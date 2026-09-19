@@ -60,6 +60,14 @@ public:
     /// Camera follows the aircraft each frame (the C toggle). Before run().
     void set_follow_camera(bool follow) noexcept;
 
+    /// SHOWCASE-1: force the FlightRecorder trace on for this run and
+    /// write it to `trace_path` when the sim exits (the world viewer's
+    /// replay mode consumes exactly this format). Overrides the
+    /// scenario's own record fields; `record_every` <= 0 keeps the
+    /// scenario's decimation. Call BEFORE load_scenario().
+    void set_recording(const std::filesystem::path& trace_path,
+                       int record_every);
+
     /// Override the initial orbit distance (feet). Before run().
     void set_camera_distance(double dist_ft) noexcept;
 

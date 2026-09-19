@@ -54,6 +54,12 @@ int main(int argc, char** argv) {
     double harness_sample_sec = 30.0;
     int harness_runs = 2;
 
+    // SHOWCASE-1: --record <path> forces the FlightRecorder trace on for
+    // this run (the world viewer's replay mode consumes it). The path is
+    // relative to the CURRENT DIRECTORY (not the scenario's dir).
+    std::string record_path;
+    int record_every = 0;
+
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--screenshot" && i + 1 < argc) {
@@ -79,6 +85,10 @@ int main(int argc, char** argv) {
             shot_at_sec = std::atof(argv[++i]);
         } else if (a == "--camera-distance" && i + 1 < argc) {
             camera_distance = std::atof(argv[++i]);
+        } else if (a == "--record" && i + 1 < argc) {
+            record_path = argv[++i];
+        } else if (a == "--record-every" && i + 1 < argc) {
+            record_every = std::atoi(argv[++i]);
         } else if (a == "--width" && i + 1 < argc) {
             window_w = std::atoi(argv[++i]);
         } else if (a == "--height" && i + 1 < argc) {
@@ -108,6 +118,13 @@ int main(int argc, char** argv) {
                 "  --runs <N>            Harness passes (2 = determinism proof)\n"
                 "  --width <N>           Window width (default: 1600)\n"
                 "  --height <N>          Window height (default: 900)\n"
+                "  --record <path>       Force a FlightRecorder trace for this\n"
+                "                        run, written to <path> on exit (the\n"
+                "                        world viewer's Open Replay / Mission QC\n"
+                "                        menu loads it). Path is relative to the\n"
+                "                        current directory.\n"
+                "  --record-every <N>    Trace decimation (with --record;\n"
+                "                        1 = every tick, N = every Nth).\n"
                 "  --help                Show this help message\n"
                 "\n"
                 "Controls:\n"
@@ -144,6 +161,12 @@ int main(int argc, char** argv) {
 
     f4::scenario_player::PlayerApp app;
     app.set_window_size(window_w, window_h);
+
+    // SHOWCASE-1: force recording on BEFORE load_scenario (the override
+    // is applied between the JSON parse and the Simulation build).
+    if (!record_path.empty()) {
+        app.set_recording(record_path, record_every);
+    }
 
     try {
         app.load_scenario(scenario_path);

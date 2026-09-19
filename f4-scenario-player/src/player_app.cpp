@@ -80,6 +80,19 @@ void PlayerApp::load_scenario(const std::filesystem::path& json_path) {
     // Load and validate the scenario JSON (resolves asset paths).
     impl_->scenario = f4::simulation::load_scenario(json_path);
 
+    // SHOWCASE-1: the CLI's --record override beats the template's own
+    // record fields (applied before the Simulation snapshots the
+    // scenario, so the write path resolves against the same asset dir).
+    if (impl_->record_override) {
+        impl_->scenario.record = true;
+        if (!impl_->record_override_path.empty()) {
+            impl_->scenario.record_path = impl_->record_override_path;
+        }
+        if (impl_->record_override_every > 0) {
+            impl_->scenario.record_every = impl_->record_override_every;
+        }
+    }
+
     // Build the simulation. The asset dir is the scenario file's parent
     // directory — the scenario JSON's asset paths are already resolved
     // against it by load_scenario(), but we keep a copy for any future
@@ -212,6 +225,20 @@ void PlayerApp::set_time_scale(double scale) noexcept {
 
 void PlayerApp::set_follow_camera(bool follow) noexcept {
     impl_->follow_aircraft = follow;
+}
+
+void PlayerApp::set_recording(const std::filesystem::path& trace_path,
+                              int record_every) {
+    impl_->record_override = true;
+    impl_->record_override_path = trace_path;
+    impl_->record_override_every = record_every;
+    // write_json does not mkdir — create the parent now so a run's last
+    // second doesn't fail on a missing directory.
+    if (!trace_path.empty()) {
+        if (auto parent = trace_path.parent_path(); !parent.empty()) {
+            std::filesystem::create_directories(parent);
+        }
+    }
 }
 
 void PlayerApp::set_camera_distance(double dist_ft) noexcept {

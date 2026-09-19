@@ -247,9 +247,81 @@ mission type**, checked in as fixtures, where the expectation table of
 Until the tranche lands, `--missions <family>` over the stock save
 plus the §4 table is the honest substitute, and the absent-byte list
 in each summary's `missions_by_type` tells you exactly what the stock
-war can't exercise.
+war can't exercise. The GEOMETRY half of the showcase idea — watch one
+aircraft fly one mission with sane behavior — is now its own chapter
+(§8); the campaign-scale stage worlds above remain the follow-on.
 
-## 8. Known gaps (deliberate, documented)
+## 8. Watch it fly (the mission-QC user concept)
+
+Numbers prove that something flew; GEOMETRY needs eyes. The concept is
+a file pair — the scenario JSON (the mission) and the FlightRecorder
+trace (the recording) — consumed three ways, all from the same
+scenario template:
+
+**The roster.** `f4-scenario-player/scenarios/*.json.in` configure into
+`build/scenarios/*.json` — 18 flyable missions covering the phases a
+mission-type QC question can ask: takeoff, climb-out, glideslope,
+pattern (closed_traffic), full ground cycle (digi_full_mission), AAR
+(tanker_track), BVR/WVR intercepts, merges, ground strike, formation.
+
+**1. Watch it live (3D).** The scenario player:
+
+```bash
+build/f4-scenario-player build/scenarios/tanker_track.json --run --follow
+#   Space pause/resume · F focus · C follow cam · Tab cycle aircraft
+#   --speed 4 compresses wall-clock, never sim-dt
+#   --record qc/tanker_track/trace.json keeps the recording of what you saw
+```
+
+**2. Record it headlessly + gate it (CI-able).** `campaign_qc
+--scenario` runs the SAME template with no window, writes the trace +
+a one-glance summary, and exits with a verdict derived from the
+scenario's own shape (a tanker + a WP_REFUEL waypoint ⇒ the AAR gates;
+a WP_LAND waypoint or start_in_approach ⇒ the touchdown gate):
+
+```bash
+build/f4-simulation/campaign_qc --scenario build/scenarios/tanker_track.json
+#   → qc/tanker_track/trace.json + scenario_qc_summary.json, exit 0
+build/f4-simulation/campaign_qc --scenario build/scenarios/landing_only.json
+#   → exit 24: InterceptFinal → GoAround, never touches down (see below)
+```
+
+Scenario-arm exit codes (disjoint from the campaign ladder's 2–16):
+
+| exit | gate | what it means |
+|---|---|---|
+| 20 | no aircraft | the template spawned nothing |
+| 21 | frozen | no state change, no protocol message, no touchdown — nothing flew |
+| 22 | AAR no contact | tanker + WP_REFUEL present, zero ContactMade — the rendezvous never got close |
+| 23 | AAR incomplete | the boom latched but DisconnectApproved/RefuelComplete never fired |
+| 24 | no touchdown | a landing was expected; every aircraft stayed up or went around |
+
+**3. Read the geometry (2D replay).** The world viewer's **File →
+Mission QC…** window lists every template and whether a recorded trace
+exists at the conventions above; "Open replay" loads it into replay
+mode — the scrubber, the focused aircraft's trail colored by
+**cross-track error**, the dashed **intended path** (glide slope,
+pattern legs, AR envelope), and the per-tick inspector (ai_state,
+fuel, vertical error). File → Open Replay… (Ctrl+R) opens any trace
+path directly.
+
+**What the first sweep already caught (the summary is the story):**
+
+* `tanker_track` PASSES the full USAF procedure — but the receiver
+dropped out of contact 3 times in 4 engagements (ContactMade 4,
+ContactLost 3: the FM's phugoid against the ±60 ft contact envelope)
+and disconnected with `refuel_complete` never firing, ending the run
+at 209 lbs. Geometry QC at a glance: watch the Hold phase wobble in
+the replay.
+* `on_glideslope` and `closed_traffic` complete their landings
+(OnFinal → Flare → Rollout → TaxiIn); `digi_full_mission` flies the
+full ground cycle (Taxi → HoldShort → Takeoff → FlyOut).
+* `landing_only` FAILS (exit 24): InterceptFinal goes around every
+time — the approach-capture gap is now a one-command reproduction
+plus a trace to autopsy, sitting at the top of the board next to §5's
+strike-target gap.
+
+## 9. Known gaps (deliberate, documented)
 
 * The C++ `--mission` filter is byte-exact and single — no family
   flag. The matrix runner loops bytes in Python rather than growing
@@ -257,6 +329,19 @@ war can't exercise.
   place in `FlightSpawnFilter`.
 * Strike employment is broken as described in §5 — currently THE
   highest-value catch on the board.
+* AAR cannot engage from the CAMPAIGN path at all: `set_tanker(true)`
+  exists only on the scenario-list spawn path (`sc.tanker` in the
+  handoff JSON), and `push_tanker_picture` scans only the scenario's
+  own waypoint list — so a saved AMIS_TANK flight spawns as an
+  ordinary nav flight and no receiver ever arms (`refuel_armed` is
+  scenario-arm-only). §8's AAR gate therefore only exercises the
+  scenario templates. Closing the campaign loop (tanker role from the
+  mission byte + refuel waypoints from saved/synthetic routes) is the
+  natural next engine tranche after §5.
+* `landing_only`'s InterceptFinal goes around every time (§8, exit
+  24) — the glide-slope capture from an approach start never converts
+  to a touchdown, while `on_glideslope` (already ON the slope) lands
+  fine. The gap is between those two, and the traces bracket it.
 * Trace snapshots carry empty `callsign` (group by `entity_id`).
 * The tasking ladder cannot be *asked* for a mission type — generation
   is strategic (profiles × situation), the filter only gates spawns.

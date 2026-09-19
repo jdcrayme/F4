@@ -5,6 +5,50 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## SHOWCASE-1 — the mission-QC user concept made real (watch one aircraft fly one mission)
+
+- **SHOWCASE-1** — the geometry half of the QC question ("follow an
+  aircraft visually through a whole mission — is the AAR rendezvous
+  sane? does the approach geometry look right?") got its tooling. The
+  discovery: the engine already had ALL the pieces except the wiring —
+  an 18-template flyable scenario library
+  (`f4-scenario-player/scenarios/*.json.in` → `build/scenarios/`, AAR +
+  glideslope + pattern + full ground cycle + intercepts + merges), a
+  3D mission player (follow cam, speed, pause), the FlightRecorder
+  trace format the viewer's replay mode renders with intended-path +
+  cross-track-error coloring, and the AAR protocol's bus messages.
+  Landed the three missing links:
+  (1) `campaign_qc --scenario <json>` — the headless QC arm: runs a
+  template with no window, writes `qc/<stem>/trace.json` +
+  `scenario_qc_summary.json` (per-aircraft states walked, touchdown,
+  fuel burn, the AAR protocol's message counts), and exits with a
+  verdict derived from the scenario's own shape — gates 20–24 (no
+  aircraft / frozen / AAR no contact / AAR incomplete / no touchdown),
+  disjoint from the campaign ladder's 2–16.
+  (2) the viewer's **File → Mission QC…** window (Windows menu toggle
+  too) — the template roster with each template's recorded-trace
+  status at the tool conventions; one click opens the geometry replay.
+  (3) `f4-scenario-player --record <path> [--record-every <n>]` — keep
+  the recording of what you just watched live.
+  First sweep verdicts: `tanker_track` passes the full USAF procedure
+  (PreContact → ClearedContact → Refueling → BackingOut → Departing →
+  RefuelDone) but the summary surfaces the wobble — ContactMade 4 vs
+  ContactLost 3 (the FM phugoid vs the ±60 ft contact envelope) and
+  the receiver disconnecting at 209 lbs with RefuelComplete never
+  firing; `on_glideslope` + `closed_traffic` land (OnFinal → Flare →
+  Rollout → TaxiIn); `digi_full_mission` flies the full ground cycle;
+  and `landing_only` FAILS exit 24 — InterceptFinal goes around every
+  run, the approach-capture gap now a one-command reproduction with a
+  trace to autopsy. Also documented in cookbook §9: AAR cannot engage
+  from the CAMPAIGN path at all (set_tanker + the tanker-picture push
+  are scenario-list-only) — the campaign AAR tranche is the next
+  engine item after §5's strike-target gap. Determinism spot-checked
+  (two runs, identical state sequences + protocol counts); the
+  end-to-end loop verified headlessly under Xvfb (record → replay →
+  screenshot). test_aar_e2e + test_flight_recorder stay green.
+  Cookbook §8 is the user-concept chapter; §7's campaign-scale stage
+  worlds remain the follow-on tranche.
+
 ## CAMP-OPT-1 — the campaign time-acceleration repair (the spinner-walk spike)
 
 - **CAMP-OPT-1** — found and fixed the p7 animation patch's per-tick

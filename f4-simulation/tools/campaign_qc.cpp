@@ -133,6 +133,28 @@
 //     --accel-baseline             (FID-6: also measure the same war at
 //                                   FullFidelity, ungated — the summary
 //                                   carries both rates)
+//
+//   8. THE SCENARIO QC ARM (SHOWCASE-1): --scenario <json> skips the
+//      campaign entirely and runs a scenario-list JSON (the
+//      f4-scenario-player template library — tanker_track, landing_only,
+//      on_glideslope, digi_full_mission, ...) headlessly: load_scenario →
+//      Simulation::initialize → tick → FlightRecorder trace.json + a
+//      per-aircraft scenario_qc_summary.json (states walked, touchdown,
+//      fuel burn, the AAR protocol's message counts). This is the
+//      geometry-QC half of the mission-QC concept: the SAME template the
+//      3D player flies is the one the headless run records, and the
+//      world viewer's Mission QC menu opens the recorded trace in replay
+//      mode. Exit codes (the scenario ladder, disjoint from the
+//      campaign's 2–16):
+//        20  the scenario spawned no aircraft;
+//        21  frozen — no aircraft changed AI state, no protocol message,
+//            no touchdown across the whole run;
+//        22  AAR expected (a tanker + a WP_REFUEL waypoint) but the boom
+//            never latched (zero ContactMade);
+//        23  AAR contact happened but the procedure never completed (no
+//            DisconnectApproved / RefuelComplete);
+//        24  landing expected (a WP_LAND waypoint or start_in_approach)
+//            but no aircraft touched down by the last tick.
 //     --save-write                 (C6: after the run, emit the mutated
 //                                   WorldState as campaign_after.world.json
 //                                   and assemble campaign_after.cam through
@@ -144,6 +166,10 @@
 //                                   (cam2json --preserve-subfiles) and the
 //                                   json2cam binary in the build tree.)
 //     --out-dir <dir>              (default: beside the world JSON)
+//
+//   campaign_qc --scenario <scenario.json> [--ticks <n>|--minutes <m>]
+//               [--record-every <n>] [--no-record] [--out-dir <dir>]
+//     (SHOWCASE-1: headless scenario run; default out-dir qc/<stem>)
 //
 // Exit code: 0 when the loop produced at least one aircraft AND the sim
 // ran to completion; 1 on usage/IO errors; 2 when the filter matched
@@ -192,6 +218,8 @@
 #include <f4/campaign/world_writeback.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/ai/brain_component.hpp>
+#include <f4/ai/atc/messages.hpp>
+#include <f4/ai/modules/strike_module.hpp>   // WP_REFUEL / is_refuel_action
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/json/writer.hpp>
 #include <f4/io/read_file.hpp>
@@ -233,6 +261,13 @@ struct Args {
     int mission = -1;            // byte; -1 = any
     int max_flights = 0;
     bool max_flights_set = false;  // --max-flights passed (0 = UNCAPPED)
+    // SHOWCASE-1 — the scenario QC arm (--scenario <json>): run a
+    // scenario-list scenario (the f4-scenario-player template library)
+    // headlessly with the FlightRecorder trace + a per-aircraft QC
+    // summary. No world, no campaign: the template IS the mission.
+    std::filesystem::path scenario_json;
+    bool ticks_set = false;        // --ticks/--minutes passed (else the
+                                   // scenario's own total_ticks runs)
     int ticks = 54000;           // 15 min at 60 Hz — taxi + takeoff +
                                  // climb + ENROUTE TO THE TARGET (the A-G
                                  // slice needs the release point reached;
@@ -374,7 +409,16 @@ struct Args {
 Args parse_args(int argc, char** argv) {
     Args a;
     if (argc < 2) usage(argv[0]);
-    a.world_json = argv[1];
+    // SHOWCASE-1: the scenario path may lead the line (replacing the
+    // positional world JSON) or ride among the options (--scenario).
+    int first_opt = 2;
+    if (std::string(argv[1]) == "--scenario") {
+        if (argc < 3) usage(argv[0]);
+        a.scenario_json = argv[2];
+        first_opt = 3;
+    } else {
+        a.world_json = argv[1];
+    }
 #ifdef F4_SOURCE_DIR
     a.class_table = std::filesystem::path(F4_SOURCE_DIR) /
                     "f4-world-convert/tests/fixtures/FALCON4.ct";
@@ -386,13 +430,14 @@ Args parse_args(int argc, char** argv) {
 #ifdef F4_MISSION_PROFILES_JSON
     a.profiles_json = F4_MISSION_PROFILES_JSON;
 #endif
-    for (int i = 2; i < argc; ++i) {
+    for (int i = first_opt; i < argc; ++i) {
         const std::string k = argv[i];
         auto next = [&]() -> const char* {
             if (i + 1 >= argc) usage(argv[0]);
             return argv[++i];
         };
         if (k == "--class-table")      a.class_table = next();
+        else if (k == "--scenario")    a.scenario_json = next();
         else if (k == "--config")      a.config = next();
         else if (k == "--profiles")    a.profiles_json = next();
         else if (k == "--team")        a.team = std::atoi(next());
@@ -400,8 +445,8 @@ Args parse_args(int argc, char** argv) {
             a.max_flights = std::atoi(next());
             a.max_flights_set = true;
         }
-        else if (k == "--ticks")       a.ticks = std::atoi(next());
-        else if (k == "--minutes")     a.ticks = static_cast<int>(std::atof(next()) * 3600.0);
+        else if (k == "--ticks")     { a.ticks = std::atoi(next()); a.ticks_set = true; }
+        else if (k == "--minutes")   { a.ticks = static_cast<int>(std::atof(next()) * 3600.0); a.ticks_set = true; }
         else if (k == "--sim-dt")      a.sim_dt = std::atof(next());
         else if (k == "--tasking")     a.tasking_minutes = std::atoi(next());
         else if (k == "--tasking-cycle") a.tasking_cycle_sec = std::atoi(next());
@@ -468,11 +513,18 @@ Args parse_args(int argc, char** argv) {
         }
     }
     if (a.out_dir.empty()) {
-        a.out_dir = a.world_json.parent_path();
-        // A bare relative filename ("testcamp.world.json") has an EMPTY
-        // parent_path — create_directories("") throws "Invalid argument".
-        // Default to CWD in that case.
-        if (a.out_dir.empty()) a.out_dir = ".";
+        if (!a.scenario_json.empty()) {
+            // SHOWCASE-1: qc/<scenario-stem> under the CWD — the same
+            // convention the world viewer's Mission QC menu checks.
+            a.out_dir = std::filesystem::path("qc") /
+                        a.scenario_json.stem();
+        } else {
+            a.out_dir = a.world_json.parent_path();
+            // A bare relative filename ("testcamp.world.json") has an EMPTY
+            // parent_path — create_directories("") throws "Invalid argument".
+            // Default to CWD in that case.
+            if (a.out_dir.empty()) a.out_dir = ".";
+        }
     }
     return a;
 }
@@ -1429,8 +1481,299 @@ int run_war(const Args& args) {
 } // namespace
 
 // ===========================================================================
+// SHOWCASE-1: THE SCENARIO QC ARM (--scenario <json>)
+// ===========================================================================
+// Headless geometry QC over a scenario-list JSON — the same templates the
+// 3D f4-scenario-player flies, recorded for the world viewer's replay mode:
+//
+//   campaign_qc --scenario build/scenarios/tanker_track.json --minutes 10
+//   → qc/tanker_track/trace.json          (the viewer's Open Replay /
+//                                          Mission QC menu loads this)
+//   → qc/tanker_track/scenario_qc_summary.json
+//
+// The gate ladder reads the scenario's own SHAPE (a tanker + a WP_REFUEL
+// waypoint ⇒ the AAR gates; a WP_LAND waypoint or start_in_approach ⇒ the
+// touchdown gate) and the AAT bus protocol's message counts (the same
+// messages the receiver's RefuelModule state machine consumes). The trace
+// carries the per-tick truth (ai_state, cross-track/vertical error, fuel);
+// the summary is the one-glance verdict. NOT byte-stable (fuel floats).
+// ===========================================================================
+int run_scenario(const Args& args) {
+    // 1. Load the template.
+    Scenario scenario;
+    try {
+        scenario = load_scenario(args.scenario_json);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "campaign_qc: scenario load failed: %s\n",
+                     e.what());
+        return 1;
+    }
+
+    // 2. QC overrides: the recording IS this mode's product (the viewer
+    // replay is its consumer), so the template's own record fields yield
+    // to the CLI. The template owns its sim_dt; the CLI owns the horizon
+    // (--ticks/--minutes) with the template's total_ticks as the default.
+    scenario.record = args.record;
+    scenario.record_every = args.record_every;
+    // record_path is written AS GIVEN (no base-dir resolution inside the
+    // sim) — compose it against the out-dir here so the trace lands with
+    // the summary regardless of the caller's CWD.
+    scenario.record_path = (args.out_dir / "trace.json").string();
+    const int ticks = args.ticks_set
+        ? args.ticks
+        : std::max(scenario.total_ticks, 600);
+
+    // 3. Expectations from the scenario's own shape — no per-scenario
+    // config file, the route IS the expectation.
+    bool has_tanker = false;
+    bool aar_expected = false;    // tanker + a WP_REFUEL waypoint
+    bool landing_expected = scenario.start_in_approach;
+    for (const auto& ac : scenario.aircraft) {
+        if (ac.tanker) has_tanker = true;
+        for (const auto& wp : ac.route) {
+            if (f4::ai::modules::is_refuel_action(wp.action))
+                aar_expected = true;
+            if (wp.action == 7)          // WP_LAND (the fixtures'
+                landing_expected = true; // vocabulary — campaign_session's
+                                         // route-home precedent)
+        }
+    }
+    aar_expected = aar_expected && has_tanker;
+
+    // 4. The sim. Out-dir first (write_recording resolves trace.json
+    // against it).
+    std::filesystem::create_directories(args.out_dir);
+    Simulation sim(scenario, args.out_dir);
+    try {
+        sim.initialize();
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "campaign_qc: scenario initialize failed: %s\n",
+                     e.what());
+        return 1;
+    }
+
+    // The AAR protocol's message counts — the gate inputs and the
+    // summary's evidence. The receiver's RefuelModule consumes the same
+    // messages (f4-ai/src/refuel_module.cpp's subscriptions), so these
+    // counters ARE the state machine's view of the world.
+    struct AarCounts {
+        int requests = 0, assigned = 0, precontact = 0, clear = 0;
+        int made = 0, lost = 0, approved = 0, transferred = 0, complete = 0;
+    } aar;
+    namespace atc = f4::ai::atc;
+    sim.bus().subscribe<atc::RefuelRequest>([&aar](const atc::RefuelRequest&) { ++aar.requests; });
+    sim.bus().subscribe<atc::TankerAssigned>([&aar](const atc::TankerAssigned&) { ++aar.assigned; });
+    sim.bus().subscribe<atc::PrecontactReport>([&aar](const atc::PrecontactReport&) { ++aar.precontact; });
+    sim.bus().subscribe<atc::ClearToContact>([&aar](const atc::ClearToContact&) { ++aar.clear; });
+    sim.bus().subscribe<atc::ContactMade>([&aar](const atc::ContactMade&) { ++aar.made; });
+    sim.bus().subscribe<atc::ContactLost>([&aar](const atc::ContactLost&) { ++aar.lost; });
+    sim.bus().subscribe<atc::DisconnectApproved>([&aar](const atc::DisconnectApproved&) { ++aar.approved; });
+    sim.bus().subscribe<atc::FuelTransferred>([&aar](const atc::FuelTransferred&) { ++aar.transferred; });
+    sim.bus().subscribe<atc::RefuelComplete>([&aar](const atc::RefuelComplete&) { ++aar.complete; });
+
+    const auto& spawned = sim.aircraft_entities();
+    if (spawned.empty()) {
+        std::fprintf(stderr,
+                     "campaign_qc: scenario spawned no aircraft (exit 20)\n");
+        return 20;
+    }
+    const std::size_t n = spawned.size();
+
+    // Callsigns: spawn order follows the scenario's aircraft list (the
+    // spawner iterates it in order); fall back to positional names when
+    // the counts disagree.
+    std::vector<std::string> callsigns(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        callsigns[i] = (i < scenario.aircraft.size()
+                        && !scenario.aircraft[i].callsign.empty())
+            ? scenario.aircraft[i].callsign
+            : ("AIRCRAFT" + std::to_string(i + 1));
+    }
+
+    // 5. The run — per-tick per-aircraft tracking (scenario aircraft
+    // counts are small; the poll is a component fetch per aircraft).
+    struct Track {
+        bool was_airborne = false;
+        bool touchdown = false;
+        int touchdown_tick = -1;
+        std::vector<std::string> states;   // unique, first-seen order
+        std::string last_state;
+        std::string final_state;
+        double min_alt_ft = 1e18;
+        double max_alt_ft = -1e18;
+        double fuel_start_lbs = -1.0;
+        double fuel_end_lbs = -1.0;
+    };
+    std::vector<Track> tracks(n);
+
+    for (int t = 0; t < ticks; ++t) {
+        sim.tick(args.sim_dt);
+        for (std::size_t i = 0; i < n; ++i) {
+            auto h = f4::entities::EntityHandle(spawned[i], &sim.world());
+            auto* fm = h.get<f4::flight::FlightModelComponent>();
+            auto* brain = h.get<f4::ai::BrainComponent>();
+            auto* tf = h.get<f4::entities::TransformComponent>();
+            Track& tr = tracks[i];
+            if (brain) {
+                const std::string st = brain->state_name();
+                if (!st.empty() && st != tr.last_state) {
+                    tr.states.push_back(st);
+                    tr.last_state = st;
+                }
+                tr.final_state = st;
+            }
+            if (fm) {
+                const auto& s = fm->state();
+                if (tr.fuel_start_lbs < 0.0) tr.fuel_start_lbs = s.fuel.fuel_lbs;
+                tr.fuel_end_lbs = s.fuel.fuel_lbs;
+                if (s.gear.inAir) {
+                    tr.was_airborne = true;
+                } else if (tr.was_airborne && !tr.touchdown) {
+                    tr.touchdown = true;
+                    tr.touchdown_tick = t;
+                }
+            }
+            if (tf) {
+                const double alt_ft = tf->position.z;
+                tr.min_alt_ft = std::min(tr.min_alt_ft, alt_ft);
+                tr.max_alt_ft = std::max(tr.max_alt_ft, alt_ft);
+            }
+        }
+    }
+    sim.write_recording();
+
+    // 6. The summary.
+    int touchdowns = 0;
+    bool any_state_change = false;
+    for (const auto& tr : tracks) {
+        if (tr.touchdown) ++touchdowns;
+        if (tr.states.size() > 1) any_state_change = true;
+    }
+    const bool protocol_silent =
+        aar.requests == 0 && aar.assigned == 0 && aar.precontact == 0 &&
+        aar.clear == 0 && aar.made == 0 && aar.lost == 0 &&
+        aar.approved == 0 && aar.transferred == 0 && aar.complete == 0;
+    const bool frozen = !any_state_change && protocol_silent && touchdowns == 0;
+
+    const auto summary_path = args.out_dir / "scenario_qc_summary.json";
+    {
+        std::ofstream out(summary_path);
+        out << "{\n";
+        out << "  \"format\": \"f4-scenario-qc-summary\",\n";
+        out << "  \"version\": 1,\n";
+        out << "  \"mode\": \"scenario\",\n";
+        out << "  \"scenario\": \"" << json_escape(args.scenario_json.string())
+            << "\",\n";
+        out << "  \"name\": \"" << json_escape(scenario.name) << "\",\n";
+        out << "  \"ticks\": " << ticks << ",\n";
+        out << "  \"record\": {\"enabled\": "
+            << (args.record ? "true" : "false")
+            << ", \"every\": " << args.record_every
+            << ", \"path\": \"trace.json\"},\n";
+        out << "  \"expectations\": {\"tanker\": "
+            << (has_tanker ? "true" : "false")
+            << ", \"aar\": " << (aar_expected ? "true" : "false")
+            << ", \"landing\": " << (landing_expected ? "true" : "false")
+            << "},\n";
+        out << "  \"aircraft\": [\n";
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto& tr = tracks[i];
+            const bool is_tanker = i < scenario.aircraft.size()
+                                       && scenario.aircraft[i].tanker;
+            out << "    {\"callsign\": \"" << json_escape(callsigns[i])
+                << "\", \"tanker\": " << (is_tanker ? "true" : "false")
+                << ", \"final_state\": \"" << json_escape(tr.final_state)
+                << "\", \"states\": [";
+            for (std::size_t s = 0; s < tr.states.size(); ++s) {
+                if (s) out << ", ";
+                out << "\"" << json_escape(tr.states[s]) << "\"";
+            }
+            out << "], \"was_airborne\": "
+                << (tr.was_airborne ? "true" : "false")
+                << ", \"touchdown\": " << (tr.touchdown ? "true" : "false")
+                << ", \"touchdown_tick\": " << tr.touchdown_tick
+                << ", \"min_alt_ft\": "
+                << (tr.min_alt_ft > 9e17 ? 0.0 : tr.min_alt_ft)
+                << ", \"max_alt_ft\": "
+                << (tr.max_alt_ft < -9e17 ? 0.0 : tr.max_alt_ft)
+                << ", \"fuel_start_lbs\": " << tr.fuel_start_lbs
+                << ", \"fuel_end_lbs\": " << tr.fuel_end_lbs
+                << "}" << (i + 1 < n ? "," : "") << "\n";
+        }
+        out << "  ],\n";
+        out << "  \"aar_protocol\": {\"requests\": " << aar.requests
+            << ", \"assigned\": " << aar.assigned
+            << ", \"precontact\": " << aar.precontact
+            << ", \"clear_to_contact\": " << aar.clear
+            << ", \"contact_made\": " << aar.made
+            << ", \"contact_lost\": " << aar.lost
+            << ", \"disconnect_approved\": " << aar.approved
+            << ", \"fuel_transferred\": " << aar.transferred
+            << ", \"refuel_complete\": " << aar.complete
+            << "},\n";
+        out << "  \"verdict\": {\"frozen\": " << (frozen ? "true" : "false")
+            << ", \"touchdowns\": " << touchdowns
+            << "}\n";
+        out << "}\n";
+    }
+    std::printf("scenario_qc: %s ticks=%d aircraft=%zu touchdowns=%d "
+                "aar(requests=%d contact=%d complete=%d)\n"
+                "  trace: %s\n  summary: %s\n",
+                scenario.name.c_str(), ticks, n, touchdowns,
+                aar.requests, aar.made, aar.complete,
+                (args.out_dir / "trace.json").c_str(),
+                summary_path.c_str());
+
+    // 7. The gate ladder (the exit codes are the QC verdict).
+    if (frozen) {
+        std::fprintf(stderr,
+                     "campaign_qc: FROZEN — no state change, no protocol "
+                     "message, no touchdown across the whole run (exit 21). "
+                     "The scenario never started flying.\n");
+        return 21;
+    }
+    if (aar_expected) {
+        if (aar.made == 0) {
+            std::fprintf(stderr,
+                         "campaign_qc: AAR FAILURE — a tanker and a "
+                         "WP_REFUEL waypoint were expected to engage, but "
+                         "the boom never latched (zero ContactMade, "
+                         "exit 22). Open the trace in replay: the receiver's "
+                         "ai_state shows how far the rendezvous got.\n");
+            return 22;
+        }
+        if (aar.approved == 0 && aar.complete == 0) {
+            std::fprintf(stderr,
+                         "campaign_qc: AAR INCOMPLETE — the boom latched "
+                         "(%d contact%s) but the procedure never completed "
+                         "(no DisconnectApproved / RefuelComplete, "
+                         "exit 23). Extend --minutes or inspect the trace's "
+                         "Hold state.\n",
+                         aar.made, aar.made == 1 ? "" : "s");
+            return 23;
+        }
+    }
+    if (landing_expected && touchdowns == 0) {
+        std::fprintf(stderr,
+                     "campaign_qc: LANDING FAILURE — a WP_LAND waypoint (or "
+                     "start_in_approach) expected a touchdown, but no "
+                     "aircraft landed (exit 24). Check the trace's final "
+                     "ai_state (OnFinal / GoAround / ...) and vertical "
+                     "error.\n");
+        return 24;
+    }
+    return 0;
+}
+
+// ===========================================================================
 int main(int argc, char** argv) {
     const Args args = parse_args(argc, argv);
+
+    // SHOWCASE-1: the scenario arm skips the campaign entirely — no
+    // world JSON, no b3 loop, no ledger. Its gates are its own (20–24).
+    if (!args.scenario_json.empty()) {
+        return run_scenario(args);
+    }
 
     if (!std::filesystem::exists(args.world_json)) {
         std::fprintf(stderr, "campaign_qc: world JSON not found: %s\n",

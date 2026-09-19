@@ -65,6 +65,13 @@ struct PlayerApp::Impl {
     bool sim_initialized = false;
     bool paused = true;  // start paused so the aircraft sits at parking
     double time_scale = 1.0;
+    // SHOWCASE-1: the --record CLI override (set_recording). Applied in
+    // load_scenario() AFTER the JSON is parsed but BEFORE the Simulation
+    // is built — the CLI wins over the template's own record fields, so
+    // any template can be recorded without editing its .in file.
+    bool record_override = false;
+    std::filesystem::path record_override_path;
+    int record_override_every = 0;
     // Fixed-timestep accumulator (seconds of SIM time owed). The render
     // loop fills it with wall-clock dt * time_scale and drains it in
     // whole scenario.sim_dt ticks, so every tick the flight model sees

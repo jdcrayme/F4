@@ -269,6 +269,13 @@ private:
     /// mission/team filters, click-to-select + camera focus. See
     /// campaign_qc_view.cpp.
     void draw_campaign_qc_view();
+    /// SHOWCASE-1: the "Mission QC" window — the scenario-template
+    /// roster with their recorded FlightRecorder traces; one click
+    /// opens the trace in replay mode. See mission_qc_view.cpp.
+    void draw_mission_qc_view();
+    /// The lazy directory scan behind the Mission QC window (first open
+    /// + the Rescan button).
+    void scan_mission_qc();
     /// V-CAMP: the "Campaign Session" window — start/stop, play/pause,
     /// speed presets, the campaign clock, the war-status block, and the
     /// generated-missions table (click a row to select + pan to the

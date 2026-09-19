@@ -183,6 +183,15 @@ struct ModelsImportJob {
 // free functions in diagnostics.cpp take a const Installation& and don't
 // need Impl access.
 // ---------------------------------------------------------------------------
+// SHOWCASE-1: one Mission QC roster row (mission_qc_view.cpp) — a
+// scenario template and, when it has been recorded, its trace.
+struct MissionQcEntry {
+    std::string name;             // scenario stem ("tanker_track")
+    std::string scenario_path;    // the template JSON
+    std::string trace_path;       // the recorded trace (when found)
+    bool has_trace = false;
+};
+
 struct ViewerApp::Impl {
     // Window / camera
     int window_w = 1400;
@@ -742,6 +751,13 @@ struct ViewerApp::Impl {
     /// everyday map view; the Windows menu and the View > Campaign QC
     /// group toggle it.
     bool show_ato = false;
+    // SHOWCASE-1: the Mission QC discovery window (mission_qc_view.cpp)
+    // + its scan cache. The scan walks the scenario-template dirs and
+    // checks the trace conventions once per open; the Rescan button
+    // forces it again.
+    bool show_mission_qc = false;
+    bool mission_qc_scanned = false;
+    std::vector<MissionQcEntry> mission_qc_entries;
     // POLISH-2.4: minimap in the bottom-right corner of the canvas.
     // Shows the whole 1024×1024 theater at a glance: terrain thumbnail
     // (re-uses the cached terrain texture), objective dots (colored by

@@ -964,7 +964,7 @@ Smaller modules with their own test suites (counts = TEST macros):
 | `f4-renderer` | Raylib-backed renderer: camera, lit shaders, texture cache, 3D draw, feature meshes, SVG symbol library (GPU-context tests self-skip without a display) | 233 |
 | `f4-world-viewer` | The interactive world viewer (raylib + Dear ImGui): V-CAMP live campaign sessions, hex inspector, class-table browser | 88 |
 | `f4-models-viewer` | The interactive 3D model viewer (BSP/glTF, LOD switching, animation preview) | — |
-| `f4-scenario-player` | Headless scenario runner with screenshot capture (exercised by the `--screenshot` integration test; unit tests removed in favor of it) | — |
+| `f4-scenario-player` | The 3D mission player (raylib): fly a scenario template live (--run, follow cam, speed), screenshot capture, --record for a FlightRecorder trace (the world viewer's replay input) | — |
 
 ## Building
 
