@@ -68,8 +68,8 @@ struct Rig {
         r->ws->load(kunsan_world());
         if (squadron_reinforcement != 0 || anchor_offset >= 0) {
             if (anchor_offset >= 0) {
-                r->ws->campaign.last_reinforcement =
-                    r->ws->campaign.current_time + anchor_offset;
+                r->ws->campaign.last_reinforcement = static_cast<std::int32_t>(
+                    r->ws->campaign.current_time + anchor_offset);
             }
             for (auto& u : r->ws->units) {
                 if (u.unit_class == f4::entities::UnitClass::Squadron) {

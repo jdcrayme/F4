@@ -82,7 +82,7 @@ TheaterVerdict compute_theater_verdict(
         const std::vector<int>& belligerent_slots,
         int victory_points_threshold) {
     RowSet rows(ledger);
-    for (const auto slot : belligerent_slots) rows.ensure(slot);
+    for (const auto slot : belligerent_slots) (void)rows.ensure(slot);
 
     // The territorial census — one walk, every rule at once:
     //   live == opening  holds (the static front)

@@ -242,6 +242,19 @@ TEST(ProtocolDispatch, AirfieldsQueryIsWhitelisted) {
               R"({"v":1,"op":"query","q":"airfields","status":"ok","data":{"mock":1}})" "\n");
 }
 
+TEST(ProtocolDispatch, TaskforcesQueryIsWhitelisted) {
+    // CAMP-DOM-5: `taskforces` joined the v1 whitelist additively (the
+    // naval face — dto.hpp's tail) — it dispatches like any served
+    // query, while task-group/CVN depth stays future vocabulary.
+    MockSession s;
+    std::string out;
+    const auto o = handle(s, R"({"v":1,"op":"query","q":"taskforces"})", out);
+    EXPECT_EQ(o.kind, ProtocolOutcome::Kind::Ok);
+    EXPECT_EQ(s.last_query, "taskforces");
+    EXPECT_EQ(out,
+              R"({"v":1,"op":"query","q":"taskforces","status":"ok","data":{"mock":1}})" "\n");
+}
+
 TEST(ProtocolDispatch, EngineSideQueryFailureIsExit24) {
     MockSession s;
     s.fail_next = true; // a whitelisted query the ENGINE side fails

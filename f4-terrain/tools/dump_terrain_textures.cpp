@@ -201,7 +201,6 @@ int main(int argc, char* argv[]) {
                                  static_cast<double>(gw);
             std::vector<double> art_w(gh * gw, 0.0);
             std::vector<double> mea_w(gh * gw, 0.0);
-            std::vector<uint8_t> px;
             for (uint32_t y = 0; y < gh; ++y) {
                 for (uint32_t x = 0; x < gw; ++x) {
                     const auto mc = f4::terrain::TerrainData::color_for_tile_type(

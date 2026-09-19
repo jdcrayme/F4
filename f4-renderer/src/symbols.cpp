@@ -268,7 +268,7 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
             }
             case SymbolKind::UnitFlight: {  // small circle outline only
                 DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy),
-                                static_cast<int>(r * 0.55f), fc);
+                                r * 0.55f, fc);
                 break;
             }
             case SymbolKind::UnitPackage: {  // plus sign
@@ -677,7 +677,7 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
         case SymbolKind::ObjNuclear: {  // trefoil — center disc + 3 sectors
             DrawCircleV({sx, sy}, r * 0.25f, fc);
             DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy),
-                            static_cast<int>(r * 0.7f), oc);
+                            r * 0.7f, oc);
             for (int i = 0; i < 3; ++i) {
                 const float angle = (-90.0f + i * 120.0f) * static_cast<float>(f4::math::DEG_TO_RAD);
                 const float x1 = sx + std::cos(angle) * r * 0.3f;
@@ -706,7 +706,7 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
         }
         case SymbolKind::ObjPort: {  // anchor — ring + cross + arc
             DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy - r * 0.55f),
-                            static_cast<int>(r * 0.18f), fc);
+                            r * 0.18f, fc);
             DrawLineEx({sx, sy - r * 0.35f}, {sx, sy + r * 0.55f}, 2.0f, fc);
             DrawLineEx({sx - r * 0.4f, sy + r * 0.35f}, {sx + r * 0.4f, sy + r * 0.35f},
                        2.0f, fc);
@@ -757,7 +757,7 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
             DrawCircleV({sx, sy - r * 0.7f}, 2.0f, fc);
             // Two emission arcs
             DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy - r * 0.7f),
-                            static_cast<int>(r * 0.3f), oc);
+                            r * 0.3f, oc);
             break;
         }
         case SymbolKind::ObjRailTerminal: {  // train silhouette — rect + 2 wheels
@@ -853,9 +853,9 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
         case SymbolKind::ObjHarts: {  // concentric circles
             DrawCircleV({sx, sy}, r * 0.7f, fc_blend);
             DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy),
-                            static_cast<int>(r * 0.7f), oc);
+                            r * 0.7f, oc);
             DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy),
-                            static_cast<int>(r * 0.4f), oc);
+                            r * 0.4f, oc);
             DrawCircleV({sx, sy}, r * 0.12f, oc);
             break;
         }
@@ -880,7 +880,7 @@ void draw_symbol(SymbolKind kind, float sx, float sy,
         default: {  // circle
             if (filled) DrawCircleV({sx, sy}, r * 0.6f, fc_blend);
             DrawCircleLines(static_cast<int>(sx), static_cast<int>(sy),
-                            static_cast<int>(r * 0.6f), oc);
+                            r * 0.6f, oc);
             break;
         }
     }

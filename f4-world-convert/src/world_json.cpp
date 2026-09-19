@@ -1218,7 +1218,6 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
     // Docs/SAVE_WRITE_PLAN.md.
     if (opts.preserve_all_subfiles) {
         o << ",\n  \"subfiles_b64\": [\n";
-        const auto& sfs = cam.subfiles();
         for (std::size_t i = 0; i < sfs.size(); ++i) {
             const auto& sf = sfs[i];
             o << "    {\"name\": \"" << escape_string(sf.name)

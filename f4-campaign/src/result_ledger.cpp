@@ -344,8 +344,8 @@ void CampaignResultLedger::apply_mission_recovery(
             d->out = false;
             if (d->dead) continue;
             ++d->missions_added;
-            if (auto* sq = find_squadron_(fc.squadron)) {
-                ++sq->run_pilot_sorties;
+            if (auto* fc_sq = find_squadron_(fc.squadron)) {
+                ++fc_sq->run_pilot_sorties;
             }
             PilotRecoveryRecord rrec;
             rrec.t_s = t_s;

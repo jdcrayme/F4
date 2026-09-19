@@ -161,5 +161,5 @@ TEST(CamFromWorldJson, ThrowsWhenSubfilesBlockAbsent) {
     CamArchive orig;
     orig.load(FIXTURE_DIR "save1.cam");
     std::string json = to_world_json(orig);   // preserve_all_subfiles=false
-    EXPECT_THROW(cam_from_world_json(json), std::runtime_error);
+    EXPECT_THROW((void)cam_from_world_json(json), std::runtime_error);
 }

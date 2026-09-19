@@ -64,7 +64,18 @@
 > closes. Also restored here: the DOM-3 personnel test files the
 > previous commit missed (they were untracked — the tree they
 > shipped in could not build). Every knob defaults OFF — the
-> goldens stand).
+> goldens stand); CAMP-DOM-5 shipped with this patch (naval — the
+> wrap-then-decide: the upstream NavalTaskingManager is a 15-byte
+> flag shell, so the naval face maps onto the ATM pipeline's
+> REQUEST VOCABULARY — the anti-ship family (AMIS_ASHIP) files at
+> the enemy's task forces through the ranked pool
+> rank_taskforce_targets owns (own-shore distance, wire-order
+> ties), the targeted filings route like strikes and publish on the
+> SAME mission_filed event (no new family), the per-target filing
+> books ride the additive `taskforces` query, and the "how deep"
+> record names what a deeper naval tranche would take (movement,
+> threat painting, carrier airbases, task groups — each its own
+> tranche). Every knob defaults OFF — the goldens stand).
 > Every other tranche below is an acceptance contract, not a claim.
 
 The campaign engine is the product. Every user experience — the world viewer
@@ -184,6 +195,7 @@ things the engine already produces:
 | `verdict` | the books' projection (DOM-1) | t (relative), threshold, band, leader, per-team census + ledger rows — **v1.1 additive, LANDED in DOM-1** |
 | `squadrons` | the personnel face (DOM-3) | one row per squadron: identity, tasking availability, the roster's run deltas, the ratings — **v1.1 additive, LANDED in DOM-3** |
 | `airfields` | the schedule books (DOM-4) | one row per booked airbase: the 32-block grid as 64 hex chars, the anchor (`epoch_min`), the set-bit count, the denial books — **v1.1 additive, LANDED in DOM-4** |
+| `taskforces` | the naval face (DOM-5) | one row per task force in the WORLD's own wire state (domain-4 units, wire order — present with or without the arm): the VU pair, the owner slot, the sea subtype + the class table's name, position, the wire's own destination, the supply byte, and this run's anti-ship filing book — **v1.1 additive, LANDED in DOM-5** |
 
 ```json
 {"v":1, "op":"query", "q":"flights", "team":0}
@@ -276,7 +288,7 @@ t=356.7 s" — it becomes an event, not just a book entry.
 
 | Event family | Emitter today |
 |---|---|
-| `mission_filed` / `mission_shared` | C4 tasking + P7 FindSupportFlights (`supports_filed`/`supports_shared`) |
+| `mission_filed` / `mission_shared` | C4 tasking + P7 FindSupportFlights (`supports_filed`/`supports_shared`); the naval wrap's anti-ship filings ride the SAME family (DOM-5 — the target id is the task force's VU, no new family) |
 | `flight_launched` / `flight_recovered` | spawn path + FID airfield-ops windows |
 | `engagement_opened` / `kill` / `loss` | the combat passes + ledger books (C6) |
 | `objective_damage` / `objective_captured` | fstatus diff (C1) + GroundWar (G1) |
@@ -1097,16 +1109,122 @@ grids — kunsan's own ATM base rows slide and book, the overflow
 books name the saturation honestly — the event/books parity, the
 armed run's determinism).
 
+### CAMP-DOM-5 — naval (the wrap-then-decide)
+
+SHIPPED with this patch. The upstream truth drove the shape:
+the NavalTaskingManagerClass is a 15-byte flag shell on the wire
+(the .tea's NTM record — the world pass captures it verbatim), and
+the reference's actual naval tasking IS the air ATM filing
+anti-ship missions at naval targets ("for each carrier: generates
+AMIS_ASHIP"; naval-target requests convert to PATROL). So the wrap
+maps the naval face onto the ATM pipeline's REQUEST VOCABULARY
+instead of building a sibling manager, and the DECIDE half of the
+tranche's contract shrinks to the "how deep" record below. Notes:
+
+(1) Every knob defaults OFF — `AtmConfig::naval_tasking`,
+`CampaignConfig::naval_tasking` (the ATM inherits it at
+construction), the session's `naval_tasking`, the QC's
+`--naval-tasking` (both the session/war and the tasking modes wire
+it). The golden identity holds a fifth time: disarmed, the naval
+ranking walk never runs, the anti-ship requests stay target-less,
+the summary carries no naval keys, and every pinned test is
+unchanged. (2) THE POOL (`rank_taskforce_targets` in the new
+naval_tasking.{hpp,cpp} — the tranche's home, the upstream NTM's
+name): the task forces of teams at WAR with the requester (the
+symmetric belligerence rule), sea domain 4, the aggregate
+TaskForce class, non-empty roster, a real VU — ranked by squared
+distance to the requester's nearest OWN-HELD objective ascending
+(the fleet off your coast is the fleet you strike first), wire
+order breaking ties through the sort key (the
+rank_battalion_targets pattern), no own holdings = the honest
+INT64_MAX tie (wire order decides). No ledger filter: the
+ledger's ground-unit books are battalion-worded and the engine
+holds no naval-loss source — a spent task force is a later
+tranche's book. Deterministic (squared distance, no sqrt, no RNG).
+(3) THE FAMILY SPLIT — the pool's decision is
+`mission_is_naval_strike` (mission_type.hpp: the name table is the
+vocabulary, kMissionAship's position pinned by static_assert):
+AMIS_ASHIP only, today. ASW shares the naval face but hunts
+SUBMARINES the wire does not carry (its pool is the honest empty
+set); TANK shares the strike SHAPE but hunts armor (the ground
+pool's business) — both stay target-less even armed. The SHAPE is
+`profile_flies_naval_strike_route` (route_builder.hpp: UNIT +
+TPROF_ATTACK + WP_STRIKE — ASW and TANK match the shape and never
+get targets; the shape only decides whether a targeted filing
+routes like a strike). (4) THE REQUESTS: generate_requests
+computes the naval pool per team when armed (the ranking walk
+never runs disarmed) and the anti-ship requests rotate across it
+through their OWN cursor (`naval_target_cursor_` — the families'
+spreads stay decoupled, the house pattern); `AtmStats::
+naval_requests` counts the requests GIVEN a task force. (5) THE
+UNIT-RESOLUTION SEAM: resolve_target_xy's `allow_units` term is
+now the OR of the two arms (`Atm::allow_unit_targets()`) — a
+task-force target resolves through the units source exactly the
+CAS battalion did; both arms off = the pre-G2 walk byte-identical.
+(6) THE ROUTES: the Campaign's compose route condition gains the
+naval shape under the arm (the builder resolves the task force's
+grid position through `unit_xy_` — any unit VU, no battalion
+filter needed); the legacy ladder gains the matching naval rung
+(`select_naval_target_`, its own cursor — the two ladders never
+share). (7) THE BOOKS: one book, one owner — the ATM's
+`book_naval_filing(vu)` at compose (main flights only; escorts
+never book) increments `AtmStats::naval_filings` AND the per-
+target map (`naval_filings_`, VU-ascending — the query's face);
+the Campaign exposes it via `atm_naval_filings()` (null when the
+pipeline is off). DELIBERATE: no new ledger log — the filings
+already book through the squadron draws (apply_mission_draw), the
+events already stream through mission_filed, and a naval log would
+double-book the same fact; the honest surface is the stats
+counter + the per-target books. (8) THE EVENTS: NO new family —
+the anti-ship packages publish on the same `mission_filed` event
+every other package rides, the task force's VU riding the target
+id (the same field the G2 CAS unit targets ride — the documented
+naming compromise). `kProtocolVersion` stays 1; campaignd is
+untouched (the query rides the whitelist). (9) THE QUERY:
+`taskforces` joins the whitelist additively (protocol +
+`engine_serves_query`) — one `TaskForceView` row per task force
+in the WORLD's own wire state (domain-4 units, wire order),
+present with or without the arm (the objectives row's rule: the
+wire owns the facts), overlaid with this run's filing books (the
+honest 0 disarmed): the VU pair, the owner slot, the sea subtype
++ the class table's name (`unit_subtype_name`), position, the
+wire's own dest_x/dest_y (unconsumed — note 10), the supply byte,
+`filings`. spec.team filters on the owner slot. (10) THE "HOW
+DEEP" RECORD (the tranche's decide-half): the wrap makes the
+naval targets REAL to the tasking pipeline — it does not make
+them MOVE. Task-force movement (the wire's dest_x/dest_y is
+decoded but never consumed — a naval GroundWar sibling), naval
+threat-map painting (the MoveType Naval=6 arrays exist on the
+wire; the map paints land AD only), carrier airbases (the
+reference's naval airbase scoring), task groups / CVN ops, and a
+naval-loss book all stay OUT — each is its own tranche with the
+same opt-in contract. The NTM's 15 wire bytes stay captured
+verbatim, untouched. (11) THE SUMMARY: the Campaign's ATM block
+gains `naval_requests`/`naval_filings` only when the arm is on
+(the disarmed block stays byte-identical — the pre-DOM-5
+anti-ship path stayed target-less, so a 0 would lie about the
+shape, not the count). The QC prints the `naval: requests=…
+filings=…` counter line when armed (the tasking mode; the war
+mode echoes the arm on its config line). (12) THE CERTIFICATE:
+the medium-war 24-hour-class gate with the arm compiled in and ON
+(deterministic=yes, two runs one MD5, the honest-zero pools —
+campinit packs generate no task forces); the kunsan gates (its 2
+task forces are the raw material): the ranker pins (hostility,
+wire-order ties, the skips), the family split, the ATM arm
+(targeted ASHIP, target-less ASW/TANK, the disarmed and
+empty-pool corners), the Campaign books (filings sum
+one-for-one, the based-squadron route pin), and the session gates
+(the query serves the wire's rows + the books, the filings ride
+mission_filed one-for-one, the arm-off golden identity, the
+two-run query determinism).
+
 ### CAMP-DOM-* — domain tranches (each its own landed series, upstream-mapped)
 - ~~**DOM-2 supply depth**~~ — SHIPPED above.
 - ~~**DOM-3 personnel**~~ — SHIPPED above.
 - ~~**DOM-4 airbase scheduling**~~ — SHIPPED above.
-- **DOM-5 naval**: upstream HAS a naval tasking manager — it is very
-  minimal, so this is a WRAP-then-DECIDE, not a from-scratch build: map
-  the existing manager onto the ATM pipeline's request vocabulary first
-  (its filings ride the same events), then decide whether TaskForce-level
-  depth (task groups, CVN ops) is worth a tranche of its own. The
-  decision record shrinks to "how deep", not "whether".
+- ~~**DOM-5 naval**~~ — SHIPPED above (the wrap; the "how deep"
+  record in the as-built notes names what a deeper naval tranche
+  would take).
 
 ## 9. What does NOT change
 

@@ -125,12 +125,13 @@ TEST(Manifest, RoundTripPreservesEverything) {
 }
 
 TEST(Manifest, RejectsMissingEnvelope) {
-    EXPECT_THROW(read_manifest(R"({ "data_dir": "Data/" })"), std::runtime_error);
+    EXPECT_THROW((void)read_manifest(R"({ "data_dir": "Data/" })"),
+                 std::runtime_error);
 }
 
 TEST(Manifest, RejectsWrongSchemaVersion) {
     const std::string bad = R"({ "f4": { "v": 99 }, "data_dir": "Data/", "assets": [] })";
-    EXPECT_THROW(read_manifest(bad), std::runtime_error);
+    EXPECT_THROW((void)read_manifest(bad), std::runtime_error);
 }
 
 TEST(Manifest, AcceptsUnknownTopLevelFields) {

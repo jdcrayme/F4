@@ -6,6 +6,7 @@
 
 #include <f4/campaign/campaign.hpp>
 #include <f4/campaign/ground_war.hpp>   // G2: the shared FLOT + ranking
+#include <f4/campaign/naval_tasking.hpp>  // DOM-5: the naval target pool
 
 #include <f4/json/f4_json.hpp>
 
@@ -89,6 +90,7 @@ Campaign::Campaign(const f4::world::ICampaignSource& camp,
         atm_cfg.pilot_assignment = cfg_.pilot_assignment;
         atm_cfg.rating_decay = cfg_.rating_decay;
         atm_cfg.airbase_scheduling = cfg_.airbase_scheduling;
+        atm_cfg.naval_tasking = cfg_.naval_tasking;
         atm_ = std::make_unique<AirTaskingManager>(
             profiles_, camp_, teams_, units_, nullptr, atm_cfg);
         atm_->set_id_base(cfg_.first_package_id);
@@ -225,6 +227,23 @@ std::uint32_t Campaign::select_unit_target_(std::uint8_t team) {
     const int cursor = unit_target_cursor_[team];
     const auto idx = static_cast<std::size_t>(cursor) % ranked.size();
     unit_target_cursor_[team] =
+        (cursor + 1) % static_cast<int>(ranked.size());
+    return ranked[idx];
+}
+
+std::uint32_t Campaign::select_naval_target_(std::uint8_t team) {
+    // DOM-5 — the naval target: the enemy's task forces, own-shore
+    // ranked (rank_taskforce_targets' own hostility/roster rules),
+    // rotation-spread over the ranked list. The legacy ladder's naval
+    // rung (the ATM path arms it inside generate_requests).
+    if (objectives_ == nullptr) return 0;
+    const auto ranked = rank_taskforce_targets(
+        units_, teams_, *objectives_, team);
+    if (ranked.empty()) return 0;
+    if (team >= naval_target_cursor_.size()) return ranked.front();
+    const int cursor = naval_target_cursor_[team];
+    const auto idx = static_cast<std::size_t>(cursor) % ranked.size();
+    naval_target_cursor_[team] =
         (cursor + 1) % static_cast<int>(ranked.size());
     return ranked[idx];
 }
@@ -464,6 +483,38 @@ void Campaign::run_tasking_cycle_legacy_() {
                 // NOT a routes_failed_ event (nothing was there to
                 // build; the QC's unit-strike gate reads the agv
                 // column instead).
+            } else if (route_planner_ != nullptr && lead->airbase != 0 &&
+                       cfg_.naval_tasking &&
+                       profile_flies_naval_strike_route(profile)) {
+                // DOM-5 — the naval rung (the legacy ladder's own
+                // shape; the ATM path arms it inside generate_requests).
+                // The pool decides navalness (mission_is_naval_strike
+                // = AMIS_ASHIP only): ASW's submarines are not on the
+                // wire and TANK's armor is the ground pool's business —
+                // both stay target-less, and an anti-ship request with
+                // no ranked task force stays route-less too (no
+                // routes_failed_ — nothing was there to build).
+                if (mission_is_naval_strike(intent.mission_byte)) {
+                    const std::uint32_t tf_vu =
+                        select_naval_target_(
+                            static_cast<std::uint8_t>(slot));
+                    if (tf_vu != 0) {
+                        const auto rb = route_planner_->build(
+                            static_cast<std::uint8_t>(slot), profile,
+                            lead->airbase, tf_vu);
+                        if (rb.waypoints.size() >= 2) {
+                            intent.target_objective_id = tf_vu;
+                            intent.route = rb.waypoints;
+                            intent.synthetic = true;
+                            ++routes_built_;
+                            if (rb.safe_path_searched)
+                                ++route_safe_searches_;
+                            if (rb.direct_fallback) ++route_fallbacks_;
+                        } else {
+                            ++routes_failed_;
+                        }
+                    }
+                }
             }
 
             // Publish + record (the campaign's only outward coupling).
@@ -563,6 +614,9 @@ void Campaign::run_tasking_cycle_atm_() {
             // G2: the unit-delivery family (CAS) routes too when the
             // interdiction arm is on — the builder resolves the
             // battalion's grid position.
+            // DOM-5: the naval strike family (AMIS_ASHIP at a task
+            // force) routes under the naval arm — the builder resolves
+            // the task force's grid position the same way.
             // P7: the loiter family (stationed CAPs) routes under the
             // strategy arm; Support-role flights build their OWN
             // station route (never the package's).
@@ -571,6 +625,8 @@ void Campaign::run_tasking_cycle_atm_() {
                 (profile_flies_delivery_route(profile) ||
                  (cfg_.unit_strike &&
                   profile_flies_unit_delivery_route(profile)) ||
+                 (cfg_.naval_tasking &&
+                  profile_flies_naval_strike_route(profile)) ||
                  loiter_station || sweep_line || objective_cas)) {
                 const auto rb = route_planner_->build(
                     team, profile, ft.airbase_vu, ft.target_vu);
@@ -672,6 +728,18 @@ void Campaign::run_tasking_cycle_atm_() {
                     result_ledger_->sync_squadron_ratings(
                         ft.squadron_vu, ft.squadron_ratings);
                 }
+            }
+
+            // DOM-5 — the naval filing book: a published MAIN flight
+            // at a task force (the map + the stat; the taskforces
+            // query's face and the QC's counter). Only the armed runs
+            // book — the disarmed publish path carries no naval
+            // targets by construction. Escorts never book (the main
+            // flight owns the filing).
+            if (cfg_.naval_tasking && ft.role == FlightRole::Main &&
+                intent.target_objective_id != 0 &&
+                mission_is_naval_strike(intent.mission_byte)) {
+                atm_->book_naval_filing(intent.target_objective_id);
             }
 
             // Publish + record (the campaign's only outward coupling).
@@ -795,6 +863,16 @@ std::string Campaign::to_summary_json() const {
             w.number_key("slot_overflows", a.slot_overflows);
             w.put(",\n    ");
             w.number_key("slot_releases", a.slot_releases);
+        }
+        // DOM-5 — the naval counters, printed when armed (the
+        // disarmed block stays byte-identical; the pre-DOM-5
+        // anti-ship path stayed target-less, so a 0 would lie about
+        // the shape, not the count).
+        if (cfg_.naval_tasking) {
+            w.put(",\n    ");
+            w.number_key("naval_requests", a.naval_requests);
+            w.put(",\n    ");
+            w.number_key("naval_filings", a.naval_filings);
         }
         w.put("\n  }");
     }

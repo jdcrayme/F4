@@ -5,6 +5,41 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-DOM-5 — naval (the wrap-then-decide)
+
+- **CAMP-DOM-5** — the campaign war's naval face becomes real to the
+  tasking pipeline behind one default-off knob (`naval_tasking`, the
+  session opt + the QC's `--naval-tasking`): the upstream
+  NavalTaskingManager is a 15-byte flag shell on the wire, so the wrap
+  maps the naval face onto the ATM pipeline's request vocabulary — a
+  ranked pool of the enemy's task forces (`rank_taskforce_targets` in
+  the new naval_tasking.{hpp,cpp}: sea-domain units at war, non-empty
+  roster, own-shore distance ascending, wire-order ties), the anti-ship
+  family (AMIS_ASHIP — `mission_is_naval_strike`, the name table's own
+  position; ASW's submarines and TANK's armor stay honestly target-less)
+  rotating across it through its own cursor, the targeted filings
+  routing like strikes (the builder resolving the task force's grid
+  position — the unit-resolution seam now the OR of the two arms), the
+  per-target filing books (`book_naval_filing`, VU-ascending) exposed
+  for the additive `taskforces` query (TaskForceView: the wire's own
+  rows with or without the arm, overlaid with this run's books), the
+  filings publishing on the SAME mission_filed event every other
+  package rides (no new event family; kProtocolVersion stays 1), the
+  legacy ladder's matching naval rung, the arm-gated
+  `naval_requests`/`naval_filings` summary keys, and the "how deep"
+  record (task-force movement, naval threat painting, carrier
+  airbases, task groups/CVN ops — each its own tranche; the NTM's 15
+  wire bytes stay captured verbatim). Tests (+15): the ranker pins
+  (hostility, ties, the skips), the family split, the ATM arm
+  (targeted ASHIP, the disarmed and empty-pool corners), the Campaign
+  books (one-for-one with the filings, the based-squadron route pin,
+  the two-run determinism, the disarmed summary), the session gates
+  (the taskforces query serves the wire + the books, the filings ride
+  mission_filed one-for-one, the arm-off identity, the two-run query
+  determinism), the protocol whitelist + the DTO goldens. The
+  medium-war gate with the arm ON: two runs one MD5; the kunsan
+  fixture's 2 task forces are the session gates' raw material.
+
 ## CAMP-DOM-4 — airbase scheduling (FindTakeoffSlot depth beyond FID's airfield-ops windows)
 
 - **CAMP-DOM-4** — the campaign war's slot grid becomes a living,

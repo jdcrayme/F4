@@ -279,6 +279,15 @@ struct CampaignSessionOptions {
     /// the golden identity.
     bool airbase_scheduling = false;
 
+    /// CAMP-DOM-5: the naval tasking wrap — the anti-ship family
+    /// (AMIS_ASHIP) files at the enemy's task forces (the ranked
+    /// pool rank_taskforce_targets owns), the targeted flights route
+    /// like strikes, the filing books ride the `taskforces` query,
+    /// and the filings publish on the same mission_filed event every
+    /// other package rides. Default false: anti-ship requests stay
+    /// target-less — the golden identity.
+    bool naval_tasking = false;
+
     /// CAMP-SCALE-1: path to the converted theater tables (cam2json
     /// --emit-tables output; f4/world/theater_tables.hpp reads it).
     /// Empty (default) = the documented countermeasure defaults stand

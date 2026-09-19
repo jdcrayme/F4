@@ -408,7 +408,7 @@ TEST(FcsYaw, PedalInputDoesNotCrash) {
     fcs.update(input, makeFc(), fcs_state, aero, 0.01);
 
     // Just verify it ran. The betcmd is computed regardless of the ground guard.
-    EXPECT_NO_FATAL_FAILURE();
+    SUCCEED();
 }
 
 TEST(FcsYaw, UnstubbedChannelDrivesAeroBetaInFlight) {
@@ -480,7 +480,7 @@ TEST(FcsYaw, NoGroundGuardWhenGearDownButQsomHigh) {
     // hard-pinned to zero.
     const double beta_deg = to_degrees(aero.beta);
     (void)beta_deg;  // smoke-test: the call above should not crash.
-    EXPECT_NO_FATAL_FAILURE();
+    SUCCEED();
 }
 
 TEST(FcsYaw, CenteredPedalsHoldBetaAtZeroInFlight) {

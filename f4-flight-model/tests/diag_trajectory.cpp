@@ -166,7 +166,7 @@ Summary summarize(const std::vector<TrajectoryPoint>& pts) {
     s.speed_brake_cycles = sb_changes;
 
     // Last 5 seconds of heading error for sign changes (limit-cycle check)
-    int tail_n = std::min<int>(300, pts.size());
+    std::size_t tail_n = std::min<std::size_t>(300, pts.size());
     auto tail_begin = pts.end() - tail_n;
     int sign_changes = 0;
     int prev_sign = 0;

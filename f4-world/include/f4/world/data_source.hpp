@@ -170,7 +170,7 @@ struct ITeamSource {
     // stock (ushort at team offset 56, v>53; 0 when the team carries
     // none — a legal wire state). Default-implemented: alternative
     // sources that predate the tranche keep compiling.
-    virtual uint16_t replacements_avail(int i) const { return 0; }
+    virtual uint16_t replacements_avail(int) const { return 0; }
 
     // DOM-2 (supply depth) — the .tea TeamClass's strategic ground
     // stocks (u16 @52/@54): the national reserve the objective supply
@@ -178,8 +178,8 @@ struct ITeamSource {
     // flow). Default-implemented 0 for the same reason: 0 = no stock
     // data, and the deepened flow regenerates nothing — a legal state,
     // not a missing adapter.
-    virtual uint16_t supply_avail(int i) const { return 0; }
-    virtual uint16_t fuel_avail(int i) const { return 0; }
+    virtual uint16_t supply_avail(int) const { return 0; }
+    virtual uint16_t fuel_avail(int) const { return 0; }
 
     // C4 (ATM pipeline) — the team's own tasking priorities (TeamRecord
     // mission_priority[]/objtype_priority[], GetPriority's inputs) and

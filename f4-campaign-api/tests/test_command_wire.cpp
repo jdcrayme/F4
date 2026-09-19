@@ -66,7 +66,7 @@ TEST(CommandWire, RoeScopeKindsRoundTrip) {
 
 TEST(CommandWire, RejectsRoeOutOfRange) {
     f4::json::Reader r("3");
-    EXPECT_THROW(parse_roe_level(r.read_int()), std::runtime_error);
+    EXPECT_THROW((void)parse_roe_level(r.read_int()), std::runtime_error);
 }
 
 TEST(CommandWire, RejectsUnknownScopeKind) {

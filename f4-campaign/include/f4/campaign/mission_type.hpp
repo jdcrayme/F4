@@ -107,6 +107,31 @@ mission_type_byte(std::string_view name);
     return mission_byte != 0;
 }
 
+// DOM-5 — the naval strike family. The reference's naval tasking files
+// its naval targets as AMIS_ASHIP missions (Core Systems Reference,
+// ATM::DoCalculations "for each carrier: generates AMIS_ASHIP"), and
+// the NavalTaskingManager itself is a 15-byte flag shell on the wire —
+// so the wrap serves the ANTI-SHIP family from the naval target pool.
+// ASW shares the naval face but hunts SUBMARINES: the wire carries no
+// submarine unit class, so its pool is the honest empty set and its
+// requests stay target-less exactly as before the arm. The names are
+// the vocabulary — these constants are their table positions, pinned
+// by static_assert (never raw literals at the call sites).
+inline constexpr std::uint8_t kMissionAsw = 34;
+inline constexpr std::uint8_t kMissionAship = 35;
+static_assert(kMissionTypeNames[kMissionAsw] == "AMIS_ASW");
+static_assert(kMissionTypeNames[kMissionAship] == "AMIS_ASHIP");
+
+/// DOM-5 — does this mission draw from the naval target pool (the
+/// ranked enemy task forces)? AMIS_ASHIP only, today: the reference's
+/// own naval filing (see above); the family grows when a naval-target
+/// face the wire actually carries (convoy supply, submarine tracks)
+/// lands.
+[[nodiscard]] constexpr bool mission_is_naval_strike(
+    std::uint8_t mission_byte) {
+    return mission_byte == kMissionAship;
+}
+
 // ============================================================================
 // Mission categories (B.3 tranche)
 // ============================================================================

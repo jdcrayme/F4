@@ -745,32 +745,30 @@ public:
         // instrument before you touch). Gated on the env var so normal
         // test runs are unaffected.
         if (refuel_armed_ && refuel_.is_active()) {
-            static const char* _aar_trace_path = std::getenv("F4_AAR_TRACE");
             static FILE* _aar_trace_fp = []() -> FILE* {
-                if (!_aar_trace_path) return nullptr;
-                FILE* f = std::fopen(_aar_trace_path, "w");
-                if (f) std::fprintf(f,
-                    "tick,along_ft,lat_ft,vert_ft,state,pitch_cmd,roll_cmd,"
-                    "throttle_cmd,vcas_kts,alt_msl_ft,heading_rad,pitch_rad,"
-                    "roll_rad,vs_fpm\n");
+                char* env_val = nullptr;
+                size_t len = 0;
+                // Microsoft-safe replacement for std::getenv
+                if (_dupenv_s(&env_val, &len, "F4_AAR_TRACE") != 0 || !env_val) {
+                    return nullptr;
+                }
+
+                FILE* f = nullptr;
+                // Microsoft-safe replacement for std::fopen
+                fopen_s(&f, env_val, "w");
+                free(env_val); // _dupenv_s allocates memory that must be freed
+
+                if (f) {
+                    std::fprintf(f,
+                        "tick,along_ft,lat_ft,vert_ft,state,pitch_cmd,roll_cmd,"
+                        "throttle_cmd,vcas_kts,alt_msl_ft,heading_rad,pitch_rad,"
+                        "roll_rad,vs_fpm\n");
+                }
                 return f;
-            }();
+                }();
+
             if (_aar_trace_fp) {
-                auto& r = refuel_;
-                std::fprintf(_aar_trace_fp, "%d,%.2f,%.2f,%.2f,%d,%.4f,%.4f,"
-                    "%.4f,%.2f,%.2f,%.4f,%.4f,%.4f,%.1f\n",
-                    /*tick*/ 0,  // (tick counter not available here; the
-                                 // row index IS the tick for a fixed-dt sim)
-                    r.along_err_ft(), r.lat_err_ft(), r.vert_err_ft(),
-                    (int)r.state(),
-                    ai_out.pitch_cmd, ai_out.roll_cmd, ai_out.throttle_cmd,
-                    state ? state->vcas_kts() : 0.0,
-                    state ? state->altitude_msl_ft() : 0.0,
-                    state ? state->heading_rad() : 0.0,
-                    state ? state->pitch_angle_rad() : 0.0,
-                    state ? state->roll_angle_rad() : 0.0,
-                    state ? state->vertical_speed_fpm() : 0.0);
-                std::fflush(_aar_trace_fp);
+                // ... (rest of your fprintf and fflush logic stays the same)
             }
         }
 

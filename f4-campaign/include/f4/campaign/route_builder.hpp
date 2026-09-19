@@ -163,6 +163,21 @@ inline constexpr std::uint8_t kWpLand = 7;
     return profile.targetwp == "WP_CAS";
 }
 
+/// DOM-5 — does this profile's route deliver ordnance on a unit AT
+/// SEA? The naval strike family's SHAPE: UNIT-targeted TPROF_ATTACK
+/// with a WP_STRIKE target waypoint (AMIS_ASHIP in the generated
+/// table). The shape alone does not make a target naval — ASW shares
+/// it (submarines the wire does not carry) and TANK shares it (armor,
+/// the ground pool's business) — both stay target-less under the
+/// naval arm: the pool decides (mission_is_naval_strike), the shape
+/// only decides whether a targeted filing routes like a strike.
+[[nodiscard]] inline bool profile_flies_naval_strike_route(
+        const MissionProfile& profile) noexcept {
+    if (profile.target != "UNIT") return false;
+    if (profile.target_profile != "TPROF_ATTACK") return false;
+    return profile.targetwp == "WP_STRIKE";
+}
+
 /// CAMP-ATM-1 — does this profile fly a SWEEP LINE? The contested-air
 /// family: LOCATION-targeted TPROF_ATTACK profiles (the generated
 /// table carries exactly AMIS_SWEEP; data-driven, never a byte

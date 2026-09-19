@@ -66,6 +66,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -280,6 +281,18 @@ struct CampaignConfig {
     /// silent overflow; every pinned test unchanged). One flag for the
     /// whole arm (the ATM's config inherits it at construction).
     bool airbase_scheduling{false};
+
+    /// DOM-5 — the naval tasking wrap: the anti-ship family
+    /// (AMIS_ASHIP) files at the enemy's task forces — the ranked
+    /// pool rank_taskforce_targets owns (sea-domain units, own-shore
+    /// distance, wire-order ties, rotation-spread), the targeted
+    /// flights route like strikes, the filing books ride the
+    /// taskforces query, and the filings publish on the same
+    /// mission_filed event every other package rides. DEFAULT OFF —
+    /// the golden identity (anti-ship requests stay target-less; every
+    /// pinned test unchanged). One flag for both ladders (the ATM's
+    /// config inherits it at construction).
+    bool naval_tasking{false};
 };
 
 class Campaign {
@@ -375,6 +388,15 @@ public:
     [[nodiscard]] const std::vector<AirbaseSchedule>* atm_schedules()
         const noexcept {
         return atm_ ? &atm_->schedules() : nullptr;
+    }
+
+    /// DOM-5: the ATM's naval filing books, per target task force VU
+    /// (this run's published anti-ship flights at it — the taskforces
+    /// query's face; VU-ascending map order) — null when the pipeline
+    /// is not armed.
+    [[nodiscard]] const std::map<std::uint32_t, int>* atm_naval_filings()
+        const noexcept {
+        return atm_ ? &atm_->naval_filings() : nullptr;
     }
 
     // --- CAMP-CMD-2 — the command-driven booking interventions ---------
@@ -515,6 +537,15 @@ private:
     [[nodiscard]] std::uint32_t select_unit_target_(
         std::uint8_t team);
 
+    /// DOM-5: select the naval target for `team` — an enemy task
+    /// force, own-shore ranked (rank_taskforce_targets), rotation-
+    /// spread by naval_target_cursor_. 0 when no ranked target exists
+    /// (no task forces at war — the honest empty pool). The legacy
+    /// ladder's naval rung (the ATM keeps its own cursor — the two
+    /// ladders never share).
+    [[nodiscard]] std::uint32_t select_naval_target_(
+        std::uint8_t team);
+
     const f4::world::ICampaignSource& camp_;
     const f4::world::ITeamSource& teams_;
     const f4::world::IUnitCoreSource& units_;
@@ -570,6 +601,11 @@ private:
     /// list (the legacy ladder's unit-target spread; the ATM keeps its
     /// own — the two ladders never share cursors).
     std::array<int, 8> unit_target_cursor_{};
+
+    /// DOM-5 — per-team rotation cursor over the ranked enemy TASK
+    /// FORCE list (the legacy ladder's naval spread; the ATM keeps
+    /// its own — the two ladders never share cursors).
+    std::array<int, 8> naval_target_cursor_{};
 
     /// C4: the ATM pipeline (constructed when cfg_.atm_pipeline — the
     /// set_result_ledger/set_route_planner attachments below keep its

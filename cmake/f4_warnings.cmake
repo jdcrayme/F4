@@ -24,6 +24,14 @@ add_library(f4_warnings INTERFACE)
 add_library(F4::Warnings ALIAS f4_warnings)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    target_compile_definitions(f4_warnings INTERFACE
+        # The codebase deliberately uses the portable C API (getenv, fopen,
+        # sprintf in vendored stb) so the same sources build clean on
+        # GCC/Clang. Microsoft's _s alternatives are non-portable C11 Annex K,
+        # so silence the secure-CRT deprecation nag instead of forking every
+        # call site. Other deprecations ([[deprecated], etc.) still surface.
+        _CRT_SECURE_NO_WARNINGS
+    )
     target_compile_options(f4_warnings INTERFACE
         /W4
         /permissive-

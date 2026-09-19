@@ -43,7 +43,7 @@ bool fixtures_ready() {
 // teams carry the stock profile and their ATM airbase rows), the
 // campaign's own default tasking cadence, ground war armed (the packs
 // carry battalions), tiered fidelity for the long horizons.
-WarHarnessOptions make_opts(const char* world, double horizon_sec,
+WarHarnessOptions make_opts(const char* world, std::int64_t horizon_sec,
                             double sample_sec) {
     WarHarnessOptions o;
     o.session.world_json = generated_world(world);
@@ -94,7 +94,7 @@ TEST(CampaignInitWars, GeneratedSmallWarPassesThe24HourHarness) {
     }
     std::string err;
     auto harness = CampaignWarHarness::create(
-        make_opts("small", 86400.0, 3600.0), &err);
+        make_opts("small", 86400, 3600.0), &err);
     ASSERT_NE(harness, nullptr) << err;
 
     const WarReport r = harness->execute();
@@ -114,7 +114,7 @@ TEST(CampaignInitWars, GeneratedMediumWarIsDeterministicAndAlive) {
     }
     std::string err;
     auto harness =
-        CampaignWarHarness::create(make_opts("medium", 7200.0, 1800.0), &err);
+        CampaignWarHarness::create(make_opts("medium", 7200, 1800.0), &err);
     ASSERT_NE(harness, nullptr) << err;
     const WarReport r = harness->execute();
     expect_green(r);
@@ -128,7 +128,7 @@ TEST(CampaignInitWars, GeneratedLargeWarIsDeterministicAndAlive) {
     }
     std::string err;
     auto harness =
-        CampaignWarHarness::create(make_opts("large", 7200.0, 1800.0), &err);
+        CampaignWarHarness::create(make_opts("large", 7200, 1800.0), &err);
     ASSERT_NE(harness, nullptr) << err;
     const WarReport r = harness->execute();
     expect_green(r);
@@ -151,7 +151,7 @@ TEST(CampaignInitWars, TwinWarsHarnessCertifiesWithTheThirdSidesStandingDown) {
     }
     std::string err;
     auto harness =
-        CampaignWarHarness::create(make_opts("twinwars", 7200.0, 1800.0), &err);
+        CampaignWarHarness::create(make_opts("twinwars", 7200, 1800.0), &err);
     ASSERT_NE(harness, nullptr) << err;
     const WarReport r = harness->execute();
     expect_green(r);

@@ -307,10 +307,10 @@ TEST(SvgRoundTrip, SyntheticSymbolPreservesGeometry) {
 
     // Filled polygons map 1:1 with roles + holes.
     ASSERT_EQ(back.polygons.size(), 1u);
-    EXPECT_TRUE(points_near(back.polygons[0].points, filled.points, 1e-3));
+    EXPECT_TRUE(points_near(back.polygons[0].points, filled.points, 1e-3f));
     EXPECT_EQ(back.polygons[0].color_role, SymbolColorRole::FillBlend);
     ASSERT_EQ(back.polygons[0].holes.size(), 1u);
-    EXPECT_TRUE(points_near(back.polygons[0].holes[0], filled.holes[0], 1e-3));
+    EXPECT_TRUE(points_near(back.polygons[0].holes[0], filled.holes[0], 1e-3f));
     EXPECT_FALSE(back.polygons[0].triangles.empty());  // holed -> earcut path
 
     // Polylines: mapped unfilled polygon first (exporter order), then the
@@ -319,13 +319,13 @@ TEST(SvgRoundTrip, SyntheticSymbolPreservesGeometry) {
     EXPECT_TRUE(back.polylines[0].closed);
     EXPECT_NEAR(back.polylines[0].width, 1.0f, 1e-2);
     EXPECT_EQ(back.polylines[0].color_role, SymbolColorRole::Outline);
-    EXPECT_TRUE(points_near(back.polylines[0].points, unfilled.points, 1e-3));
+    EXPECT_TRUE(points_near(back.polylines[0].points, unfilled.points, 1e-3f));
 
-    EXPECT_TRUE(points_near(back.polylines[1].points, open_line.points, 1e-3));
+    EXPECT_TRUE(points_near(back.polylines[1].points, open_line.points, 1e-3f));
     EXPECT_NEAR(back.polylines[1].width, 2.0f, 1e-2);
     EXPECT_FALSE(back.polylines[1].closed);
 
-    EXPECT_TRUE(points_near(back.polylines[2].points, closed_line.points, 1e-3));
+    EXPECT_TRUE(points_near(back.polylines[2].points, closed_line.points, 1e-3f));
     EXPECT_NEAR(back.polylines[2].width, 1.5f, 1e-2);
     EXPECT_TRUE(back.polylines[2].closed);
     EXPECT_EQ(back.polylines[2].color_role, SymbolColorRole::Fill);
@@ -390,11 +390,11 @@ TEST(SvgRoundTrip, FullCorpusOfFSymbols) {
         for (const auto& pg : s.polygons) {
             if (!pg.filled) continue;
             const auto& got = back.polygons[fi++];
-            EXPECT_TRUE(points_near(got.points, pg.points, 1e-3)) << s.key;
+            EXPECT_TRUE(points_near(got.points, pg.points, 1e-3f)) << s.key;
             EXPECT_EQ(got.color_role, pg.color_role) << s.key;
             ASSERT_EQ(got.holes.size(), pg.holes.size()) << s.key;
             for (std::size_t h = 0; h < pg.holes.size(); ++h) {
-                EXPECT_TRUE(points_near(got.holes[h], pg.holes[h], 1e-3)) << s.key;
+                EXPECT_TRUE(points_near(got.holes[h], pg.holes[h], 1e-3f)) << s.key;
             }
         }
 
@@ -413,11 +413,11 @@ TEST(SvgRoundTrip, FullCorpusOfFSymbols) {
             EXPECT_TRUE(got.closed) << s.key;
             EXPECT_NEAR(got.width, 1.0f, 1e-2) << s.key;
             EXPECT_EQ(got.color_role, SymbolColorRole::Outline) << s.key;
-            EXPECT_TRUE(points_near(got.points, pg.points, 1e-3)) << s.key;
+            EXPECT_TRUE(points_near(got.points, pg.points, 1e-3f)) << s.key;
         }
         for (const auto& pl : s.polylines) {
             const auto& got = back.polylines[pi++];
-            EXPECT_TRUE(points_near(got.points, pl.points, 1e-3)) << s.key;
+            EXPECT_TRUE(points_near(got.points, pl.points, 1e-3f)) << s.key;
             EXPECT_NEAR(got.width, pl.width, 1e-2) << s.key;
             EXPECT_EQ(got.closed, pl.closed) << s.key;
             EXPECT_EQ(got.color_role, pl.color_role) << s.key;

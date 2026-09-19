@@ -4,8 +4,8 @@
 // emitted by f4-world-convert. The reader is shape-compatible with the
 // hand-rolled JsonReader that lived here previously — the field parsers
 // below are unchanged from the original implementation; only the local
-// class definition has been replaced with #include <f4/json/reader.hpp>
-#include <f4/json/writer.hpp>.
+// class definition has been replaced with f4-json's Reader/Writer headers.
+#include <f4/json/writer.hpp>
 
 #include <f4/world/detail/world_state.hpp>
 

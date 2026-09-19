@@ -253,14 +253,14 @@ TEST(TheaterTables, AdditiveExporterFieldsNeverBreakTheReader) {
         std::string s = tables_json();
         s.insert(s.find("\"counts\""),
                  "\"future_field\": {\"a\": [1, 2, 3]},\n  ");
-        EXPECT_NO_THROW(TheaterTables::parse(s));
+        EXPECT_NO_THROW((void)TheaterTables::parse(s));
     }
     {
         std::string s = tables_json();
         s.replace(s.find("f4.theater.tables/1"),
                   std::string("f4.theater.tables/1").size(),
                   "f4.theater.tables/2");
-        EXPECT_THROW(TheaterTables::parse(s), std::runtime_error);
+        EXPECT_THROW((void)TheaterTables::parse(s), std::runtime_error);
     }
 }
 

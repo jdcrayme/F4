@@ -455,7 +455,6 @@ GltfEmitResult emit_model_as_gltf(
         int mode;                      // 4 = TRIANGLES, 1 = LINES, 0 = POINTS
         int material;
     };
-    constexpr std::size_t kNoAccessor = static_cast<std::size_t>(-1);
 
     std::vector<PrimInfo> prims;
 

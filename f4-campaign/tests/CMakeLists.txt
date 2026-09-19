@@ -79,3 +79,14 @@ target_link_libraries(test_campaign_personnel PRIVATE f4-json)
 # f4-json (the summary + the artifact).
 f4_campaign_add_test(test_campaign_scheduling test_campaign_scheduling.cpp)
 target_link_libraries(test_campaign_scheduling PRIVATE f4-json)
+
+# DOM-5 — the naval tasking wrap: the sea-domain target pool (the
+# ranker's hostility/roster/wire-order rules), the family split (the
+# pool's ASHIP-only decision vs the strike shape), the ATM arm's
+# targeted ASHIP requests, and the Campaign's per-target filing books
+# over the kunsan fixture's own 2 task forces. Links f4-json (the
+# summary).
+f4_campaign_add_test(test_naval_tasking test_naval_tasking.cpp)
+target_link_libraries(test_naval_tasking PRIVATE f4-json)
+target_compile_definitions(test_naval_tasking PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-simulation/tests/fixtures")

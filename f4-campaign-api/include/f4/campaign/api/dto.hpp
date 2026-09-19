@@ -665,4 +665,72 @@ inline void encode(f4::json::Writer& w,
     w.put(']');
 }
 
+// ---------------------------------------------------------------------------
+// CAMP-DOM-5 — the taskforces query (the naval face)
+// ---------------------------------------------------------------------------
+
+/// One row of the `taskforces` query: a task force from the WORLD's
+/// own wire state (domain-4 units — the save's naval truth, present
+/// whether or not the naval arm is on), overlaid with this run's
+/// naval filing books (the ATM's per-target counts — 0 when the arm
+/// is off or nothing filed). The wire's identity + counts pattern
+/// (the squadrons row's shape): the wire owns the facts, the run adds
+/// only what it did.
+struct TaskForceView {
+    std::uint32_t id_creator{0};   ///< VU_ID.creator
+    std::uint32_t id_num{0};       ///< VU_ID.num (the campaign key)
+    std::uint8_t team{0};          ///< owner slot (0 = neutral control)
+    std::uint8_t unit_subtype{0};  ///< STYPE_SEA_* (3 = carrier, ...)
+    std::string subtype_name;      ///< the class table's face ("Carrier")
+    int x{0};                      ///< grid column
+    int y{0};                      ///< grid row
+    int dest_x{0};                 ///< movement destination (the wire's
+    int dest_y{0};                 ///< own field; the engine does not
+                                   ///< consume it yet — the as-built's
+                                   ///< "how deep" note)
+    int supply{0};                 ///< the TaskForce tail's supply byte
+    int filings{0};                ///< this run's anti-ship filings at
+                                   ///< this task force
+};
+
+inline void encode_taskforce(f4::json::Writer& w, const TaskForceView& t) {
+    w.raw("{\"id_creator\":");
+    w.number(static_cast<std::uint64_t>(t.id_creator));
+    w.raw(",\"id_num\":");
+    w.number(static_cast<std::uint64_t>(t.id_num));
+    w.raw(",\"team\":");
+    w.number(t.team);
+    w.raw(",\"unit_subtype\":");
+    w.number(t.unit_subtype);
+    w.raw(",\"subtype_name\":\"");
+    w.put(t.subtype_name);
+    w.raw("\",\"x\":");
+    w.number(t.x);
+    w.raw(",\"y\":");
+    w.number(t.y);
+    w.raw(",\"dest_x\":");
+    w.number(t.dest_x);
+    w.raw(",\"dest_y\":");
+    w.number(t.dest_y);
+    w.raw(",\"supply\":");
+    w.number(t.supply);
+    w.raw(",\"filings\":");
+    w.number(t.filings);
+    w.put('}');
+}
+
+inline void encode(f4::json::Writer& w, const TaskForceView& t) {
+    encode_taskforce(w, t);
+}
+
+inline void encode(f4::json::Writer& w,
+                   const std::vector<TaskForceView>& taskforces) {
+    w.put('[');
+    for (std::size_t i = 0; i < taskforces.size(); ++i) {
+        if (i != 0) w.put(',');
+        encode_taskforce(w, taskforces[i]);
+    }
+    w.put(']');
+}
+
 } // namespace f4::campaign::api

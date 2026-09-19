@@ -171,7 +171,7 @@ void validate(const ScenarioPack& p) {
                        std::to_string(o.owner) + " is not a named team");
         if (o.priority < 0 || o.priority > 100)
             pack_error("objective \"" + o.name + "\" priority out of range 0..100");
-        objective_type_from_kind(o.kind);   // vocabulary check (throws)
+        (void)objective_type_from_kind(o.kind);   // vocabulary check (throws)
     }
 
     std::set<std::pair<int, int>> seen_links;
@@ -196,7 +196,7 @@ void validate(const ScenarioPack& p) {
             pack_error("squadron \"" + s.name + "\" size out of range 1..48");
         if (s.skill < 0 || s.skill > 9)
             pack_error("squadron \"" + s.name + "\" skill out of range 0..9");
-        squadron_specialty_from_word(s.specialty);   // vocabulary check
+        (void)squadron_specialty_from_word(s.specialty);   // vocabulary check
     }
 
     if (p.battalions.size() > 512) pack_error("at most 512 battalions per pack");
@@ -207,7 +207,7 @@ void validate(const ScenarioPack& p) {
             pack_error("battalion site \"" + b.at + "\" names no objective");
         if (b.groups < 1 || b.groups > 16)
             pack_error("battalion groups out of range 1..16");
-        battalion_subtype_from_kind(b.kind);         // vocabulary check
+        (void)battalion_subtype_from_kind(b.kind);         // vocabulary check
     }
 
     if (p.player_team != 0 && !named(p.player_team))
@@ -322,7 +322,7 @@ ScenarioPack ScenarioPack::parse(const std::string& json) {
                     parse_object(r, "objectives[]", [&](const std::string& ok) {
                         if (ok == "name") { o.name = r.read_string(); return true; }
                         if (ok == "kind") { o.kind = r.read_string();
-                                            objective_type_from_kind(o.kind); return true; }
+                                            (void)objective_type_from_kind(o.kind); return true; }
                         if (ok == "x") { o.x = read_int_field(r); return true; }
                         if (ok == "y") { o.y = read_int_field(r); return true; }
                         if (ok == "owner") { o.owner = read_int_field(r); return true; }

@@ -92,7 +92,8 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
     // from the same world file every session starts from).
     impl_->world_team_names.clear();
     for (const auto& t : ws.teams) {
-        impl_->world_team_names.emplace_back(t.slot, t.name);
+        impl_->world_team_names.emplace_back(
+            static_cast<std::int8_t>(t.slot), t.name);
     }
 
     // If the WorldState already has terrain loaded, transfer it.

@@ -454,7 +454,7 @@ std::size_t execute_brain_combat_intents(
             if (cm != nullptr) {
                 const auto& md = brain->missile_defense();
                 if (md.should_chaff()) {
-                    weapons::deploy_countermeasure(
+                    (void)weapons::deploy_countermeasure(
                         world, bus, shooter, weapons::DecoyKind::Chaff,
                         sim_time_s,
                         static_cast<std::uint32_t>(0x43484146u) ^
@@ -462,7 +462,7 @@ std::size_t execute_brain_combat_intents(
                                 shooter.id().value));
                 }
                 if (md.should_flare()) {
-                    weapons::deploy_countermeasure(
+                    (void)weapons::deploy_countermeasure(
                         world, bus, shooter, weapons::DecoyKind::Flare,
                         sim_time_s,
                         static_cast<std::uint32_t>(0x464C4152u) ^

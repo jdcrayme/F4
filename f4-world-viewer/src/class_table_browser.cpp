@@ -33,6 +33,7 @@
 #include <rlgl.h>      // rlDisableBackfaceCulling
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -70,6 +71,12 @@ struct f4::viewer::PreviewCache {
 namespace f4::viewer {
 
 using f4::world_types::unit_subtype_name;
+
+namespace {
+// std::transform-friendly lowercasing: ::tolower returns int and takes a
+// domain-checked value, so convert through unsigned char explicitly.
+char ascii_lower(unsigned char c) { return static_cast<char>(std::tolower(c)); }
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Corrected data_type_name -- uses the verified DataType enum from
@@ -201,11 +208,11 @@ bool ClassTableBrowser::passes_filter(
     if (search_buf_[0] != '\0') {
         std::string search_lower(search_buf_);
         std::transform(search_lower.begin(), search_lower.end(),
-                       search_lower.begin(), ::tolower);
+                       search_lower.begin(), ascii_lower);
 
         // Match entity type ID
         std::string id_str = std::to_string(entity_type);
-        std::transform(id_str.begin(), id_str.end(), id_str.begin(), ::tolower);
+        std::transform(id_str.begin(), id_str.end(), id_str.begin(), ascii_lower);
         if (id_str.find(search_lower) != std::string::npos) return true;
 
         // Match subtype name
@@ -213,7 +220,7 @@ bool ClassTableBrowser::passes_filter(
         if (sub) {
             std::string sub_lower(sub);
             std::transform(sub_lower.begin(), sub_lower.end(),
-                           sub_lower.begin(), ::tolower);
+                           sub_lower.begin(), ascii_lower);
             if (sub_lower.find(search_lower) != std::string::npos) return true;
         }
 
@@ -222,7 +229,7 @@ bool ClassTableBrowser::passes_filter(
         if (cls) {
             std::string cls_lower(cls);
             std::transform(cls_lower.begin(), cls_lower.end(),
-                           cls_lower.begin(), ::tolower);
+                           cls_lower.begin(), ascii_lower);
             if (cls_lower.find(search_lower) != std::string::npos) return true;
         }
 
@@ -231,7 +238,7 @@ bool ClassTableBrowser::passes_filter(
         if (dt_name) {
             std::string dt_lower(dt_name);
             std::transform(dt_lower.begin(), dt_lower.end(),
-                           dt_lower.begin(), ::tolower);
+                           dt_lower.begin(), ascii_lower);
             if (dt_lower.find(search_lower) != std::string::npos) return true;
         }
 

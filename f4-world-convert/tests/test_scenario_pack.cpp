@@ -135,14 +135,14 @@ TEST(ScenarioPack, FullPackParsesEveryBlock) {
 
 TEST(ScenarioPack, UnknownKeysAreNamedErrors) {
     try {
-        ScenarioPack::parse("{ \"pack\": 1, \"nmae\": \"t\" }");
+        (void)ScenarioPack::parse("{ \"pack\": 1, \"nmae\": \"t\" }");
         FAIL() << "expected the typo'd key to throw";
     } catch (const std::exception& e) {
         EXPECT_NE(std::string(e.what()).find("nmae"), std::string::npos)
             << "the unknown key must be named: " << e.what();
     }
     try {
-        ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+        (void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
             "teams": [ { "slot": 1, "name": "B", "xp": 5 },
                        { "slot": 6, "name": "R" } ],
             "objectives": [ { "name": "A", "kind": "city", "x": 1, "y": 1 } ] })");
@@ -154,12 +154,12 @@ TEST(ScenarioPack, UnknownKeysAreNamedErrors) {
 }
 
 TEST(ScenarioPack, UnknownVocabularyWordsAreNamedErrors) {
-    EXPECT_THROW(ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+    EXPECT_THROW((void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
         "teams": [ { "slot": 1, "name": "B" }, { "slot": 6, "name": "R" } ],
         "relations": [ { "a": 1, "b": 6, "stance": "blood feud" } ],
         "objectives": [ { "name": "A", "kind": "city", "x": 1, "y": 1 } ] })"),
                  std::runtime_error);
-    EXPECT_THROW(ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+    EXPECT_THROW((void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
         "teams": [ { "slot": 1, "name": "B" }, { "slot": 6, "name": "R" } ],
         "objectives": [ { "name": "A", "kind": "castle", "x": 1, "y": 1 } ] })"),
                  std::runtime_error);
@@ -167,47 +167,47 @@ TEST(ScenarioPack, UnknownVocabularyWordsAreNamedErrors) {
 
 TEST(ScenarioPack, CrossReferenceFaultsAreNamedErrors) {
     // squadron base names no objective
-    EXPECT_THROW(ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+    EXPECT_THROW((void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
         "teams": [ { "slot": 1, "name": "B" }, { "slot": 6, "name": "R" } ],
         "objectives": [ { "name": "A", "kind": "airbase", "x": 1, "y": 1, "owner": 1 } ],
         "squadrons": [ { "team": 1, "base": "Nope", "size": 4 } ] })"),
                  std::runtime_error);
     // objective owner references an unnamed slot
-    EXPECT_THROW(ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+    EXPECT_THROW((void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
         "teams": [ { "slot": 1, "name": "B" }, { "slot": 6, "name": "R" } ],
         "objectives": [ { "name": "A", "kind": "city", "x": 1, "y": 1, "owner": 4 } ] })"),
                  std::runtime_error);
     // link index out of range
-    EXPECT_THROW(ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+    EXPECT_THROW((void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
         "teams": [ { "slot": 1, "name": "B" }, { "slot": 6, "name": "R" } ],
         "objectives": [ { "name": "A", "kind": "city", "x": 1, "y": 1 } ],
         "links": [ [0, 5] ] })"),
                  std::runtime_error);
     // duplicate objective name
-    EXPECT_THROW(ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+    EXPECT_THROW((void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
         "teams": [ { "slot": 1, "name": "B" }, { "slot": 6, "name": "R" } ],
         "objectives": [ { "name": "A", "kind": "city", "x": 1, "y": 1 },
                         { "name": "A", "kind": "town", "x": 2, "y": 2 } ] })"),
                  std::runtime_error);
     // objective outside the theater grid
-    EXPECT_THROW(ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+    EXPECT_THROW((void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
         "theater": { "size_x": 64, "size_y": 64 },
         "teams": [ { "slot": 1, "name": "B" }, { "slot": 6, "name": "R" } ],
         "objectives": [ { "name": "A", "kind": "city", "x": 100, "y": 1 } ] })"),
                  std::runtime_error);
     // a lone team is not a war
-    EXPECT_THROW(ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+    EXPECT_THROW((void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
         "teams": [ { "slot": 1, "name": "B" } ],
         "objectives": [ { "name": "A", "kind": "city", "x": 1, "y": 1 } ] })"),
                  std::runtime_error);
     // camp map overflows the .cmp's i16 CampMapSize
-    EXPECT_THROW(ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+    EXPECT_THROW((void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
         "theater": { "size_x": 1024, "size_y": 1024 },
         "teams": [ { "slot": 1, "name": "B" }, { "slot": 6, "name": "R" } ],
         "objectives": [ { "name": "A", "kind": "city", "x": 1, "y": 1 } ] })"),
                  std::runtime_error);
     // a self-war is nonsense
-    EXPECT_THROW(ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
+    EXPECT_THROW((void)ScenarioPack::parse(R"({ "pack": 1, "name": "t", "seed": 1,
         "teams": [ { "slot": 1, "name": "B" }, { "slot": 6, "name": "R" } ],
         "relations": [ { "a": 1, "b": 1, "stance": "war" } ],
         "objectives": [ { "name": "A", "kind": "city", "x": 1, "y": 1 } ] })"),

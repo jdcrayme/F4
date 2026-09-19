@@ -109,7 +109,6 @@ void HexInspector::draw() {
     if (model_.loaded()) {
         // Splitter-style horizontal layout: annotations panel on left,
         // hex dump on right.
-        const float left_width = 280.0f;
         draw_annotations_panel();
         ImGui::SameLine();
         draw_hex_dump();
@@ -227,10 +226,8 @@ void HexInspector::draw_hex_dump() {
     const float offset_w = 8 * char_w + 8;
     const float hex_byte_w = 2 * char_w + 2;     // "XX "
     const float hex_section_w = bytes_per_row_ * hex_byte_w + 8;
-    const float ascii_section_w = bytes_per_row_ * char_w + 8;
 
     const std::size_t total_rows = (model_.size() + bytes_per_row_ - 1) / bytes_per_row_;
-    const float content_h = total_rows * line_h;
 
     // Use ImGui's clipper to only render visible rows (handles huge files).
     ImGuiListClipper clipper;

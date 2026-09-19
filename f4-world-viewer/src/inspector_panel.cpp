@@ -63,7 +63,7 @@ void ViewerApp::draw_inspector_window() {
     // old Inspector (480 vs 310) to comfortably hold the 2D layout
     // canvas and the 3D viewport side-by-side with the controls.
     // Visibility: show_inspector (Windows menu / close button).
-    ImGui::SetNextWindowPos(ImVec2(impl_->window_w - 520, 30),
+    ImGui::SetNextWindowPos(ImVec2(static_cast<float>(impl_->window_w - 520), 30.0f),
                             ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(500, 540), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Inspector", &impl_->show_inspector,

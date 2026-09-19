@@ -521,6 +521,10 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     // Campaign's own pass-through).
     ladder_cfg.airbase_scheduling = opts.airbase_scheduling;
     session->airbase_scheduling_ = opts.airbase_scheduling;
+    // CAMP-DOM-5: the naval tasking wrap (one flag, the same opt-in
+    // contract; the ATM inherits it at construction — the Campaign's
+    // own pass-through).
+    ladder_cfg.naval_tasking = opts.naval_tasking;
     session->ladder_ = std::make_unique<f4::campaign::Campaign>(
         static_cast<const f4::world::ICampaignSource&>(
             session->adapters_->campaign),
@@ -1125,7 +1129,8 @@ void CampaignSession::emit_cadence_events_() {
         e.kind = api::CampaignEvent::Kind::TaskingCycle;
         e.tasking_cycle.t = ladder_->clock();
         e.tasking_cycle.cycles = static_cast<int>(fired);
-        e.tasking_cycle.next_tasking_sec = ladder_->seconds_to_next_cycle();
+        e.tasking_cycle.next_tasking_sec =
+            static_cast<int>(ladder_->seconds_to_next_cycle());
         e.tasking_cycle.intents =
             static_cast<int>(ladder_->intents().size());
         sim_->bus().publish(e);

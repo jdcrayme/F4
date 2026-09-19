@@ -77,7 +77,7 @@ TEST(ZipReader, ReadsStoredEntries) {
               (std::vector<uint8_t>{'a', 'l', 'p', 'h', 'a'}));
     EXPECT_EQ(z.read("b/c.bin"),
               (std::vector<uint8_t>{0x01, 0x02, 0x03}));
-    EXPECT_THROW(z.read("missing.txt"), std::runtime_error);
+    EXPECT_THROW((void)z.read("missing.txt"), std::runtime_error);
 }
 
 TEST(ZipReader, RejectsNonZip) {

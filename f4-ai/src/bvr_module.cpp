@@ -333,7 +333,7 @@ double BVRModule::pursuit_heading_rad(
 }
 
 AirSteering::Input BVRModule::steering_input(
-    const flight::IAircraftState& s) const noexcept {
+    [[maybe_unused]] const flight::IAircraftState& s) const noexcept {
     AirSteering::Input in;
     in.position = current_position_;
     in.heading_rad = current_heading_rad_;

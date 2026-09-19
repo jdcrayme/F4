@@ -171,6 +171,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -368,6 +369,18 @@ struct AtmConfig {
     /// instead of re-picking the leader every cycle (the rotation
     /// pressure the reference's own docs name). DEFAULT OFF.
     bool rating_decay = false;
+
+    /// DOM-5 — the naval tasking wrap: the anti-ship family
+    /// (AMIS_ASHIP) draws its target from a ranked pool of the
+    /// enemy's TASK FORCES (the wire's domain-4 units — the pool
+    /// rank_taskforce_targets owns) instead of staying target-less,
+    /// the targeted filings route like strikes (the builder resolves
+    /// the task force's grid position), and the per-target filing
+    /// books ride the taskforces query. DEFAULT OFF — the golden
+    /// identity: the naval ranking walk never runs, ASHIP requests
+    /// stay target-less, every pinned test unchanged. The Campaign's
+    /// own naval_tasking flag arms it (one source of truth).
+    bool naval_tasking = false;
 };
 
 // CAMP-ATM-1 — the ACTION system's type byte (the wire AtmRequestState
@@ -439,6 +452,15 @@ struct AtmStats {
     int slot_overflows = 0;       ///< bookings the horizon refused
     int slot_releases = 0;        ///< future slots scrubbed flights gave
                                   ///< back
+    // DOM-5 — the naval counters (deterministic; the summary emits
+    // them only when the arm is on — the disarmed block stays
+    // byte-identical).
+    int naval_requests = 0;       ///< anti-ship requests GIVEN a task
+                                  ///< force target (the pool was non-
+                                  ///< empty; rotation picked one)
+    int naval_filings = 0;        ///< flights PUBLISHED at a task force
+                                  ///< (compose; the per-target books
+                                  ///< split it — naval_filings_)
 };
 
 /// DOM-4 — why a schedule denied a flight (the slot_denied ledger
@@ -673,6 +695,23 @@ public:
         return schedules_;
     }
 
+    /// DOM-5 — the naval filing books, per target task force VU (this
+    /// run's published anti-ship flights at it — the taskforces
+    /// query's face; map order = VU ascending, deterministic).
+    [[nodiscard]] const std::map<std::uint32_t, int>&
+    naval_filings() const noexcept {
+        return naval_filings_;
+    }
+
+    /// DOM-5 — book one published anti-ship flight at its task force
+    /// (compose's per-flight call; the total rides AtmStats::
+    /// naval_filings, the per-target split rides the map). No-op
+    /// guard-free: only called armed with a nonzero target.
+    void book_naval_filing(std::uint32_t target_vu) {
+        ++stats_.naval_filings;
+        ++naval_filings_[target_vu];
+    }
+
     /// DOM-4 — the denials queued since the last drain (the Campaign
     /// books them into the ledger's slot_denial log after the cycle;
     /// the slot_denied event family rides that log). Empty when the
@@ -795,6 +834,14 @@ private:
     [[nodiscard]] std::uint32_t
     nearest_own_objective_(std::uint8_t team, int x, int y) const;
 
+    /// DOM-5 — may a target VU resolve through the UNITS source? The
+    /// resolve_target_xy allow_units term: the interdiction arm OR the
+    /// naval arm (a task-force target is a unit target). Both off =
+    /// the pre-G2 walk byte-identical (objectives only).
+    [[nodiscard]] bool allow_unit_targets() const noexcept {
+        return cfg_.unit_strike || cfg_.naval_tasking;
+    }
+
     /// RequestEnemyMission: file a defender BARCAP over `target_vu`
     /// (the objective a just-built strike package threatens) for the
     /// other belligerent's NEXT generate_requests — the pending queue
@@ -890,6 +937,15 @@ private:
     /// list (the unit-target family's own spread, decoupled from the
     /// objective rotation).
     std::array<int, 8> unit_target_cursor_{};
+    /// DOM-5 — per-team rotation cursor over the ranked enemy TASK
+    /// FORCE list (the naval family's own spread, decoupled from the
+    /// objective and battalion rotations).
+    std::array<int, 8> naval_target_cursor_{};
+    /// DOM-5 — the naval filing books, per target task force VU (this
+    /// run's published anti-ship flights at it — the taskforces
+    /// query's face; wire-order insertion via std::map, the house
+    /// determinism rule).
+    std::map<std::uint32_t, int> naval_filings_{};
     /// P7 — per-team rotation cursor over the ranked OWN objective
     /// list (the CAP family's station spread).
     std::array<int, 8> station_cursor_{};

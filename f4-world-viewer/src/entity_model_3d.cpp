@@ -72,8 +72,8 @@ struct ModelPlacement {
     const f4::anim::AnimValues* anim = nullptr;
 };
 
-constexpr float RT_W = 800;   // must match ground_layout_3d.cpp (the
-constexpr float RT_H = 600;   // RenderTexture is shared)
+constexpr int RT_W = 800;   // must match ground_layout_3d.cpp (the
+constexpr int RT_H = 600;   // RenderTexture is shared)
 
 constexpr Color BG_COLOR = {22, 24, 30, 255};
 constexpr Color GRID_COLOR = {50, 54, 62, 255};

@@ -199,6 +199,20 @@ target_compile_definitions(test_campaign_scheduling_session PRIVATE
 )
 add_dependencies(test_campaign_scheduling_session mission_profiles_fixture)
 
+# DOM-5 — the naval wrap's sim-side gates: the taskforces query serves
+# the wire's own rows with the armed run's filing books, the filings
+# ride the mission_filed stream one-for-one, the golden identity with
+# the arm off (the same rows, the honest zeros), and the armed run's
+# determinism pin.
+f4_simulation_add_test(test_campaign_naval_session test_campaign_naval_session.cpp)
+target_compile_definitions(test_campaign_naval_session PRIVATE
+    F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
+add_dependencies(test_campaign_naval_session mission_profiles_fixture)
+
 # P7 — the strategy layer's sim-side integration: the station contract
 # ride (route → plan → brain), the post-arm RoE gates, and the
 # strategy-armed session (stationed CAPs spawn with racetrack plans;

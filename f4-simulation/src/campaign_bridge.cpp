@@ -608,7 +608,7 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
             EntityHandle(fp->squadron, &world), ct);
     }
     if (vis_type_index <= 0) {
-        vis_type_index = scenario_aircraft.vis_type_index;
+        vis_type_index = static_cast<std::int16_t>(scenario_aircraft.vis_type_index);
     }
 
     // Compose the aircraft entity: Transform + FM + VisualModel + Brain.
@@ -737,9 +737,11 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
         //    (the CAMPAIGN vocabulary — the sim's blue/red/green string
         //    above is a different thing entirely).
         auto& origin = h.add<CampaignOriginComponent>();
-        origin.flight_vu = entity_vu_id(world, flight_entity);
+        origin.flight_vu =
+            static_cast<std::uint32_t>(entity_vu_id(world, flight_entity));
         origin.squadron_vu = (fp->squadron.value != 0)
-            ? entity_vu_id(world, fp->squadron) : 0;
+            ? static_cast<std::uint32_t>(entity_vu_id(world, fp->squadron))
+            : 0;
         origin.home_airbase_vu = home_airbase_vu;
         origin.team_slot = owner;
         origin.callsign_id = fp->callsign_id;
@@ -1369,7 +1371,7 @@ spawn_aircraft_for_intent(
             EntityHandle(squadron_entity, &world), ct);
     }
     if (vis_type_index <= 0) {
-        vis_type_index = scenario_aircraft.vis_type_index;
+        vis_type_index = static_cast<std::int16_t>(scenario_aircraft.vis_type_index);
     }
 
     // Compose the aircraft — the same component set the flight path
@@ -1889,7 +1891,7 @@ spawn_aircraft_from_squadrons(f4::entities::EntityWorld& world,
         //    resolve_unit_aircraft_vis; F-16C vehicle 273 → vis 1052).
         int16_t vis_type_index = resolve_unit_aircraft_vis(sq_h, ct);
         if (vis_type_index <= 0) {
-            vis_type_index = scenario_aircraft.vis_type_index;
+            vis_type_index = static_cast<std::int16_t>(scenario_aircraft.vis_type_index);
         }
 
         // 2. Count active Flights — only spawn the un-tasked remainder.

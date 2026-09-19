@@ -236,7 +236,8 @@ void TakeoffModule::initialize(
 // Per-tick update
 // ============================================================================
 
-AIControlOutput TakeoffModule::update(double dt, const flight::IAircraftState* state)
+AIControlOutput TakeoffModule::update([[maybe_unused]] double dt,
+                                      const flight::IAircraftState* state)
 {
     // Cache aircraft state for control methods.
     cache_aircraft_state(state);

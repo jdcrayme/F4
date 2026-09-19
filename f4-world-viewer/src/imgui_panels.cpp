@@ -500,8 +500,8 @@ void ViewerApp::draw_imgui() {
     draw_inspector_window();
 
     // --- Status bar (bottom) ---
-    ImGui::SetNextWindowPos(ImVec2(0, impl_->window_h - 24));
-    ImGui::SetNextWindowSize(ImVec2(impl_->window_w, 24));
+    ImGui::SetNextWindowPos(ImVec2(0.0f, static_cast<float>(impl_->window_h - 24)));
+    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(impl_->window_w), 24.0f));
     if (ImGui::Begin("##status", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar |

@@ -15,6 +15,7 @@
 #include <f4/campaign/api/protocol.hpp>
 #include <f4/campaign/threat_map.hpp>  // CAMP-HOST-3: kThreatMapRatio echo
 #include <f4/geo/f4_geo.hpp>
+#include <f4/world_types/class_table.hpp>  // CAMP-DOM-5: subtype names
 
 #include <algorithm>
 #include <cmath>
@@ -37,7 +38,7 @@ namespace {
            name == "tasking" || name == "books" ||
            name == "objectives" || name == "threat" ||
            name == "verdict" || name == "squadrons" ||
-           name == "airfields";
+           name == "airfields" || name == "taskforces";
 }
 
 // The session's command-write outcome → the contract's typed refusal
@@ -528,6 +529,48 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
         return res;
     }
 
+    if (spec.name == "taskforces") {
+        // CAMP-DOM-5: the naval face — one row per TASK FORCE in the
+        // WORLD's own wire state (the save's domain-4 truth — present
+        // whether or not the naval arm is on, exactly the objectives
+        // row's rule: the wire owns the facts), in WIRE order,
+        // overlaid with this run's naval filing books (the ATM's
+        // per-target counts — 0 when the arm is off or nothing filed;
+        // no pipeline = no books, the honest zeros). spec.team filters
+        // on the owner slot (the objectives row's rule).
+        std::vector<api::TaskForceView> rows;
+        const auto* filings = session_->campaign().atm_naval_filings();
+        for (const auto& u : session_->world_state().units) {
+            if (u.unit_class != f4::entities::UnitClass::TaskForce)
+                continue;
+            if (spec.team >= 0 && u.owner != spec.team) continue;
+            api::TaskForceView v;
+            v.id_creator = u.id_creator;
+            v.id_num = u.id_num;
+            v.team = u.owner;
+            v.unit_subtype = u.unit_subtype;
+            v.subtype_name =
+                f4::world_types::unit_subtype_name(u.domain,
+                                                   u.unit_subtype);
+            v.x = u.x;
+            v.y = u.y;
+            v.dest_x = u.dest_x;
+            v.dest_y = u.dest_y;
+            v.supply = u.supply;
+            if (filings != nullptr) {
+                const auto it = filings->find(u.id_num);
+                if (it != filings->end()) v.filings = it->second;
+            }
+            rows.push_back(std::move(v));
+            if (spec.limit > 0 && rows.size() >= spec.limit) break;
+        }
+        f4::json::Writer w;
+        api::encode(w, rows);
+        res.ok = true;
+        res.data_json = std::move(w).str();
+        return res;
+    }
+
     // objectives
     const auto& objectives = session_->world_state().objectives;
     // CAMP-DOM-2: the LIVE objective logistics overlay — when a ground
@@ -570,7 +613,8 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
         v.supply = g ? g->supply : o.supply;
         v.fuel = g ? g->fuel : o.fuel;
         v.losses = g ? g->losses : o.losses;
-        v.last_repair = g ? g->last_repair : o.last_repair;
+        v.last_repair =
+            static_cast<std::int32_t>(g ? g->last_repair : o.last_repair);
         v.has_radar = o.has_radar;
         v.radar_range_km = o.radar_range_km;
         v.fstatus = g ? g->fstatus : o.fstatus;

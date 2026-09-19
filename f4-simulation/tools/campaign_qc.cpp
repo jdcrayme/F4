@@ -319,6 +319,11 @@ struct Args {
     // the denial books, and the slot-anchored ops gate. False = the
     // golden identity (the campaign-start anchor, the silent overflow).
     bool airbase_scheduling = false;
+    // CAMP-DOM-5: the naval tasking wrap (--naval-tasking) — the
+    // anti-ship family files at the enemy's task forces (the ranked
+    // pool), routes like strikes, books per target. False = the golden
+    // identity (anti-ship requests stay target-less).
+    bool naval_tasking = false;
     // Real-data tier: the wcd2json export folded over the built-in table.
     std::string weapon_data;
     // FID-6 — the acceleration certificate (--accel <x>): the tiered
@@ -424,6 +429,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--pilot-assignment") a.pilot_assignment = true;
         else if (k == "--rating-decay") a.rating_decay = true;
         else if (k == "--airbase-scheduling") a.airbase_scheduling = true;
+        else if (k == "--naval-tasking") a.naval_tasking = true;
         else if (k == "--synthesize-airbases") a.synthesize_airbases = true;
         else if (k == "--weapon-data") a.weapon_data = next();
         else if (k == "--ground-update-sec")
@@ -613,6 +619,7 @@ int run_war(const Args& args) {
     hopts.session.pilot_assignment = args.pilot_assignment;
     hopts.session.rating_decay = args.rating_decay;
     hopts.session.airbase_scheduling = args.airbase_scheduling;
+    hopts.session.naval_tasking = args.naval_tasking;
     hopts.session.weapon_data_path = args.weapon_data;
     // FID-6: the accel certificate FORCES the tiered policy — the war
     // runs the game's own way (aggregates until observed), which is
@@ -665,6 +672,9 @@ int run_war(const Args& args) {
     std::fprintf(stderr,
                  "  scheduling:   airbase-scheduling=%s\n",
                  hopts.session.airbase_scheduling ? "on" : "off");
+    std::fprintf(stderr,
+                 "  naval:        naval-tasking=%s\n",
+                 hopts.session.naval_tasking ? "on" : "off");
 
     std::string err;
     auto harness = CampaignWarHarness::create(hopts, &err);
@@ -1598,6 +1608,9 @@ int main(int argc, char** argv) {
         // CAMP-DOM-4: the airbase-scheduling depth arm (the same
         // opt-in contract the session mode wires).
         ladder_cfg.airbase_scheduling = args.airbase_scheduling;
+        // CAMP-DOM-5: the naval tasking wrap (the same opt-in contract
+        // the session mode wires).
+        ladder_cfg.naval_tasking = args.naval_tasking;
         // P7: the strategy layer — station targeting, support
         // filings, enemy BARCAP requests (opt-in, the same contract
         // as the pipeline itself).
@@ -1738,6 +1751,11 @@ int main(int argc, char** argv) {
                             "releases=%d\n",
                             atm->schedule_denials, atm->slot_overflows,
                             atm->slot_releases);
+            }
+            // CAMP-DOM-5: the naval counters, printed when armed.
+            if (args.naval_tasking) {
+                std::printf("naval: requests=%d filings=%d\n",
+                            atm->naval_requests, atm->naval_filings);
             }
         }
         std::printf("threat_map: ad_units=%d threatened_cells=%d\n",

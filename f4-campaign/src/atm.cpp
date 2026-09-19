@@ -6,6 +6,7 @@
 
 #include <f4/campaign/atm.hpp>
 #include <f4/campaign/ground_war.hpp>    // G2: the shared FLOT + ranking
+#include <f4/campaign/naval_tasking.hpp>  // DOM-5: the naval target pool
 #include <f4/campaign/route_builder.hpp>   // profile_flies_delivery_route
 
 #include "squadron_snapshot.hpp"
@@ -629,6 +630,18 @@ AirTaskingManager::generate_requests(std::uint8_t team, CampaignTime now) {
         }
     }
 
+    // DOM-5 — the naval family's target list: enemy TASK FORCES
+    // (domain 4, the wire's own naval aggregate) ranked by distance to
+    // the requesting team's own-held objectives (the fleet off the
+    // coast is struck first), wire-order ties. Computed only when the
+    // naval arm is on (the golden identity otherwise — the ranking
+    // walk never runs, the anti-ship requests never change shape).
+    std::vector<std::uint32_t> naval_targets;
+    if (cfg_.naval_tasking && objectives_ != nullptr) {
+        naval_targets = f4::campaign::rank_taskforce_targets(
+            units_, teams_, *objectives_, team);
+    }
+
     // P7 — the CAP family's station pool: the team's own objectives,
     // value-ranked (the defensive CAP orbit flies over what the team
     // values — the reference's strategy layer files its BARCAPs
@@ -711,6 +724,25 @@ AirTaskingManager::generate_requests(std::uint8_t team, CampaignTime now) {
             unit_target_cursor_[team] =
                 (unit_target_cursor_[team] + 1) %
                 static_cast<int>(unit_targets.size());
+        }
+
+        // DOM-5 — the naval family (AMIS_ASHIP): the anti-ship mission
+        // rotates across the ranked enemy task forces. Off (or no
+        // ranked task forces): target-less, exactly the pre-DOM-5
+        // shape (ASW's pool is the honest empty set — no submarines on
+        // the wire — and TANK stays target-less, the ground pool's
+        // business). A separate cursor — the families' spreads stay
+        // decoupled (one naval package per cycle walks the coast).
+        if (cfg_.naval_tasking && mission_is_naval_strike(req.mission)
+                && !naval_targets.empty()) {
+            const auto idx = static_cast<std::size_t>(
+                                 naval_target_cursor_[team]) %
+                             naval_targets.size();
+            req.target_id = naval_targets[idx];
+            naval_target_cursor_[team] =
+                (naval_target_cursor_[team] + 1) %
+                static_cast<int>(naval_targets.size());
+            ++stats_.naval_requests;
         }
 
         // P7 — the CAP family: TPROF_LOITER + WP_CAP profiles (BARCAP,
@@ -948,7 +980,8 @@ AirTaskingManager::compose_packages(
         if (threat_ != nullptr && objectives_ != nullptr &&
             req.target_id != 0) {
             int tx = 0, ty = 0;
-            if (resolve_target_xy(objectives_, units_, cfg_.unit_strike,
+            if (resolve_target_xy(objectives_, units_,
+                                  allow_unit_targets(),
                                   req.target_id, tx, ty)) {
                 const int ls = threat_->score(
                     tx, ty, alt_band_from_feet(profile.minalt * 100), team);
@@ -1190,7 +1223,7 @@ AirTaskingManager::find_best_air_(const MissionRequest& req,
     // source — objectives first, the loader's own order.
     int tx = 0, ty = 0;
     const bool have_target =
-        resolve_target_xy(objectives_, units_, cfg_.unit_strike,
+        resolve_target_xy(objectives_, units_, allow_unit_targets(),
                           req.target_id, tx, ty);
 
     const int sc = role_specialty_family(profile);
@@ -1380,8 +1413,8 @@ int AirTaskingManager::rating_(const SquadronState& sq,
 // PHASE 7 — TOT slot scheduling
 // ============================================================================
 
-CampaignTime AirTaskingManager::schedule_takeoff(FlightTasking& flight,
-                                                 CampaignTime now) {
+CampaignTime AirTaskingManager::schedule_takeoff(
+    FlightTasking& flight, [[maybe_unused]] CampaignTime now) {
     // Fresh schedule for bases the decoded list never carried (the
     // reference adds airbases lazily in DoCalculations the same way).
     AirbaseSchedule* sched = nullptr;
@@ -1834,7 +1867,7 @@ void AirTaskingManager::file_support_flight_(
     // The package's target area (the station pick measures against it).
     int px = 0, py = 0;
     const bool have_pkg = resolve_target_xy(
-        objectives_, units_, cfg_.unit_strike, main.target_vu, px, py);
+        objectives_, units_, allow_unit_targets(), main.target_vu, px, py);
 
     // The FILE half first (the share check needs the station): the
     // station is the own objective nearest the package target (the
@@ -1844,7 +1877,7 @@ void AirTaskingManager::file_support_flight_(
     int stx = 0, sty = 0;
     if (have_pkg) station = nearest_own_objective_(team, px, py);
     if (station == 0) return;
-    if (!resolve_target_xy(objectives_, units_, cfg_.unit_strike,
+    if (!resolve_target_xy(objectives_, units_, allow_unit_targets(),
                            station, stx, sty)) {
         return;   // unreachable — the station came from the objectives
     }
@@ -1867,7 +1900,7 @@ void AirTaskingManager::file_support_flight_(
             f.tot + static_cast<CampaignTime>(sprof.loitertime) * 60) {
             return false;
         }
-        if (!resolve_target_xy(objectives_, units_, cfg_.unit_strike,
+        if (!resolve_target_xy(objectives_, units_, allow_unit_targets(),
                                f.target_vu, sx, sy)) {
             return false;
         }

@@ -539,7 +539,7 @@ void ViewerApp::draw_canvas() {
                     ? Color{255, 215, 0,   255}
                     : Color{255, 215, 0,   150};
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
-                                static_cast<int>(ring_r), ring);
+                                ring_r, ring);
             }
             if (draw_labels) {
                 std::string label;
@@ -567,7 +567,7 @@ void ViewerApp::draw_canvas() {
             if (impl_->sel_kind == Impl::SelectionKind::Objective &&
                 impl_->sel_entity == eid) {
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
-                                static_cast<int>(base_size * 0.6f + 4),
+                                base_size * 0.6f + 4.0f,
                                 Color{255, 255, 0, 255});
             }
         }
@@ -620,7 +620,6 @@ void ViewerApp::draw_canvas() {
             auto h = impl_->handle(eid);
             auto* tr = h.get<f4::entities::TransformComponent>();
             auto* uc = h.get<f4::entities::UnitCoreComponent>();
-            auto* pb = h.get<f4::entities::PropertyBag>();
             if (!tr || !uc) continue;
 
             const float ux = impl_->grid_x(tr), uy = impl_->grid_y(tr);
@@ -746,7 +745,7 @@ void ViewerApp::draw_canvas() {
             // Selection outline
             if (unit_selected) {
                 DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
-                                static_cast<int>(s * 0.6f + 4),
+                                s * 0.6f + 4.0f,
                                 Color{255, 255, 0, 255});
             }
         }
@@ -811,7 +810,7 @@ void ViewerApp::draw_canvas() {
                            Color{xcol, xcol, xcol, 150});
                 continue;
             }
-            RlColor c = color_for_owner(t.team);
+            RlColor c = color_for_owner(static_cast<std::uint8_t>(t.team));
             if (impl_->team_filter != 0xFF && t.team != impl_->team_filter) {
                 c.r = static_cast<unsigned char>(c.r * 0.3f);
                 c.g = static_cast<unsigned char>(c.g * 0.3f);
@@ -837,7 +836,7 @@ void ViewerApp::draw_canvas() {
             if (sel_vu != 0 && sel_vu == t.vu) {
                 DrawCircleLines(static_cast<int>(p.x),
                                 static_cast<int>(p.y),
-                                static_cast<int>(s * 0.6f + 4),
+                                s * 0.6f + 4.0f,
                                 Color{255, 255, 0, 255});
             }
         }
@@ -943,7 +942,7 @@ void ViewerApp::draw_canvas() {
             if (selected_is_live && impl_->sel_entity == eid) {
                 DrawCircleLines(static_cast<int>(p.x),
                                 static_cast<int>(p.y),
-                                static_cast<int>(s * 0.6f + 4),
+                                s * 0.6f + 4.0f,
                                 Color{255, 255, 0, 255});
             }
         }
@@ -997,7 +996,7 @@ void ViewerApp::draw_canvas() {
             if (selected_is_live && impl_->sel_entity == eid) {
                 DrawCircleLines(static_cast<int>(p.x),
                                 static_cast<int>(p.y),
-                                static_cast<int>(dot_r + 4),
+                                dot_r + 4.0f,
                                 Color{255, 255, 0, 255});
             }
         }
@@ -1419,7 +1418,6 @@ void ViewerApp::draw_canvas() {
         auto h = impl_->handle(impl_->sel_entity);
         auto* tr = h.get<f4::entities::TransformComponent>();
         auto* gl = h.get<f4::entities::GroundLayoutComponent>();
-        auto* fe = h.get <f4::entities::FeatureSetComponent>();
         if (tr && gl && !gl->layouts.empty()) {
             constexpr float FT_PER_GRID = 1024.0f;
             const float ox = impl_->grid_x(tr), oy = impl_->grid_y(tr);
@@ -1684,8 +1682,10 @@ void ViewerApp::draw_canvas() {
         const Color shadow = { 0, 0, 0, 200 };
         const Color text = { 235, 235, 235, 230 };
         auto draw_text = [&](const char* buf, float px, float py, Color c) {
-            DrawText(buf, px + 1, py + 1, font_size, shadow);
-            DrawText(buf, px, py, font_size, c);
+            DrawText(buf, static_cast<int>(px) + 1, static_cast<int>(py) + 1,
+                     font_size, shadow);
+            DrawText(buf, static_cast<int>(px), static_cast<int>(py),
+                     font_size, c);
         };
 
         // Only draw labels when zoomed in enough to read them.

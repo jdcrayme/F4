@@ -665,16 +665,16 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
 
         // Grouped mode: record this translator as an ancestor.
         if (ctx.grouped) {
-            TaggedAncestor a;
-            a.type = node.type;
-            a.node_index = node_idx;
-            a.number = node.dof_number;
-            a.frame_translation = node.dof_translation;
-            a.dof_min = node.dof_min;
-            a.dof_max = node.dof_max;
-            a.dof_multiplier = node.dof_multiplier;
-            a.dof_flags = node.dof_flags;
-            ctx.chain.push_back(a);
+            TaggedAncestor ancestor;
+            ancestor.type = node.type;
+            ancestor.node_index = node_idx;
+            ancestor.number = node.dof_number;
+            ancestor.frame_translation = node.dof_translation;
+            ancestor.dof_min = node.dof_min;
+            ancestor.dof_max = node.dof_max;
+            ancestor.dof_multiplier = node.dof_multiplier;
+            ancestor.dof_flags = node.dof_flags;
+            ctx.chain.push_back(ancestor);
             pushed_chain = true;
         }
 
@@ -717,17 +717,17 @@ void walk_node(WalkContext& ctx, NodeIdx node_idx)
 
         // Grouped mode: record this scale node as an ancestor.
         if (ctx.grouped) {
-            TaggedAncestor a;
-            a.type = node.type;
-            a.node_index = node_idx;
-            a.number = node.dof_number;
-            a.frame_translation = node.dof_translation;
-            a.dof_min = node.dof_min;
-            a.dof_max = node.dof_max;
-            a.dof_multiplier = node.dof_multiplier;
-            a.dof_flags = node.dof_flags;
-            a.scale_target = node.scale;
-            ctx.chain.push_back(a);
+            TaggedAncestor ancestor;
+            ancestor.type = node.type;
+            ancestor.node_index = node_idx;
+            ancestor.number = node.dof_number;
+            ancestor.frame_translation = node.dof_translation;
+            ancestor.dof_min = node.dof_min;
+            ancestor.dof_max = node.dof_max;
+            ancestor.dof_multiplier = node.dof_multiplier;
+            ancestor.dof_flags = node.dof_flags;
+            ancestor.scale_target = node.scale;
+            ctx.chain.push_back(ancestor);
             pushed_chain = true;
         }
 

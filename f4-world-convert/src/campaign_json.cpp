@@ -203,7 +203,8 @@ int read_world_json_version(const std::string& world_json) {
     return 63;
 }
 
-CampaignHeader from_world_json_campaign(const std::string& world_json, int camp_version) {
+CampaignHeader from_world_json_campaign(
+    const std::string& world_json, [[maybe_unused]] int camp_version) {
     CampaignHeader h;
     // Version-gated fields: set the flags the encoder checks.
     // (The encoder reads camp_version, not h.* — we pass it through.)

@@ -153,7 +153,7 @@ TEST(CampaignJson, ReturnsDefaultVersionWhenAbsent) {
 
 TEST(CampaignJson, ThrowsWhenCampaignBlockAbsent) {
     std::string json = R"({"theater": "korea", "version": 63})";
-    EXPECT_THROW(from_world_json_campaign(json), std::runtime_error);
+    EXPECT_THROW((void)from_world_json_campaign(json), std::runtime_error);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

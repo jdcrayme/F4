@@ -94,7 +94,7 @@ void check_d3_class_table_bindings(const std::filesystem::path&,
 // check every node name against the <kind>:<id>[.<instance>] grammar,
 // and verify that nodes with f4 extras have a matching kind + id.
 void check_d5_node_tags(const std::filesystem::path& data_dir,
-                         const f4::assets::Manifest& manifest,
+                         [[maybe_unused]] const f4::assets::Manifest& manifest,
                          DoctorReport& out) {
     // Scan Models/ for .gltf files.
     auto models_dir = data_dir / "Models";

@@ -731,7 +731,7 @@ void Simulation::spawn_from_scenario_list() {
         //    Tranche 0d: vis_type IS the identity — the renderer resolves the
         //    mesh through its own model cache. No ModelDatabase involvement.
         auto& vis = h.add<VisualModelComponent>();
-        vis.vis_type = sc.vis_type_index;  // V-3DLIVE (identity)
+        vis.vis_type = static_cast<std::int16_t>(sc.vis_type_index);  // V-3DLIVE (identity)
         vis.active_lod = 0;  // highest detail
         // Ground-staged aircraft render with FreeFalcon's parked preset
         // (gear shown, doors/holes shown) — all-zero switch masks would
@@ -777,7 +777,6 @@ void Simulation::spawn_from_scenario_list() {
         if (aircraft_cfg_.geometry.area.value() > 0.0 &&
             !aircraft_cfg_.aero.clift.empty() &&
             aircraft_cfg_.aux.landingAOA.value() > 0.0) {
-            constexpr double K_STALL = 17.16;  // knots × sqrt(ft²/lb)
             const double W = aircraft_cfg_.geometry.emptyWeight.value()
                            + 0.5 * aircraft_cfg_.geometry.internalFuel.value();
             const double S = aircraft_cfg_.geometry.area.value();
@@ -786,7 +785,8 @@ void Simulation::spawn_from_scenario_list() {
                 f4::flight::to_degrees(aircraft_cfg_.aux.landingAOA));
             if (W > 0.0 && S > 0.0 && std::fabs(cl_land) > 0.1) {
                 const double ws = W / S;
-                const double vstall_land = K_STALL * std::sqrt(ws / std::fabs(cl_land));
+                const double vstall_land =
+                    f4::flight::K_STALL * std::sqrt(ws / std::fabs(cl_land));
                 const double vapp = 1.3 * vstall_land;
                 brain.landing().approach_speed_kts = std::clamp(vapp, 150.0, 220.0);
             }
@@ -1726,7 +1726,7 @@ void Simulation::spawn_airfield_features() {
         // V-3DLIVE: vis_type recorded for hosts that resolve meshes from
         // Tranche 0d: vis_type IS the identity — no ModelDatabase lookup.
         auto& vis = h.add<VisualModelComponent>();
-        vis.vis_type = sf.vis_type_index;
+        vis.vis_type = static_cast<std::int16_t>(sf.vis_type_index);
         vis.active_lod = 0;
 
         feature_entities_.push_back(h.id());
@@ -2152,7 +2152,7 @@ void Simulation::tick(double dt) {
                 anim_params.door_range_rad[i] = 90.0f * 0.017453292519943295f;
             }
             const auto gear_cmd = f4::anim::eval_gear(
-                s.aero.gearPos, nullptr, anim_params);
+                static_cast<float>(s.aero.gearPos), nullptr, anim_params);
             f4::anim::apply_gear_command(gear_cmd, vis->anim_values);
 
             // At either REST state the gear DOF angles return to the

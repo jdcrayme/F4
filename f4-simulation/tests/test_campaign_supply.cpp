@@ -298,11 +298,11 @@ TEST(CampaignSupply, RepairOffLeavesTheSeededDamage) {
     // The seeded damage is still the mirror's truth (the engine
     // seeded the face; nothing healed it).
     bool seeded_seen = false;
-    for (const auto& o : war->objectives()) {
-        if (o.owner != 2 && o.owner != 6) continue;
-        if (o.fstatus.empty()) continue;
+    for (const auto& obj : war->objectives()) {
+        if (obj.owner != 2 && obj.owner != 6) continue;
+        if (obj.fstatus.empty()) continue;
         seeded_seen = true;
-        EXPECT_EQ(o.fstatus[0] & 0x03, 3)
+        EXPECT_EQ(obj.fstatus[0] & 0x03, 3)
             << "an unrepaired objective still carries its damage";
         break;
     }

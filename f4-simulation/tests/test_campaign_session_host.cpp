@@ -1428,9 +1428,12 @@ TEST(CampaignHostParity, ThreatGridMatchesTheMap) {
     for (int cy = 0; cy < t.cells_y; cy += 7) {
         for (int cx = 0; cx < t.cells_x; cx += 7) {
             const auto i = static_cast<std::size_t>(cy) * t.cells_x + cx;
-            EXPECT_EQ(t.low[i], map.low_band_density(cx, cy, t.viewer_team));
+            EXPECT_EQ(t.low[i],
+                      map.low_band_density(
+                          cx, cy, static_cast<std::uint8_t>(t.viewer_team)));
             EXPECT_EQ(t.high[i],
-                      map.high_band_density(cx, cy, t.viewer_team));
+                      map.high_band_density(
+                          cx, cy, static_cast<std::uint8_t>(t.viewer_team)));
         }
     }
 }

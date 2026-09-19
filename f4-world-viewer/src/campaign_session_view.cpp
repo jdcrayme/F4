@@ -800,11 +800,12 @@ void ViewerApp::draw_campaign_session_view() {
                         }
                     }
                     ImGui::TableNextColumn();
-                    ImGui::TextUnformatted(team_name(t.team));
+                    ImGui::TextUnformatted(
+                        team_name(static_cast<std::uint8_t>(t.team)));
                     ImGui::TableNextColumn();
                     {
-                        const std::string mname(
-                            f4::campaign::mission_type_name(t.mission));
+                        const std::string mname(f4::campaign::mission_type_name(
+                            static_cast<std::uint8_t>(t.mission)));
                         ImGui::TextUnformatted(mname.c_str());
                     }
                     ImGui::TableNextColumn();

@@ -446,7 +446,8 @@ std::vector<double> newtonWeights(const Session& ses) {
     return v;
 }
 // Normalized max residual
-double residualMax(const Session& ses, const std::vector<double>& fx,
+double residualMax([[maybe_unused]] const Session& ses,
+                   const std::vector<double>& fx,
                    const std::vector<double>& x, const std::vector<double>& W) {
     double rmax = 0.0;
     for (std::size_t i = 0; i < x.size(); ++i)
@@ -1056,7 +1057,6 @@ std::unique_ptr<Session> makeSession(const f4::data::AircraftConfig& cfg,
 void verifyRun(const Session& ses, const std::vector<double>& x0,
                double seconds, const std::string& csv_path,
                double amp_fps = 25.0) {
-    const std::size_t n = x0.size();
     std::vector<double> x = x0;
     // Inject amp_fps of speed (a phugoid-energy perturbation).
     // Iterate the PACKER entries only: with the AI loop closed, x0 also

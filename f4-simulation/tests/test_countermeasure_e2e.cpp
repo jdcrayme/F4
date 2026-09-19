@@ -170,7 +170,7 @@ TEST(IrSeekerCards, ShippedDataCardDrivesTheChance) {
 
 TEST(IrSeekerCards, EmptyPathIsTheIdentityBadPathIsLoud) {
     EXPECT_TRUE(resolve_ir_seeker_data("").sensors.empty());
-    EXPECT_THROW(resolve_ir_seeker_data("/no/such/irstdata.json"),
+    EXPECT_THROW((void)resolve_ir_seeker_data("/no/such/irstdata.json"),
                  std::runtime_error);
 }
 
