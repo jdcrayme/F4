@@ -9,7 +9,7 @@
 function(f4_weapons_add_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-weapons)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-weapons" TIMEOUT 60)
 endfunction()
 
 f4_weapons_add_test(test_damage        test_damage.cpp)
@@ -25,4 +25,4 @@ add_executable(test_wcd_weapon_data test_wcd_weapon_data.cpp)
 target_link_libraries(test_wcd_weapon_data PRIVATE GTest::gtest_main f4-weapons)
 target_compile_definitions(test_wcd_weapon_data PRIVATE
     WCD_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-gtest_discover_tests(test_wcd_weapon_data)
+gtest_discover_tests(test_wcd_weapon_data PROPERTIES LABELS "f4-weapons" TIMEOUT 60)

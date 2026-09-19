@@ -12,7 +12,7 @@
 function(f4_sensors_add_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-sensors)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-sensors" TIMEOUT 60)
 endfunction()
 
 f4_sensors_add_test(test_detection     test_detection.cpp)

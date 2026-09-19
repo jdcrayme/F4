@@ -11,80 +11,12 @@
 // on the small war is the gate; medium/large/twinwars pin determinism
 // and the two-war-pair bed at compressed horizons.
 
-#include <f4/simulation/campaign_war_harness.hpp>
+#include "campaign_init_wars_helpers.hpp"
 
 #include <gtest/gtest.h>
 
-#include <cctype>
-#include <filesystem>
-#include <string>
-
 using namespace f4::simulation;
-
-namespace {
-
-std::filesystem::path generated_world(const char* name) {
-    return std::filesystem::path(F4_CAMPINIT_FIXTURES_DIR) /
-           (std::string("campinit_") + name + ".world.json");
-}
-std::filesystem::path class_table() {
-    return std::filesystem::path(F4_SOURCE_FIXTURES_DIR) / "falcon4.ct.json";
-}
-std::filesystem::path f16_config() {
-    return std::filesystem::path(F4_GENERATED_FIXTURES_DIR) / "f16.json";
-}
-
-bool fixtures_ready() {
-    return std::filesystem::exists(f16_config()) &&
-           std::filesystem::exists(generated_world("small"));
-}
-
-// The generated-war rig: the REAL tasking pipeline (the generated
-// teams carry the stock profile and their ATM airbase rows), the
-// campaign's own default tasking cadence, ground war armed (the packs
-// carry battalions), tiered fidelity for the long horizons.
-WarHarnessOptions make_opts(const char* world, std::int64_t horizon_sec,
-                            double sample_sec) {
-    WarHarnessOptions o;
-    o.session.world_json = generated_world(world);
-    o.session.class_table = class_table();
-    o.session.aircraft_config = f16_config();
-    o.session.mission_profiles = F4_MISSION_PROFILES_JSON;
-    o.session.tasking_cycle_sec = 1800;
-    o.session.atm_pipeline = true;
-    o.session.ground_war = true;
-    o.session.fidelity_policy = FidelityPolicy::Tiered;
-    o.session.max_flights = 24;
-    o.horizon_sec = horizon_sec;
-    o.sample_sec = sample_sec;
-    o.runs = 2;
-    return o;
-}
-
-bool is_hex_32(const std::string& s) {
-    if (s.size() != 32) return false;
-    for (const char c : s) {
-        if (!std::isdigit(static_cast<unsigned char>(c)) &&
-            (c < 'a' || c > 'f')) {
-            return false;
-        }
-    }
-    return true;
-}
-
-void expect_green(const WarReport& r) {
-    const WarVerdict& v = r.verdict;
-    EXPECT_TRUE(v.drew_aircraft) << "a generated war must draw aircraft";
-    EXPECT_TRUE(v.routes_built);
-    EXPECT_TRUE(v.materialized);
-    EXPECT_TRUE(v.packages_built);
-    EXPECT_TRUE(v.deterministic);
-    EXPECT_TRUE(v.ledger_consistent) << v.ledger_drift;
-    EXPECT_TRUE(v.entities_bounded) << v.entity_leak;
-    EXPECT_TRUE(v.war_alive) << v.war_stall;
-}
-
-} // namespace
+using namespace f4_test;  // the shared helpers (make_opts, expect_green, ...)
 
 // ── THE gate: the C5 24-hour harness passes on a generated save ─────────
 

@@ -11,10 +11,21 @@ cmake_minimum_required(VERSION 3.20)
 # f4-ai/tests/CMakeLists.txt and every other f4-* tests dir.
 
 function(f4_simulation_add_test name source)
+    # Tier 2.2: every f4-simulation test gets a label by default so
+    # `ctest -L f4-simulation` / `ctest -LE slow` work. Pass LABELS/TIMEOUT
+    # to override for the slow harness binaries (see test_campaign_init_wars
+    # + test_campaign_verdict below).
+    cmake_parse_arguments(ARG "" "TIMEOUT" "LABELS" ${ARGN})
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-simulation)
     target_compile_features(${name} PRIVATE cxx_std_20)
-    gtest_discover_tests(${name})
+    if(NOT ARG_LABELS)
+        set(ARG_LABELS "f4-simulation")
+    endif()
+    if(NOT ARG_TIMEOUT)
+        set(ARG_TIMEOUT 60)
+    endif()
+    gtest_discover_tests(${name} PROPERTIES LABELS "${ARG_LABELS}" TIMEOUT ${ARG_TIMEOUT})
 endfunction()
 
 f4_simulation_add_test(test_weather_system          test_weather_system.cpp)
@@ -139,7 +150,8 @@ add_dependencies(test_campaign_war_harness mission_profiles_fixture)
 # harness runs on exactly the bytes the Task-70 encoder stack produced.
 # The 24-hour run on the small war is the acceptance gate; medium /
 # large / twinwars pin determinism and the two-war-pair bed.
-f4_simulation_add_test(test_campaign_init_wars test_campaign_init_wars.cpp)
+f4_simulation_add_test(test_campaign_init_wars test_campaign_init_wars.cpp
+    LABELS slow TIMEOUT 900)  # Tier 3.1: 170 s real-time — run via `ctest -L slow`
 target_compile_definitions(test_campaign_init_wars PRIVATE
     F4_CAMPINIT_FIXTURES_DIR="${F4_CAMPINIT_FIXTURES_DIR}"
     F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
@@ -148,10 +160,27 @@ target_compile_definitions(test_campaign_init_wars PRIVATE
 )
 add_dependencies(test_campaign_init_wars campinit_fixtures mission_profiles_fixture)
 
+# Tier 3.1 — the FAST tier counterparts: the same 4 wars at 60x accel.
+# Same fixtures, same generated worlds, same expect_green pins — but
+# WarHarnessOptions::speed = 60.0 (the acceptance preset from FID_OPT /
+# FIDELITY_TIERS), so the 170 s / 25 s / 23 s / 25 s real-time tests
+# become ~3 s each. Run via `ctest -LE slow` (the default fast tier);
+# the nightly 1x variants above run via `ctest -L slow`.
+f4_simulation_add_test(test_campaign_init_wars_fast test_campaign_init_wars_fast.cpp
+    LABEL "f4-simulation" TIMEOUT 120)  # 4 wars at 60x accel (~5s each, 120s headroom under -j4 load)
+target_compile_definitions(test_campaign_init_wars_fast PRIVATE
+    F4_CAMPINIT_FIXTURES_DIR="${F4_CAMPINIT_FIXTURES_DIR}"
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
+add_dependencies(test_campaign_init_wars_fast campinit_fixtures mission_profiles_fixture)
+
 # DOM-1 — the verdict's war gates: the generated small war over the
 # HOST (ground war armed) — a capture raises the verdict event, and the
 # query answers with the stream's last coarse state.
-f4_simulation_add_test(test_campaign_verdict test_campaign_verdict.cpp)
+f4_simulation_add_test(test_campaign_verdict test_campaign_verdict.cpp
+    LABELS slow TIMEOUT 300)  # 56 s real-time — no speed knob (EngineSessionHost path)
 target_compile_definitions(test_campaign_verdict PRIVATE
     F4_CAMPINIT_FIXTURES_DIR="${F4_CAMPINIT_FIXTURES_DIR}"
     F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"

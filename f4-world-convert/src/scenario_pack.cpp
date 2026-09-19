@@ -378,7 +378,7 @@ ScenarioPack ScenarioPack::parse(const std::string& json) {
                         if (sk == "size") { s.size = read_int_field(r); return true; }
                         if (sk == "skill") { s.skill = read_int_field(r); return true; }
                         if (sk == "specialty") { s.specialty = r.read_string();
-                                                 squadron_specialty_from_word(s.specialty); return true; }
+                                                 (void)squadron_specialty_from_word(s.specialty); return true; }
                         if (sk == "entity_type") { s.entity_type = read_int_field(r); return true; }
                         return false;
                     });
@@ -400,7 +400,7 @@ ScenarioPack ScenarioPack::parse(const std::string& json) {
                         if (bk == "team") { b.team = read_int_field(r); return true; }
                         if (bk == "at") { b.at = r.read_string(); return true; }
                         if (bk == "kind") { b.kind = r.read_string();
-                                            battalion_subtype_from_kind(b.kind); return true; }
+                                            (void)battalion_subtype_from_kind(b.kind); return true; }
                         if (bk == "groups") { b.groups = read_int_field(r); return true; }
                         if (bk == "entity_type") { b.entity_type = read_int_field(r); return true; }
                         return false;

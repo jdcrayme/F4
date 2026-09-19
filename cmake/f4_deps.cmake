@@ -9,6 +9,17 @@
 
 include(FetchContent)
 
+# ── Tier 1 speedup: cache fetched deps across configure runs ─────────────────
+# Without this, every clean configure re-fetches GoogleTest + nlohmann_json
+# from GitHub (~30 s on a cold network). With this, the fetch lives in
+# .fetchcache/ at the repo root and survives `rm -rf build/`. Safe to commit
+# or gitignore (your call); the content is reproducible from the pinned
+# GIT_TAGs below. Set -DFETCHCONTENT_FULLY_DISCONNECTED=ON in CI once warmed.
+set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/.fetchcache" CACHE PATH
+    "Where fetched deps live (repo-local so they survive rm -rf build/)")
+mark_as_advanced(FETCHCONTENT_BASE_DIR)
+option(FETCHCONTENT_UPDATES_DISCONNECTED "Don't re-check git remote on every configure" ON)
+
 # ── GoogleTest ────────────────────────────────────────────────────────────────
 FetchContent_Declare(
     googletest

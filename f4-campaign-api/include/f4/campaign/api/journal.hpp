@@ -168,14 +168,19 @@ public:
         if (!expect_line([&](f4::json::Writer& w) {
                 encode_journal_end(w, at_end);
             }, error)) {
+            in_.close();
             return false;
         }
         std::string extra;
         if (std::getline(in_, extra)) {
+            in_.close();
             return fail("golden continues past journal_end at line " +
                             std::to_string(line_ + 1),
                         error);
         }
+        // Release the handle before the caller deletes the file — Windows
+        // refuses to remove a file this process still holds open.
+        in_.close();
         return true;
     }
 
@@ -209,6 +214,9 @@ private:
     bool fail(const std::string& what, std::string* error) {
         detail_ = what;
         if (error != nullptr) *error = what;
+        // Release the handle on every failure path too — the caller may
+        // delete the journal file right after (Windows sharing rules).
+        in_.close();
         return false;
     }
 

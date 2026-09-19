@@ -742,7 +742,8 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
         origin.squadron_vu = (fp->squadron.value != 0)
             ? static_cast<std::uint32_t>(entity_vu_id(world, fp->squadron))
             : 0;
-        origin.home_airbase_vu = home_airbase_vu;
+        origin.home_airbase_vu =
+            static_cast<std::uint32_t>(home_airbase_vu);
         origin.team_slot = owner;
         origin.callsign_id = fp->callsign_id;
         origin.callsign_num = fp->callsign_num;

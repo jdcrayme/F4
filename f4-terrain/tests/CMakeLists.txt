@@ -7,7 +7,7 @@ function(f4_add_test name source)
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-terrain)
     target_compile_definitions(${name} PRIVATE
         TERRAIN_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/")
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-terrain" TIMEOUT 60)
 endfunction()
 
 f4_add_test(test_terrain test_terrain.cpp)
@@ -21,15 +21,15 @@ target_compile_definitions(test_terrain_adapter PRIVATE
     TERRAIN_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../f4-world-convert/tests/fixtures/"
 )
-gtest_discover_tests(test_terrain_adapter)
+gtest_discover_tests(test_terrain_adapter PROPERTIES LABELS "f4-terrain" TIMEOUT 60)
 
 # Theater post/tile decoders (Phase 1 of the textured-terrain effort).
 add_executable(test_post_level test_post_level.cpp)
 target_link_libraries(test_post_level PRIVATE GTest::gtest_main f4-terrain)
 target_compile_definitions(test_post_level PRIVATE
     TERRAIN_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/")
-gtest_discover_tests(test_post_level)
+gtest_discover_tests(test_post_level PROPERTIES LABELS "f4-terrain" TIMEOUT 60)
 
 add_executable(test_tile_db test_tile_db.cpp)
 target_link_libraries(test_tile_db PRIVATE GTest::gtest_main f4-terrain)
-gtest_discover_tests(test_tile_db)
+gtest_discover_tests(test_tile_db PROPERTIES LABELS "f4-terrain" TIMEOUT 60)

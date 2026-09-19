@@ -13,7 +13,7 @@ target_include_directories(test_settings PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 target_link_libraries(test_settings PRIVATE GTest::gtest_main f4-json)
-gtest_discover_tests(test_settings)
+gtest_discover_tests(test_settings PROPERTIES LABELS "f4-world-viewer" TIMEOUT 60)
 
 # --- Hex model + decoders tests ---
 # Link against hex_model.cpp + decoders.cpp + f4-world-convert (decoders
@@ -38,7 +38,7 @@ target_compile_definitions(test_hex_model PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../f4-world-convert/tests/fixtures/"
     TERRAIN_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../f4-terrain/tests/fixtures/"
 )
-gtest_discover_tests(test_hex_model)
+gtest_discover_tests(test_hex_model PROPERTIES LABELS "f4-world-viewer" TIMEOUT 60)
 
 # --- Replay mode tests (Path B2) ---
 # Exercises the ReplayState data model + load_replay + fit_replay_camera.
@@ -58,7 +58,7 @@ target_link_libraries(test_replay_mode PRIVATE
     GTest::gtest_main
     f4-recorder
 )
-gtest_discover_tests(test_replay_mode)
+gtest_discover_tests(test_replay_mode PROPERTIES LABELS "f4-world-viewer" TIMEOUT 60)
 
 
 # --- Enum text tests (B.3 QC tranche) ---
@@ -71,7 +71,7 @@ target_include_directories(test_enum_text PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 target_link_libraries(test_enum_text PRIVATE GTest::gtest_main f4-world-convert f4-world-types)
-gtest_discover_tests(test_enum_text)
+gtest_discover_tests(test_enum_text PROPERTIES LABELS "f4-world-viewer" TIMEOUT 60)
 
 # --- CAMP-HOST-3: the campaign client runner (contract tests) ----------
 # The relocated V-THREAD runner, pinned WITHOUT the engine in the link:
@@ -89,7 +89,7 @@ target_include_directories(test_campaign_client_runner PRIVATE
 )
 target_link_libraries(test_campaign_client_runner PRIVATE
     GTest::gtest_main f4-campaign-api f4-json)
-gtest_discover_tests(test_campaign_client_runner)
+gtest_discover_tests(test_campaign_client_runner PROPERTIES LABELS "f4-world-viewer" TIMEOUT 60)
 
 # --- CAMP-HOST-3: the contract-plane query walks -----------------------
 # The fetch layer (campaign_queries.cpp) against golden DTO JSON — the
@@ -105,4 +105,4 @@ target_include_directories(test_campaign_queries PRIVATE
 )
 target_link_libraries(test_campaign_queries PRIVATE
     GTest::gtest_main f4-campaign-api f4-json)
-gtest_discover_tests(test_campaign_queries)
+gtest_discover_tests(test_campaign_queries PROPERTIES LABELS "f4-world-viewer" TIMEOUT 60)

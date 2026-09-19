@@ -13,7 +13,7 @@ function(f4_add_test name source)
         f4-entities
         f4-messaging
     )
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-entities" TIMEOUT 60)
 endfunction()
 
 f4_add_test(test_entities_entity              test_entity.cpp)

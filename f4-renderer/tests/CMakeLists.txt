@@ -20,11 +20,13 @@ add_executable(test_coord_transform test_coord_transform.cpp ${IMGUI_SOURCES})
 target_include_directories(test_coord_transform PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_coord_transform PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME coord_transform COMMAND test_coord_transform)
+set_tests_properties(coord_transform PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 add_executable(test_symbol_mapping test_symbol_mapping.cpp ${IMGUI_SOURCES})
 target_include_directories(test_symbol_mapping PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_symbol_mapping PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME symbol_mapping COMMAND test_symbol_mapping)
+set_tests_properties(symbol_mapping PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 # test_symbol_library — pure data-model + JSON I/O tests for the new
 # data-driven symbol library. No GPU context required (the render helpers
@@ -33,6 +35,7 @@ add_executable(test_symbol_library test_symbol_library.cpp ${IMGUI_SOURCES})
 target_include_directories(test_symbol_library PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_symbol_library PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME symbol_library COMMAND test_symbol_library)
+set_tests_properties(symbol_library PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 # test_svg_import — SVG (authoring format) <-> SymbolDefinition round-trips:
 # subset parsing, transforms, curve flattening, evenodd holes, earcut
@@ -46,11 +49,13 @@ target_compile_definitions(test_svg_import PRIVATE
     F4_SYMBOLS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../f4_symbols.json")
 target_link_libraries(test_svg_import PRIVATE f4-renderer f4-xml GTest::gtest_main)
 add_test(NAME svg_import COMMAND test_svg_import)
+set_tests_properties(svg_import PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 add_executable(test_mesh_builder test_mesh_builder.cpp ${IMGUI_SOURCES})
 target_include_directories(test_mesh_builder PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_mesh_builder PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME mesh_builder COMMAND test_mesh_builder)
+set_tests_properties(mesh_builder PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 # ── GPU-context tests (require InitWindow / OpenGL) ────────────────────────────
 
@@ -58,21 +63,25 @@ add_executable(test_orbit_camera test_orbit_camera.cpp ${IMGUI_SOURCES})
 target_include_directories(test_orbit_camera PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_orbit_camera PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME orbit_camera COMMAND test_orbit_camera)
+set_tests_properties(orbit_camera PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 add_executable(test_lit_shader test_lit_shader.cpp ${IMGUI_SOURCES})
 target_include_directories(test_lit_shader PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_lit_shader PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME lit_shader COMMAND test_lit_shader)
+set_tests_properties(lit_shader PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 add_executable(test_texture_cache test_texture_cache.cpp ${IMGUI_SOURCES})
 target_include_directories(test_texture_cache PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_texture_cache PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME texture_cache COMMAND test_texture_cache)
+set_tests_properties(texture_cache PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 add_executable(test_draw_3d test_draw_3d.cpp ${IMGUI_SOURCES})
 target_include_directories(test_draw_3d PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_draw_3d PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME draw_3d COMMAND test_draw_3d)
+set_tests_properties(draw_3d PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 # test_feature_mesh uses the committed glTF fixture tree
 # (f4-import/tests/fixtures/clean_data/Models/koreaobj — the same tree the
@@ -86,6 +95,7 @@ target_compile_definitions(test_feature_mesh PRIVATE
     F4_DATA_ROOT="${CMAKE_SOURCE_DIR}/Data")
 target_link_libraries(test_feature_mesh PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME feature_mesh COMMAND test_feature_mesh)
+set_tests_properties(feature_mesh PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 # test_entity_render — entity-level rendering: entity_icon_info(), RenderEntity()
 # Pure tests (no GPU) for component-inspection logic; RenderEntity with
@@ -94,6 +104,7 @@ add_executable(test_entity_render test_entity_render.cpp ${IMGUI_SOURCES})
 target_include_directories(test_entity_render PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_entity_render PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME entity_render COMMAND test_entity_render)
+set_tests_properties(entity_render PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 # ── Ground-layout geometry builder (moved from f4-world-viewer) ─────────────
 # Pure data-model tests: no GL context, but the executable still needs the
@@ -102,15 +113,18 @@ add_executable(test_ground_layout_models test_ground_layout_models.cpp ${IMGUI_S
 target_include_directories(test_ground_layout_models PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_ground_layout_models PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME ground_layout_models COMMAND test_ground_layout_models)
+set_tests_properties(ground_layout_models PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 # ── World camera (pure math: heading vectors, camera construction) ─────────
 add_executable(test_world_camera test_world_camera.cpp ${IMGUI_SOURCES})
 target_include_directories(test_world_camera PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_world_camera PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME world_camera COMMAND test_world_camera)
+set_tests_properties(world_camera PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 # ── World renderer (SceneDescription defaults, entity dispatch, GPU smoke) ─
 add_executable(test_world_renderer test_world_renderer.cpp ${IMGUI_SOURCES})
 target_include_directories(test_world_renderer PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_world_renderer PRIVATE f4-renderer GTest::gtest_main f4-entities)
 add_test(NAME world_renderer COMMAND test_world_renderer)
+set_tests_properties(world_renderer PROPERTIES LABELS "f4-renderer" TIMEOUT 60)

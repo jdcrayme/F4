@@ -8,7 +8,7 @@
 function(f4_math_add_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-math)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-math" TIMEOUT 60)
 endfunction()
 
 f4_math_add_test(test_scalar       test_scalar.cpp)

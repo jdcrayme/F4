@@ -60,3 +60,6 @@ build*.log
 
 # Agent session artifacts (never tracked)
 .zcode/
+
+# Tier 1 speedup: repo-local FetchContent cache
+.fetchcache/

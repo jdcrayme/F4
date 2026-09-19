@@ -1,7 +1,7 @@
 function(f4_add_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-assets)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-assets" TIMEOUT 60)
 endfunction()
 
 f4_add_test(test_asset_id       test_asset_id.cpp)

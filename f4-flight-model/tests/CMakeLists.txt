@@ -7,7 +7,7 @@
 function(f4_fm_add_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-flight-model)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-flight-model" TIMEOUT 60)
 endfunction()
 
 # Pass the path to the generated JSON fixtures (produced by f4-convert at
@@ -71,7 +71,7 @@ target_compile_definitions(test_poles_envelope PRIVATE
     DIAG_POLES_BINARY="$<TARGET_FILE:diag_poles>"
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")
 add_dependencies(test_poles_envelope diag_poles convert_golden_fixtures)
-gtest_discover_tests(test_poles_envelope)
+gtest_discover_tests(test_poles_envelope PROPERTIES LABELS "f4-flight-model" TIMEOUT 60)
 
 target_compile_definitions(test_flight_model PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}")

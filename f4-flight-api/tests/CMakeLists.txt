@@ -5,7 +5,7 @@
 function(f4_flight_api_add_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-flight-api)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-flight-api" TIMEOUT 60)
 endfunction()
 
 f4_flight_api_add_test(test_pilot_input test_pilot_input.cpp)

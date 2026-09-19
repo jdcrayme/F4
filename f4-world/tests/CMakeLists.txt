@@ -20,7 +20,7 @@ function(f4_add_test name source)
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-world)
     target_compile_definitions(${name} PRIVATE
         WORLD_JSON_FIXTURE="${WORLD_JSON_FIXTURE}")
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-world" TIMEOUT 60)
 endfunction()
 
 f4_add_test(test_world_state  test_world_state.cpp)
@@ -44,7 +44,7 @@ add_executable(test_world_assets test_world_assets.cpp)
 target_link_libraries(test_world_assets PRIVATE GTest::gtest_main f4-world f4-assets)
 target_compile_definitions(test_world_assets PRIVATE
     WORLD_JSON_FIXTURE="${WORLD_JSON_FIXTURE}")
-gtest_discover_tests(test_world_assets)
+gtest_discover_tests(test_world_assets PROPERTIES LABELS "f4-world" TIMEOUT 60)
 
 # Ensure the JSON fixture is generated before the state tests run.
 add_custom_target(world_json_fixture ALL DEPENDS ${WORLD_JSON_FIXTURE})

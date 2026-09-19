@@ -75,6 +75,7 @@
 #include <string>
 #include <vector>
 #include <cstdio>    // Tranche D tuning: AAR CSV trace
+#include <cstdlib>   // std::getenv (the F4_AAR_TRACE env-var gate)
 #include <cstdlib>   // getenv
 
 namespace f4::ai {
@@ -746,17 +747,12 @@ public:
         // test runs are unaffected.
         if (refuel_armed_ && refuel_.is_active()) {
             static FILE* _aar_trace_fp = []() -> FILE* {
-                char* env_val = nullptr;
-                size_t len = 0;
-                // Microsoft-safe replacement for std::getenv
-                if (_dupenv_s(&env_val, &len, "F4_AAR_TRACE") != 0 || !env_val) {
+                FILE* f = nullptr;
+                const char* env_val = std::getenv("F4_AAR_TRACE");
+                if (!env_val) {
                     return nullptr;
                 }
-
-                FILE* f = nullptr;
-                // Microsoft-safe replacement for std::fopen
-                fopen_s(&f, env_val, "w");
-                free(env_val); // _dupenv_s allocates memory that must be freed
+                f = std::fopen(env_val, "w");
 
                 if (f) {
                     std::fprintf(f,

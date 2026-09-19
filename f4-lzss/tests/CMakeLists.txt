@@ -5,7 +5,7 @@
 function(f4_lzss_add_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-lzss)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-lzss" TIMEOUT 60)
 endfunction()
 
 f4_lzss_add_test(test_lzss_core test_lzss.cpp)

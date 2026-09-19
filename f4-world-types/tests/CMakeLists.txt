@@ -10,7 +10,7 @@ function(f4_add_test name source)
     target_compile_definitions(${name} PRIVATE
         F4_CT_JSON="${CMAKE_SOURCE_DIR}/Data/Classes/falcon4.ct.json"
     )
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-world-types" TIMEOUT 60)
 endfunction()
 
 f4_add_test(test_class_table_json test_class_table_json.cpp)

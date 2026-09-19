@@ -14,7 +14,7 @@ function(f4_campaign_add_test name source)
     target_compile_definitions(${name} PRIVATE
         F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}")
     add_dependencies(${name} mission_profiles_fixture)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-campaign" TIMEOUT 60)
 endfunction()
 
 f4_campaign_add_test(test_mission_type      test_mission_type.cpp)

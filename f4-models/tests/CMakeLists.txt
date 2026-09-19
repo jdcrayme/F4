@@ -13,7 +13,7 @@ function(f4_add_test name source)
     target_compile_definitions(${name} PRIVATE
         MODELS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     )
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-models" TIMEOUT 60)
 endfunction()
 
 f4_add_test(test_models test_models.cpp)

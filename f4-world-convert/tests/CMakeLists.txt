@@ -12,7 +12,7 @@ function(f4_add_test name source)
         # v71 decoder tests; the file is skipped gracefully when absent
         # (e.g. shallow exports) via a file-exists guard.
         REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 endfunction()
 
 f4_add_test(test_lzss         test_lzss.cpp)
@@ -25,7 +25,7 @@ target_link_libraries(test_class_table PRIVATE GTest::gtest_main f4-world-conver
 target_compile_definitions(test_class_table PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_class_table)
+gtest_discover_tests(test_class_table PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 f4_add_test(test_aii_config   test_aii_config.cpp)
 f4_add_test(test_objectives   test_objectives.cpp)
 f4_add_test(test_units        test_units.cpp)
@@ -42,14 +42,14 @@ target_link_libraries(test_cmp_encoder PRIVATE GTest::gtest_main f4-world-conver
 target_compile_definitions(test_cmp_encoder PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_cmp_encoder)
+gtest_discover_tests(test_cmp_encoder PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 
 add_executable(test_cam_writer test_cam_writer.cpp)
 target_link_libraries(test_cam_writer PRIVATE GTest::gtest_main f4-world-convert)
 target_compile_definitions(test_cam_writer PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_cam_writer)
+gtest_discover_tests(test_cam_writer PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 
 # Save-write tranche: campaign JSON round-trip + objective encoder.
 add_executable(test_campaign_json test_campaign_json.cpp)
@@ -57,14 +57,14 @@ target_link_libraries(test_campaign_json PRIVATE GTest::gtest_main f4-world-conv
 target_compile_definitions(test_campaign_json PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_campaign_json)
+gtest_discover_tests(test_campaign_json PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 
 add_executable(test_objective_encoder test_objective_encoder.cpp)
 target_link_libraries(test_objective_encoder PRIVATE GTest::gtest_main f4-world-convert f4-lzss)
 target_compile_definitions(test_objective_encoder PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_objective_encoder)
+gtest_discover_tests(test_objective_encoder PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 
 # Save-write tranche: .tea team sub-file encoder.
 add_executable(test_team_encoder test_team_encoder.cpp)
@@ -72,7 +72,7 @@ target_link_libraries(test_team_encoder PRIVATE GTest::gtest_main f4-world-conve
 target_compile_definitions(test_team_encoder PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_team_encoder)
+gtest_discover_tests(test_team_encoder PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 
 # Save-write tranche: .uni unit sub-file encoder.
 add_executable(test_unit_encoder test_unit_encoder.cpp)
@@ -80,7 +80,7 @@ target_link_libraries(test_unit_encoder PRIVATE GTest::gtest_main f4-world-conve
 target_compile_definitions(test_unit_encoder PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_unit_encoder)
+gtest_discover_tests(test_unit_encoder PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 
 # Byte-identity closure: every LZSS-structured sub-file re-encodes
 # byte-for-byte on both fixtures, and the whole archive round-trips.
@@ -89,7 +89,7 @@ target_link_libraries(test_cam_byte_identity PRIVATE GTest::gtest_main f4-world-
 target_compile_definitions(test_cam_byte_identity PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_cam_byte_identity)
+gtest_discover_tests(test_cam_byte_identity PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 
 # Save-write tranche: CampaignSaver integration bridge.
 add_executable(test_campaign_saver test_campaign_saver.cpp)
@@ -97,7 +97,7 @@ target_link_libraries(test_campaign_saver PRIVATE GTest::gtest_main f4-world-con
 target_compile_definitions(test_campaign_saver PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_campaign_saver)
+gtest_discover_tests(test_campaign_saver PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 
 # Save-write tranche §6.1: the runtime-mutated save path. Links f4-world
 # (the WorldState the campaign loop mutates) + f4-world-convert (the
@@ -109,7 +109,7 @@ target_link_libraries(test_save_writeback PRIVATE GTest::gtest_main
 target_compile_definitions(test_save_writeback PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_save_writeback)
+gtest_discover_tests(test_save_writeback PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 
 # CAMP-INIT-1 — the scenario pack parser (strict surface, vocabulary).
 f4_add_test(test_scenario_pack test_scenario_pack.cpp)
@@ -125,4 +125,4 @@ target_link_libraries(test_campaign_initializer PRIVATE GTest::gtest_main
 target_compile_definitions(test_campaign_initializer PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
-gtest_discover_tests(test_campaign_initializer)
+gtest_discover_tests(test_campaign_initializer PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)

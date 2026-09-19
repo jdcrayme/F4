@@ -8,7 +8,7 @@ function(f4_add_test name source)
     target_compile_definitions(${name} PRIVATE
         FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     )
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-import" TIMEOUT 60)
 endfunction()
 
 f4_add_test(test_doctor test_doctor.cpp)
@@ -20,7 +20,7 @@ target_link_libraries(test_models_gltf PRIVATE GTest::gtest_main f4-import f4-gl
 target_compile_definitions(test_models_gltf PRIVATE
     KOREAOBJ_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/f4-models/tests/fixtures"
 )
-gtest_discover_tests(test_models_gltf)
+gtest_discover_tests(test_models_gltf PROPERTIES LABELS "f4-import" TIMEOUT 60)
 
 # Tranche 0c: material emission + texture PNG export. The PNG tests need
 # KoreaObj.TEX — optional (the test skips when missing), falling back to
@@ -31,7 +31,7 @@ target_compile_definitions(test_textures_gltf PRIVATE
     KOREAOBJ_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/f4-models/tests/fixtures"
     KOREAOBJ_TEX_FALLBACK="${CMAKE_SOURCE_DIR}/temp/KoreaObj.TEX"
 )
-gtest_discover_tests(test_textures_gltf)
+gtest_discover_tests(test_textures_gltf PROPERTIES LABELS "f4-import" TIMEOUT 60)
 
 # Hierarchy emission tests (AIRCRAFT_ANIMATION_PLAN.md §4): family
 # vocab path baked in for the table loader.
@@ -41,7 +41,7 @@ target_compile_definitions(test_hierarchy_emit PRIVATE
     KOREAOBJ_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/f4-models/tests/fixtures"
     F4_VOCAB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../vocab"
 )
-gtest_discover_tests(test_hierarchy_emit)
+gtest_discover_tests(test_hierarchy_emit PROPERTIES LABELS "f4-import" TIMEOUT 60)
 
 # The CLI test spawns the f4import binary as a subprocess — it needs the
 # path baked in at compile time.
@@ -51,4 +51,4 @@ target_compile_definitions(test_f4import_cli PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     F4IMPORT_PATH="$<TARGET_FILE:f4import>"
 )
-gtest_discover_tests(test_f4import_cli)
+gtest_discover_tests(test_f4import_cli PROPERTIES LABELS "f4-import" TIMEOUT 60)

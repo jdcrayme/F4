@@ -9,7 +9,7 @@
 function(f4_add_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-geo)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-geo" TIMEOUT 60)
 endfunction()
 
 f4_add_test(test_geo_position    test_position.cpp)

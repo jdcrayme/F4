@@ -5,7 +5,7 @@
 function(f4_add_anim_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE GTest::gtest_main f4-anim)
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} PROPERTIES LABELS "f4-anim" TIMEOUT 60)
 endfunction()
 
 f4_add_anim_test(test_anim_channels test_channels.cpp)
