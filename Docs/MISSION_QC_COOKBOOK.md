@@ -347,8 +347,14 @@ strike-target gap.
   flag. The matrix runner loops bytes in Python rather than growing
   the C++ surface; revisit if a `--category` filter ever earns its
   place in `FlightSpawnFilter`.
-* Strike employment is broken as described in §5 — currently THE
-  highest-value catch on the board.
+* Strike employment is RESOLVED (QC-ANCHOR): INTSTRIKE (byte 13 — the
+  §5 example's `--mission 39` was AMIS_TANK, a Support flight) flies
+  its full employment chain on TestCamp — armed=2, released=8,
+  impacts=8, features_destroyed=9, 2 objectives damage-synced, exit 0.
+  The saved INTSTRIKE route carries a WP_STRIKE (17) leg with the
+  mission target attached, which the A-G tranche resolves through to
+  the StrikeModule. The §5 workflow (gate → ledger → trace autopsy)
+  remains the template for the next catch.
 * AAR cannot engage from the CAMPAIGN path at all: `set_tanker(true)`
   exists only on the scenario-list spawn path (`sc.tanker` in the
   handoff JSON), and `push_tanker_picture` scans only the scenario's

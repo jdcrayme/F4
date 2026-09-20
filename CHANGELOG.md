@@ -66,18 +66,17 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
   the runtime-canonical `Data/Classes/falcon4.ct.json` (binary
   fixture demoted to fallback), and main routes every mode's
   exceptions through one reporter (a load error now prints its real
-  message and exits 1). The Release matrix RUNS now — and the first
-  45-minute TestCamp INTSTRIKE run sharpens the strike gap's
-  definition: 4 flights spawn with routes, but `strike_flights_armed`
-  is 0 (the loadout arming layer doesn't fire for saved-flight
-  spawns), `target_description` stays empty all run (the delivery
-  waypoints' actions are plain nav points — the saved INTSTRIKE route
-  never carries an A-G delivery action for the plan builder to
-  attach the resolved target to), and the flights are still
-  taxiing/departing at the 15-min horizon the cookbook used. The
-  strike gap is therefore TWO named layers (mission-type-driven
-  arming + mission-type-driven delivery-waypoint synthesis), both
-  now reachable in seconds via the Release matrix.
+  message and exits 1). The Release matrix RUNS now — and the
+  cookbook's strike catch turns out to be a BYTE MISREAD: §5's
+  `--mission 39` filtered AMIS_TANK (a Support flight — taxi-bound by
+  design, no strike leg); AMIS_INTSTRIKE is byte 13, and the first
+  real INTSTRIKE matrix run on TestCamp flies the whole chain —
+  armed=2, released=8, impacts=8, features_destroyed=9, 2 objectives
+  damage-synced, exit 0. The saved INTSTRIKE route always carried a
+  WP_STRIKE (17) leg with the mission target attached; the A-G
+  tranche resolves it through to the StrikeModule. The strike gap is
+  closed; §5's gate→ledger→trace workflow remains the template for
+  the next catch.
 
 ## QC-WORLD — Mission QC flights fly in the actual world, on the world map
 
