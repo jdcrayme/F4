@@ -68,15 +68,19 @@ const f4::geo::WorldPosition kAim{0.0, kAimNorth, 0.0};
 TEST(StrikeFireControl, NoPulseOutsideTheEnvelope) {
     TestAircraftState own;
     StrikeModule sm;
+    // EMPL-1a: the drag factor is pinned (the default is now the
+    // calibrated 1.0) so the bounds below test the envelope math, not
+    // the default.
+    sm.config.drag_factor = 1.0;
     sm.set_target(42);
-    // 20,000 ft south of the aim with a ~10,100 ft throw: the predicted
-    // impact sits ~9,900 ft short of the aim — pipper off, no release.
+    // 20,000 ft south of the aim with an ~11,900 ft throw: the predicted
+    // impact sits ~8,100 ft short of the aim — pipper off, no release.
     sm.update(DT, &own, kAim, true);
     EXPECT_FALSE(sm.release_pulse());
     EXPECT_TRUE(sm.armed());
-    EXPECT_GT(sm.computed_release_range_ft(), 9500.0);
-    EXPECT_LT(sm.computed_release_range_ft(), 11000.0);
-    EXPECT_GT(sm.predicted_miss_ft(), 9000.0);
+    EXPECT_GT(sm.computed_release_range_ft(), 11000.0);
+    EXPECT_LT(sm.computed_release_range_ft(), 12500.0);
+    EXPECT_GT(sm.predicted_miss_ft(), 7000.0);
 }
 
 TEST(StrikeFireControl, PulsesWhenPipperIsOn) {

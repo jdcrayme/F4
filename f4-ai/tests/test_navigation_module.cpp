@@ -458,3 +458,154 @@ TEST(NavigationStationHold, SetRouteResetsTheHold) {
     EXPECT_NEAR(mod.station_elapsed_s(), 0.0, 1e-9);
     EXPECT_EQ(mod.current_waypoint_index(), 0u);
 }
+
+// ============================================================================
+// EMPL-1a — the attack run (delivery-leg steering + delivery altitude)
+// ============================================================================
+
+namespace {
+
+NavigationModule::Waypoint make_strike_wp(const std::string& name, double east,
+                                          double north, double alt) {
+    NavigationModule::Waypoint wp =
+        make_wp(name, east, north, alt);
+    wp.action = 17;  // WP_STRIKE
+    wp.target_id = 42;
+    return wp;
+}
+
+} // anonymous namespace
+
+TEST(NavigationAttackRun, VirtualLegConvergesLateralOffset) {
+    // The EMPL-1a defect, kinematically: pure pursuit of a stationary
+    // point CONSERVES its entry lateral offset almost to the target (the
+    // TestCamp stick released ~6 deg off bearing: 675 of its 682-889 ft
+    // miss was lateral). The virtual leg's cross-track law must DRIVE
+    // the offset to zero well before the release boundary.
+    NavigationModule mod;
+    const double aim_e = 0.0, aim_n = 60000.0;
+    mod.set_route({make_strike_wp("STRIKE", aim_e, aim_n, 10000.0)});
+
+    // Engage 3,000 ft east of the direct north line to the aim, pointed
+    // north (the offset the corner handed over).
+    TestAircraftState s;
+    s.east_ft = 3000.0; s.north_ft = 0.0;
+    s.alt_msl_ft = 10000.0; s.alt_agl_ft_ = 10000.0;
+    s.heading_rad_ = 0.0; s.vcas_kts_ = 400.0;
+
+    // Kinematic march with an IDEALIZED heading response: the state's
+    // heading tracks the module's command instantly (the steering law's
+    // geometry is what's under test, not the FCS's lag).
+    const double speed = 400.0 * 1.68781;
+    const double dt = 0.5;
+    const int steps = static_cast<int>(58000.0 / (speed * dt));
+    for (int i = 0; i < steps; ++i) {
+        (void)mod.update(dt, &s);              // caches + engages the anchor
+        s.heading_rad_ = mod.nav_heading_rad(); // idealized heading response
+        s.east_ft += std::sin(s.heading_rad_) * speed * dt;
+        s.north_ft += std::cos(s.heading_rad_) * speed * dt;
+    }
+    // Lateral offset from the engagement->aim line (engagement was at
+    // (3000, 0); the line runs to (0, 60000)).
+    const double lex = aim_e - 3000.0, ley = aim_n - 0.0;
+    const double llen = std::sqrt(lex * lex + ley * ley);
+    const double rx = ley / llen, ry = -lex / llen;
+    const double xte = (s.east_ft - 3000.0) * rx + (s.north_ft - 0.0) * ry;
+
+    // The aircraft stopped ~2,000 ft short of the aim (the release
+    // boundary's neighborhood). Pursuit-style conservation would carry
+    // ~2,900 ft of offset here; the virtual leg must be inside 200 ft.
+    EXPECT_LT(std::abs(xte), 200.0)
+        << "attack run must converge the lateral offset (pursuit conserves it)";
+    // And it must still be short of the aim (flying TOWARD it, not past).
+    EXPECT_LT(s.north_ft, aim_n);
+}
+
+TEST(NavigationAttackRun, OnLineCommandsHoldTheAnchoredCourse) {
+    // The anchor freezes at engagement: an aircraft ON the virtual leg
+    // keeps commanding the SAME course across ticks (no pursuit slew —
+    // the nose does not chase the aim as the distance closes).
+    NavigationModule mod;
+    mod.set_route({make_strike_wp("STRIKE", 0.0, 60000.0, 10000.0)});
+
+    // Start 60,000 ft south, exactly on the line, heading north.
+    TestAircraftState s;
+    s.east_ft = 0.0; s.north_ft = 0.0;
+    s.alt_msl_ft = 10000.0; s.alt_agl_ft_ = 10000.0;
+    s.heading_rad_ = 0.0; s.vcas_kts_ = 400.0;
+
+    (void)mod.update(0.5, &s);
+    const double h1 = mod.nav_heading_rad();
+    // Fly 20,000 ft straight up the line and ask again.
+    s.north_ft += 20000.0;
+    (void)mod.update(0.5, &s);
+    const double h2 = mod.nav_heading_rad();
+    EXPECT_NEAR(h1, h2, 1e-9)
+        << "anchored course must not slew (pursuit would re-point at the aim)";
+    EXPECT_NEAR(h1, 0.0, 1e-6);  // due north — the engagement->aim course
+}
+
+TEST(NavigationAttackRun, ShortEngagementFallsBackToPursuit) {
+    // Engaged inside attack_min_virtual_leg_ft of the aim, the anchored
+    // course is bearing-noise: the law falls back to pursuit, whose
+    // commanded heading CHANGES as the aircraft closes (the opposite of
+    // the anchored-course constancy above).
+    NavigationModule mod;
+    mod.set_route({make_strike_wp("STRIKE", 0.0, 60000.0, 10000.0)});
+    mod.attack_min_virtual_leg_ft = 2000.0;
+    // Stay ToWaypoint: the capture floor is max(radius, 10*vcas), so a
+    // 400-kt state captures the aim from 4,000 ft — before the fallback
+    // is observable. 150 kts floors the capture at 1,500 ft.
+    mod.capture_radius_ft = 500.0;
+
+    TestAircraftState s;
+    s.east_ft = 1000.0; s.north_ft = 58100.0;   // ~1,900 ft from the aim
+    s.alt_msl_ft = 10000.0; s.alt_agl_ft_ = 10000.0;
+    s.heading_rad_ = 0.0; s.vcas_kts_ = 150.0;
+
+    (void)mod.update(0.5, &s);
+    const double h1 = mod.nav_heading_rad();
+    // Fly 200 ft straight north (NOT along the bearing — pursuit along
+    // its own bearing to a stationary aim never changes the bearing).
+    s.north_ft += 200.0;                        // ~1,720 ft out
+    (void)mod.update(0.5, &s);
+    const double h2 = mod.nav_heading_rad();
+    EXPECT_NE(h1, h2)
+        << "pursuit fallback must re-point as the aircraft closes";
+}
+
+TEST(NavigationAttackRun, DeliveryAltitudeFliesTheWaypointNotTheFloor) {
+    // The bridge floors delivery waypoints at 1,500 ft MSL for the
+    // release envelope; the 3,000 ft terrain floor used to override it
+    // and double the throw. A delivery waypoint must command its OWN
+    // altitude (level at 1,500), while a plain waypoint at the same
+    // altitude still climbs to the floor (the floor's regression guard).
+    double delivery_pitch = 0.0;
+    {
+        NavigationModule mod;
+        NavigationModule::Waypoint egress = make_wp("EGRESS", 0, 120000, 10000);
+        mod.set_route({make_strike_wp("STRIKE", 0.0, 60000.0, 1500.0),
+                       egress});
+        // Level AT the delivery altitude AND at the commanded speed — the
+        // speed channel rides pitch too (energy exchange), so a speed
+        // error would mask the altitude assertion.
+        auto s = make_state(0, 40000, 1500, 0.0, 350.0);
+        const auto out = mod.update(0.1, s.get());
+        delivery_pitch = out.pitch_cmd;
+        EXPECT_LT(std::abs(delivery_pitch), 0.005)
+            << "delivery waypoint must fly its own 1,500 ft (no climb to the floor)";
+    }
+    {
+        NavigationModule mod;
+        mod.set_route({make_wp("ENROUTE", 0.0, 60000.0, 1500.0),
+                       make_wp("EGRESS", 0.0, 120000.0, 10000.0)});
+        auto s = make_state(0, 40000, 1500, 0.0, 350.0);
+        const auto out = mod.update(0.1, s.get());
+        // The floor's climb is gentle in the calm enroute tune (a 1,500-ft
+        // error rides ~0.003 pitch) — assert the ORDERING, not an
+        // absolute: the floored leg climbs, the delivery leg does not.
+        EXPECT_GT(out.pitch_cmd, delivery_pitch + 0.001)
+            << "non-delivery legs keep the terrain floor (climb toward 3,000)";
+    }
+}
+

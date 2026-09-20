@@ -451,11 +451,119 @@ AIControlOutput RefuelModule::controls_for_rendezvous() const
     // pre-contact area).
     if (!tanker_picture_.valid) return controls_for_no_tanker();
     const auto cp = precontact_point();
-    const double desired_heading = AirSteering::bearing_to(current_position_, cp);
+    const double h = tanker_picture_.heading_rad;
+    const double fwd_x = std::sin(h);
+    const double fwd_y = std::cos(h);
+
+    // EMPL-2 — the standoff join (see the config block): aim the
+    // along-axis at a point BEHIND the pre-contact point while the
+    // vertical error is outside the catch window — level off beside the
+    // boom FIRST, then release the standoff and close. Without it the
+    // horizontal closure (kts-scale) outruns the vertical (fpm-scale)
+    // and the receiver flies through the station below it, spiraling
+    // for an aligned tick the envelope never sees.
+    const double dz = current_position_.z - cp.z;
+    const double standoff_ft =
+        (std::abs(dz) > config.precontact_vert_ft)
+            ? config.rendezvous_standoff_ft : 0.0;
+    // EMPL-2 — lead pursuit (see the config block): the heading aims
+    // AHEAD of the (standoff-shifted) aim point along the tanker's
+    // track, cutting inside the orbit; pure pursuit circles astern
+    // forever. The lead FADES inside 20,000 ft of the point — the
+    // terminal approach is pure pursuit + the braking curve (a constant
+    // lead carried the receiver THROUGH the boom: ClearedContact at
+    // 170 kts of overtake, then 20 NM past it).
+    constexpr double kFpsPerKt = 1.68781;
+    const double tank_speed_fps = tanker_picture_.speed_kts * kFpsPerKt;
+    const double dist_cp_ft = std::hypot(current_position_.x - cp.x,
+                                         current_position_.y - cp.y);
+    const double lead_scale = std::clamp(dist_cp_ft / 20000.0, 0.0, 1.0);
+    const double lead_ft = tank_speed_fps * config.rendezvous_lead_s *
+                           lead_scale;
+    // The standoff gates the LEAD: while the vertical error is outside
+    // the catch window the aim holds 6,000 ft BEHIND the point (no
+    // lead) — the throttle goes to the climb, not to a 150-kts
+    // overtake. Otherwise the +7,600-ft lead swamps the −6,000-ft
+    // standoff and the receiver closes horizontally while still 5k ft
+    // below the boom (the e2e catch: a 190-fpm climb that never
+    // reconciled).
+    const double along_shift_ft =
+        (std::abs(dz) > config.precontact_vert_ft)
+            ? -standoff_ft
+            : lead_ft;
+    const double aim_x = cp.x + fwd_x * along_shift_ft;
+    const double aim_y = cp.y + fwd_y * along_shift_ft;
+    const geo::WorldPosition aim_pos{aim_x, aim_y, cp.z};
+
+    // EMPL-2 — the near-field terminal (see the config block): inside
+    // rendezvous_near_ft the heading becomes the TANKER'S TRACK —
+    // formate behind the boom and let the closure law close — instead
+    // of chasing a point on an orbit (the sustained-turn trap: the
+    // receiver circled 5k ft above the boom, never descending).
+    double desired_heading;
+    if (dist_cp_ft < config.rendezvous_near_ft) {
+        desired_heading = tanker_picture_.heading_rad;
+    } else {
+        desired_heading = AirSteering::bearing_to(current_position_, aim_pos);
+    }
     const double target_alt = cp.z;
-    const double target_speed_vcas = tanker_picture_.speed_kts + config.closure_bias_kts;
-    return air_steering.steer(desired_heading, target_alt, target_speed_vcas,
-                              steering_input());
+
+    // EMPL-2 — the rendezvous closure law: error-proportional (tau),
+    // CAPPED by the kinematic braking curve sqrt(2·a·err) — the
+    // stopping-distance law. A clamped constant-overtake cannot stop AT
+    // the aim point (the QC funnel: closed 74,000 ft, overshot +30,000
+    // past it); the braking curve starts decelerating where the
+    // configured deceleration can absorb the remaining closure, so the
+    // final approach creeps into the pre-contact envelope instead of
+    // flying through it. Near the envelope the law still degenerates to
+    // the original tanker-speed + bias chase (the scenario runs' shape).
+    const double rx = current_position_.x - aim_x;
+    const double ry = current_position_.y - aim_y;
+    const double along_aim_ft = rx * fwd_x + ry * fwd_y;
+    const double err_ft = -along_aim_ft;   // + = the aim point is ahead
+    double target_speed_vcas = tanker_picture_.speed_kts;
+    if (err_ft > 0.0) {
+        // Behind the aim point: close at the demanded rate — the tau
+        // law capped by the stopping-distance curve — never below the
+        // original gentle bias.
+        const double demand_fps =
+            std::min(err_ft / std::max(config.rendezvous_tau_s, 1.0),
+                     std::sqrt(2.0 * config.rendezvous_brake_fps2 * err_ft));
+        target_speed_vcas +=
+            std::max(std::min(demand_fps / kFpsPerKt,
+                              config.rendezvous_max_closure_kts),
+                     config.closure_bias_kts);
+    } else {
+        // Overshot (ahead): fall back below the tanker's speed, under
+        // the same braking curve mirrored.
+        const double e = -err_ft;
+        const double demand_fps =
+            -std::min(e / std::max(config.rendezvous_tau_s, 1.0),
+                      std::sqrt(2.0 * config.rendezvous_brake_fps2 * e));
+        target_speed_vcas +=
+            std::max(demand_fps / kFpsPerKt,
+                     -config.rendezvous_max_back_kts);
+    }
+
+    // EMPL-2 — the JOIN envelope (nav-scale; see the config block). The
+    // constructor's hold-tuned gains (bank 0.10, VS 300 fpm) close a
+    // campaign altitude deficit (10-15k ft) in 40+ minutes — the join
+    // never lands inside the station window. The rendezvous state swaps
+    // in the nav-scale envelope for THIS steer (the save/steer/restore
+    // pattern controls_for_precontact established); the hold phases
+    // keep their own envelopes, so nothing leaks across states. The
+    // scenario runs keep their shape: their receiver is PLACED at the
+    // pre-contact position — the deficit is inside the tight envelope's
+    // reach before the swap could matter.
+    const double save_bank = air_steering.max_bank_rad;
+    const double save_maxvs = air_steering.max_vs_fpm;
+    air_steering.max_bank_rad = config.rendezvous_max_bank_rad;
+    air_steering.max_vs_fpm = config.rendezvous_max_vs_fpm;
+    auto out = air_steering.steer(desired_heading, target_alt, target_speed_vcas,
+                                  steering_input());
+    air_steering.max_bank_rad = save_bank;
+    air_steering.max_vs_fpm = save_maxvs;
+    return out;
 }
 
 AIControlOutput RefuelModule::controls_for_precontact() const

@@ -44,6 +44,33 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
   campaign_qc's console summary printed garbage on Windows
   (`fs::path::c_str()` is wchar_t* into a printf %s — hoisted narrow
   copies).
+- 
+## EMPL-1a — the strike stick destroys features (impact precision, A-G kill chain closes on damage)
+
+- **EMPL-1a** — `features_destroyed` went 0 -> 9 on the INTSTRIKE repro
+  (and 0 -> 6 on ONCALLCAS) with no exit-4 regression. The autopsy split
+  the EMPL-1 miss (682-984 ft) into its axes and found three stacked
+  defects: (1) the brain aimed the strike module at the objective CENTER
+  while the loader's nominal feature grid sits 156+ ft off it and the
+  Mk-82's single-hit envelope is 144 ft — the A-G rung now aims at the
+  first ALIVE feature (the save's own aim-point element wiring comes with
+  the mission-element tranche); (2) the EMPL-1 attack run flew PURE
+  PURSUIT, which conserves its entry lateral offset almost to the target
+  (675 of the miss was lateral, under 100 ft along-track) — the delivery
+  leg is now a VIRTUAL LNAV leg THROUGH the aim, anchored at the
+  engagement position and flown with the module's own cross-track law
+  (degenerate anchors fall back to pursuit; 4 new `NavigationAttackRun`
+  tests); (3) the 3,000-ft terrain floor silently overrode the bridge's
+  1,500-ft delivery altitude, doubling the throw — delivery waypoints now
+  fly their own altitude. Also calibrated: `drag_factor` default
+  0.85 -> 1.0 (the Mk-82 card's own ODE measures 0.999 of vacuum — the
+  0.85 folklore under-predicted the throw ~15% for every bare-module
+  user). `ground_strike_qc` stays green with MD5 determinism (pursuit and
+  the anchored line coincide on a straight-in); BARCAP2 no-ordnance
+  regression unchanged. The QC tool also learned the relative-path lesson
+  campaign_session.cpp already knew: scenario JSONs carry ABSOLUTE
+  world/class-table/config paths, so the documented
+  `campaign_qc --out-dir qc/<name>` invocation works again.
 
 ## CT-BROWSER-LAYOUT — the class table browser previews unit/squadron deaggregation layouts
 

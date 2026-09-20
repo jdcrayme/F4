@@ -674,6 +674,28 @@ public:
                             tgt.get<entities::TransformComponent>()) {
                         aim = tf->position;
                         aim_valid = true;
+                        // EMPL-1a: aim at a FEATURE when the objective
+                        // carries a feature set — the loader's nominal
+                        // grid (no FED data in the fixture world) places
+                        // features 156+ ft off the center while the
+                        // Mk-82's single-hit envelope is ~144 ft, so a
+                        // center aim can never kill anything. First
+                        // ALIVE feature (VIS 3 = destroyed — rubble
+                        // takes no further damage); deterministic and
+                        // monotone with damage. The save's own
+                        // per-mission aim-point element wiring arrives
+                        // with the mission-element tranche.
+                        if (const auto* fs =
+                                tgt.get<entities::FeatureSetComponent>()) {
+                            for (const auto& f : fs->features) {
+                                if (f.damage_state != 3) {
+                                    aim.x += f.offset_x;
+                                    aim.y += f.offset_y;
+                                    aim.z += f.offset_z;
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
                 strike_.set_target(plan_.route[wp_index].target_id);
@@ -1161,6 +1183,52 @@ public:
     /// TakeoffModule's first-update init.
     void set_refuel_armed(bool on) noexcept { refuel_armed_ = on; }
     [[nodiscard]] bool refuel_armed() const noexcept { return refuel_armed_; }
+    /// EMPL-2 — campaign-path receiver ELIGIBILITY (static, spawn-time).
+    /// The campaign bridge stamps this when the flight's own route
+    /// carries a refuel waypoint (the campaign wire byte — the bridge
+    /// owns the vocabulary; the brain stays engine-agnostic). The
+    /// per-tick tanker push (Simulation::push_tanker_picture) arms the
+    /// rung only for eligible receivers AND only while the tanker
+    /// picture is valid — campaign tankers spawn on tasking cycles, so
+    /// arming against a not-yet-airborne tanker would storm the protocol
+    /// with RefuelRequest/TankerLost round-trips every tick. The
+    /// scenario path's global gate (scenario_has_refuel_waypoint_)
+    /// supersedes this flag — its arming contract is unchanged.
+    void set_refuel_eligible(bool on) noexcept { refuel_eligible_ = on; }
+    [[nodiscard]] bool refuel_eligible() const noexcept { return refuel_eligible_; }
+    /// EMPL-2 — the receiver's POSITIONAL arming gate: the CURRENT route
+    /// waypoint is the refuel leg (the same read the strike rung makes
+    /// of the delivery legs). A campaign receiver flies its route like
+    /// any flight — the nav ferries it to the rendezvous area (the
+    /// WP_REFUEL waypoint IS the declared rendezvous, the reference's
+    /// AddMissionTankerWaypoint shape) — and only on that leg does the
+    /// rung arm (the join itself is the tanker picture's job). Without
+    /// the gate an armed receiver abandons its route the moment a
+    /// tanker exists — the QC catch: armed strike flights that diverted
+    /// to the boom and never delivered.
+    [[nodiscard]] bool at_refuel_waypoint() const noexcept {
+        if (plan_.route.empty()) return false;
+        const auto idx = nav_.current_waypoint_index();
+        return idx < plan_.route.size() &&
+               modules::is_campaign_refuel_action(
+                   plan_.route[idx].action);
+    }
+    /// EMPL-2 — the current refuel leg's POSITION (the rendezvous point
+    /// the route declares). The host's tanker push pairs the receiver
+    /// with the tanker whose station is nearest THIS point — the
+    /// reference's FindNearestActiveTanker keyed on the waypoint the
+    /// save's/ladder's own planner wrote — and nullopt when the current
+    /// leg is not a refuel leg (the same gate at_refuel_waypoint reads).
+    [[nodiscard]] std::optional<geo::WorldPosition>
+    refuel_waypoint_position() const {
+        if (plan_.route.empty()) return std::nullopt;
+        const auto idx = nav_.current_waypoint_index();
+        if (idx >= plan_.route.size() ||
+            !modules::is_campaign_refuel_action(plan_.route[idx].action)) {
+            return std::nullopt;
+        }
+        return plan_.route[idx].position;
+    }
     /// Push the tanker's kinematic picture for THIS tick (the host calls
     /// it every tick BEFORE update: the module is engine-agnostic, it
     /// cannot read the tanker entity itself). An invalid picture
@@ -1309,6 +1377,8 @@ private:
     modules::RefuelModule refuel_{};
     bool refuel_armed_{false};
     bool refuel_initialized_{false};
+    /// EMPL-2 — the campaign-side receiver eligibility (see the setter).
+    bool refuel_eligible_{false};
 
     // Safety ladder (the arbiter's top rungs): the terrain pull-up + the
     // mid-air break, and the pictures the host pushes each tick (the

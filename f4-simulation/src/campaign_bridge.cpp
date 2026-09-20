@@ -31,6 +31,7 @@
 #include <f4/flight/angle.hpp>
 #include <f4/ai/brain_component.hpp>
 #include <f4/campaign/mission_type.hpp>
+#include <f4/campaign/route_builder.hpp>   // kWpRefuel (EMPL-2 eligibility scan)
 #include <f4/weapons/bomb.hpp>
 #include <f4/world_types/layout_types.hpp>  // ObjectiveType::TYPE_AIRBASE
 #include <f4/world_types/layout_types.hpp>        // PointListType
@@ -708,7 +709,61 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
             // the NavigationModule (the LNAV scenarios' own contract).
             plan->start_phase = MissionPlan::StartPhase::Enroute;
         }
+        // EMPL-2 — the campaign AAR wiring (receiver eligibility). The
+        // route's WP_REFUEL waypoints (the campaign wire byte — the
+        // real saves carry it on 158 TestCamp flights) make THIS
+        // aircraft a refuel receiver: the per-tick tanker push arms the
+        // rung when a valid tanker picture exists. Arming itself is NOT
+        // spawn-time — a campaign tanker spawns on a tasking cycle, and
+        // arming first would storm the protocol with unanswered
+        // RefuelRequest round-trips.
+        for (const auto& wp : plan->route) {
+            if (wp.action == f4::campaign::kWpRefuel) {
+                brain.set_refuel_eligible(true);
+                break;
+            }
+        }
+        // EMPL-2 — the saved tanker's STATION HOLD. The wire's routes
+        // carry no loiter fields (the reference's MissionData
+        // loitertime lives in its profile tables, not the waypoint), so
+        // a saved tanker flies THROUGH its station and recovers — and
+        // the receivers' refuel legs point at a boom that is never
+        // there. Synthesize the P7 racetrack hold on the route's
+        // furthest-from-home waypoint (the station): the tanker orbits
+        // ON STATION for 30 minutes (the reference's FindSupportFlights
+        // window shape; the profile-table loitertime is the named
+        // follow-up) while the receivers join.
+        if (f4::campaign::mission_is_tanker(fp->mission) && plan->route.size() >= 2) {
+            std::size_t station = 0;
+            double best_d2 = -1.0;
+            const auto& home = plan->route.front().position;
+            for (std::size_t i = 0; i + 1 < plan->route.size(); ++i) {
+                const double dx = plan->route[i].position.x - home.x;
+                const double dy = plan->route[i].position.y - home.y;
+                const double d2 = dx * dx + dy * dy;
+                if (d2 > best_d2) {
+                    best_d2 = d2;
+                    station = i;
+                }
+            }
+            if (best_d2 > 0.0 && station + 1 < plan->route.size()) {
+                plan->route[station].loop_waypoints = 2;
+                plan->route[station].station_time_s = 30.0 * 60.0;
+            }
+        }
         brain.set_mission_plan(std::move(*plan));
+    }
+    // EMPL-2 — the campaign AAR wiring (tanker role). Tanker-hood is
+    // the mission byte across BOTH vocabularies the pipeline carries:
+    // AMIS_TANKER (27, the ATM filings) and AMIS_TANK (39, the stock
+    // war's byte — TestCamp's 78 saved tanker flights). The role keys
+    // the Simulation's tanker discovery (the picture push + the
+    // traffic-picture skip); it does NOT touch the takeoff/landing
+    // phases — a ground-spawned campaign tanker taxis and departs like
+    // any flight (the scenario tanker's airborne start is the scenario
+    // path's own spawn pose, not a tanker-brain behavior).
+    if (f4::campaign::mission_is_tanker(fp->mission)) {
+        brain.set_tanker(true);
     }
 
     // 4b. A-G employment tranche: the flight's decoded loadout becomes a
@@ -1464,7 +1519,23 @@ spawn_aircraft_for_intent(
         if (spawn_in_air) {
             plan->start_phase = MissionPlan::StartPhase::Enroute;
         }
+        // EMPL-2 — receiver eligibility from the synthetic route (the
+        // same scan the flight path runs on the saved plan; the ladder's
+        // stamped routes carry kWpRefuel the same way).
+        for (const auto& wp : plan->route) {
+            if (wp.action == f4::campaign::kWpRefuel) {
+                brain.set_refuel_eligible(true);
+                break;
+            }
+        }
         brain.set_mission_plan(std::move(*plan));
+    }
+    // EMPL-2 — the tanker role from the intent's mission byte (the
+    // synthetic path's role source; see the flight path's note — the
+    // ATM's ADDTANKER filings carry AMIS_TANKER(27), which
+    // mission_is_tanker covers along with the stock war's byte 39).
+    if (f4::campaign::mission_is_tanker(intent.mission_byte)) {
+        brain.set_tanker(true);
     }
 
     // Ordnance: no wire loadout exists for a synthetic draw, so the

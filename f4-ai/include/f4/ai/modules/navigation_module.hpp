@@ -226,6 +226,11 @@ public:
     /// 180-deg reversal at 350+ kts exceeds 20k ft; beyond this the module
     /// just sequences at the clamp and lets the cross-track law re-center.
     double turn_lead_max_ft{22000.0};
+    /// EMPL-1a: below this engagement distance the attack run's virtual
+    /// leg degenerates (the anchored course becomes bearing-noise) and
+    /// the delivery leg falls back to pure pursuit — exact in the last
+    /// seconds, where the entry offset has already converged.
+    double attack_min_virtual_leg_ft{2000.0};
 
     // Shared air control laws (heading/altitude/speed cascades). Public so
     // hosts can tune gains like the fields above.
@@ -264,6 +269,19 @@ private:
     /// NAV-B: true once leg_from_ has been anchored to a real position
     /// (set on the first update() after set_route()).
     bool leg_initialized_{false};
+
+    /// EMPL-1a: the attack run's VIRTUAL leg anchor — the position the
+    /// aircraft held when the current delivery waypoint became active.
+    /// The delivery leg flies the NAV-B cross-track law on the line
+    /// attack_from_ -> aim (see nav_heading_rad), not pursuit: a pursuit
+    /// curve of a stationary point CONSERVES its entry lateral offset to
+    /// the release point, and the bomb flies straight along the track —
+    /// the TestCamp INTSTRIKE stick released ~6 deg off bearing and
+    /// landed 675 of its 682-889 ft miss LATERALLY. Keyed by waypoint
+    /// index: a re-engage on the same index keeps the original anchor.
+    geo::WorldPosition attack_from_{};
+    std::size_t attack_from_wp_{0};
+    bool attack_engaged_{false};
 
     // Route + progress. wp_timer_ tracks seconds on the CURRENT waypoint
     // (guards the abeam capture — see check_waypoint_capture).

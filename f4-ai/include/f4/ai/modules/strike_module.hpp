@@ -17,8 +17,9 @@
 //      dz          = aircraft altitude - aim point altitude
 //      v           = ground speed (IAircraftState::ground_speed_fps)
 //      drag_factor = a scalar the host computes from the weapon class
-//                    card (drag shortens the vacuum throw; ~0.8-0.9 for
-//                    slick bombs at delivery speeds) — set at spawn, one
+//                    card (drag shortens the vacuum throw; the Mk-82's
+//                    own ODE measures 0.999 — a slick body sheds ~2 fps
+//                    of 675 over the whole fall) — set at spawn, one
 //                    number, no weapon types cross the boundary.
 //
 // The trigger evaluates EVERY tick (dz and v change continuously), so a
@@ -81,6 +82,22 @@ inline constexpr std::uint8_t WP_REFUEL{20};
     return action == WP_REFUEL;
 }
 
+/// EMPL-2 — the CAMPAIGN wire's WP_REFUEL byte (campwp.h WP_REFUEL = 4;
+/// the vocabulary the real saves' receiver routes carry — TestCamp: 158
+/// flights — and the RouteBuilder's tanker/receiver stamps emit). This
+/// is a DIFFERENT vocabulary from the scenario marker above, and the
+/// two must never merge: in the campaign vocabulary action 20 is
+/// WP_ELINT (the AWACS/ECM station legs — merging would arm AWACS
+/// orbits as refuel receivers), and in the scenario vocabulary 4 is an
+/// unassigned slot. The brain-level leg gate (at_refuel_waypoint) runs
+/// on CAMPAIGN routes only, so it keys the campaign byte.
+inline constexpr std::uint8_t WP_REFUEL_CAMPAIGN{4};
+
+[[nodiscard]] constexpr bool is_campaign_refuel_action(
+    std::uint8_t action) noexcept {
+    return action == WP_REFUEL_CAMPAIGN;
+}
+
 class StrikeModule {
 public:
     /// Release-trigger parameters. Defaults are the doctrine fill for a
@@ -89,7 +106,16 @@ public:
     struct Config {
         /// Vacuum-to-real range scale (host computes from the bomb card:
         /// drag area/mass at delivery speed). 1.0 = vacuum ballistics.
-        double drag_factor{0.85};
+        /// EMPL-1a calibration: the Mk-82 card's own ODE (bomb.cpp's drag
+        /// model, 5,000 ft / 675 fps — campaign_bridge's
+        /// bomb_drag_factor_for) measures 0.999 of vacuum: over a 13-20 s
+        /// fall the slick body sheds ~2 fps of the 675 it starts with.
+        /// The old 0.85 folklore default under-predicted the throw ~15%
+        /// (~1,300 ft at dz 3,000) — the gate fired early and the stick
+        /// landed systematically long. The host's computed factor
+        /// overrides this anyway; 1.0 is the physically honest default
+        /// (hosts set < 1.0 for draggy shapes).
+        double drag_factor{1.0};
         /// Stick spacing (seconds between releases).
         double salvo_interval_s{0.25};
         /// Stick size (bombs per target). The host's store may run dry

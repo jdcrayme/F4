@@ -365,6 +365,13 @@ struct Args {
     // taskforces query, the save carries them. False = the golden
     // identity (the engine never constructs; the fleet stays put).
     bool naval_movement = false;
+    // EMPL-2 — the campaign-path AAR gate (--expect-aar): the run MUST
+    // produce the SHOWCASE-1 AAR protocol (a tanker spawned + receivers
+    // armed by their saved/ladder refuel waypoints). Exit 22 = zero
+    // ContactMade (the boom never latched); exit 23 = latched but never
+    // completed — the SAME vocabulary the scenario arm's AAR gate uses,
+    // now on the campaign path. Default off (every golden unchanged).
+    bool expect_aar = false;
     // Real-data tier: the wcd2json export folded over the built-in table.
     std::string weapon_data;
     // FID-6 — the acceleration certificate (--accel <x>): the tiered
@@ -395,7 +402,7 @@ struct Args {
         "          [--ground-war] [--ground-update-sec <sec>]\n"
         "          [--ground-orders-sec <sec>] [--ground-resupply-sec <sec>]\n"
         "          [--naval-tasking] [--naval-movement]\n"
-        "          [--unit-strike] [--weapon-data <wcd.json>] [--out-dir <dir>]\n"
+        "          [--unit-strike] [--expect-aar] [--weapon-data <wcd.json>] [--out-dir <dir>]\n"
         "          [--synthesize-airbases]\n"
         "          [--theater-tables <tables.json>] [--pilot-skill]\n"
         "          [--pilot-assignment] [--rating-decay] [--airbase-scheduling]\n"
@@ -483,6 +490,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--airbase-scheduling") a.airbase_scheduling = true;
         else if (k == "--naval-tasking") a.naval_tasking = true;
         else if (k == "--naval-movement") a.naval_movement = true;
+        else if (k == "--expect-aar")    a.expect_aar = true;
         else if (k == "--synthesize-airbases") a.synthesize_airbases = true;
         else if (k == "--weapon-data") a.weapon_data = next();
         else if (k == "--ground-update-sec")
@@ -1561,15 +1569,15 @@ int run_scenario(const Args& args) {
         int made = 0, lost = 0, approved = 0, transferred = 0, complete = 0;
     } aar;
     namespace atc = f4::ai::atc;
-    sim.bus().subscribe<atc::RefuelRequest>([&aar](const atc::RefuelRequest&) { ++aar.requests; });
-    sim.bus().subscribe<atc::TankerAssigned>([&aar](const atc::TankerAssigned&) { ++aar.assigned; });
-    sim.bus().subscribe<atc::PrecontactReport>([&aar](const atc::PrecontactReport&) { ++aar.precontact; });
-    sim.bus().subscribe<atc::ClearToContact>([&aar](const atc::ClearToContact&) { ++aar.clear; });
-    sim.bus().subscribe<atc::ContactMade>([&aar](const atc::ContactMade&) { ++aar.made; });
-    sim.bus().subscribe<atc::ContactLost>([&aar](const atc::ContactLost&) { ++aar.lost; });
-    sim.bus().subscribe<atc::DisconnectApproved>([&aar](const atc::DisconnectApproved&) { ++aar.approved; });
-    sim.bus().subscribe<atc::FuelTransferred>([&aar](const atc::FuelTransferred&) { ++aar.transferred; });
-    sim.bus().subscribe<atc::RefuelComplete>([&aar](const atc::RefuelComplete&) { ++aar.complete; });
+    sim.bus().subscribe<f4::ai::atc::RefuelRequest>([&aar](const atc::RefuelRequest&) { ++aar.requests; });
+    sim.bus().subscribe<f4::ai::atc::TankerAssigned>([&aar](const atc::TankerAssigned&) { ++aar.assigned; });
+    sim.bus().subscribe<f4::ai::atc::PrecontactReport>([&aar](const atc::PrecontactReport&) { ++aar.precontact; });
+    sim.bus().subscribe<f4::ai::atc::ClearToContact>([&aar](const atc::ClearToContact&) { ++aar.clear; });
+    sim.bus().subscribe<f4::ai::atc::ContactMade>([&aar](const atc::ContactMade&) { ++aar.made; });
+    sim.bus().subscribe<f4::ai::atc::ContactLost>([&aar](const atc::ContactLost&) { ++aar.lost; });
+    sim.bus().subscribe<f4::ai::atc::DisconnectApproved>([&aar](const atc::DisconnectApproved&) { ++aar.approved; });
+    sim.bus().subscribe<f4::ai::atc::FuelTransferred>([&aar](const atc::FuelTransferred&) { ++aar.transferred; });
+    sim.bus().subscribe<f4::ai::atc::RefuelComplete>([&aar](const atc::RefuelComplete&) { ++aar.complete; });
 
     const auto& spawned = sim.aircraft_entities();
     if (spawned.empty()) {
@@ -1957,6 +1965,7 @@ int main(int argc, char** argv) {
     int tasking_route_wps = 0;
     int tasking_route_searches = 0;  // FindSafePath invocations
     int tasking_route_fallbacks = 0; // direct-line fallback legs
+    int tasking_receiver_refuels = 0;  // EMPL-2: package routes stamped
     int threat_ad_units = 0;         // the map's painted AD battalions
     int threat_cells = 0;            // cells carrying any viewer threat
     // C4: the ATM pipeline's counters (the summary's atm block + the
@@ -2096,6 +2105,10 @@ int main(int argc, char** argv) {
         tasking_routes_failed = ladder.routes_failed();
         tasking_route_searches = ladder.route_safe_searches();
         tasking_route_fallbacks = ladder.route_fallbacks();
+        // EMPL-2: the receiver refuel stamps (strategy-armed packages
+        // whose route gained a WP_REFUEL at the covering tanker's
+        // station — the ladder's own receiver-eligibility source).
+        tasking_receiver_refuels = ladder.receiver_refuel_waypoints();
         threat_ad_units = route_builder.threat_map().stats().ad_units;
         threat_cells =
             route_builder.threat_map().stats().threatened_cells;
@@ -2111,6 +2124,12 @@ int main(int argc, char** argv) {
                     spawner.stats().synthetic_spawned,
                     result_ledger.reinforcement_fires(),
                     result_ledger.aircraft_reinforced());
+        // EMPL-2: the receiver stamps, printed when the ladder armed
+        // them (strategy on — the arm that files the tankers).
+        if (args.strategy && tasking_receiver_refuels > 0) {
+            std::printf("aar: receiver_refuel_stamps=%d\n",
+                        tasking_receiver_refuels);
+        }
         // C4: the ATM pipeline's own telemetry — the request → package
         // → escort → slot → recovery chain, visible in one line.
         if (const auto* atm = ladder.atm_stats(); atm != nullptr) {
@@ -2194,10 +2213,19 @@ int main(int argc, char** argv) {
         out << "  \"name\": \"campaign_qc\",\n";
         out << "  \"theater\": \"" << ws.theater << "\",\n";
         out << "  \"spawn_mode\": \"campaign_flights\",\n";
+        // ABSOLUTE — the sim resolves scenario-relative paths against the
+        // scenario file's OWN directory (the out-dir here, not the CWD;
+        // the same relative-path lesson campaign_session.cpp §6 already
+        // applied: a --out-dir qc/<name> run re-opened
+        // qc/<name>/testcamp.world.json and died). A bare filename's
+        // absolute() is CWD-relative, which is what the default out-dir
+        // (the world's own directory / ".") always meant.
         out << "  \"world_json_path\": \""
-             << json_escape(args.world_json.string()) << "\",\n";
+             << json_escape(std::filesystem::absolute(args.world_json).string())
+             << "\",\n";
         out << "  \"class_table_path\": \""
-             << json_escape(args.class_table.string()) << "\",\n";
+             << json_escape(std::filesystem::absolute(args.class_table).string())
+             << "\",\n";
         out << "  \"campaign_flight_filter\": {";
         out << "\"team\": " << args.team;
         out << ", \"mission\": " << args.mission;
@@ -2210,7 +2238,8 @@ int main(int argc, char** argv) {
         out << "  \"aircraft\": [{\n";
         out << "    \"callsign\": \"CAMPAIGN1\",\n";
         out << "    \"aircraft_config_path\": \""
-             << json_escape(args.config.string()) << "\",\n";
+             << json_escape(std::filesystem::absolute(args.config).string())
+             << "\",\n";
         out << "    \"aircraft_name\": \"F-16C_50\",\n";
         out << "    \"vis_type_index\": 1052,\n";
         out << "    \"parking_spot\": {\"x\": 0.0, \"y\": 0.0, \"z\": 0.0},\n";
@@ -2267,6 +2296,44 @@ int main(int argc, char** argv) {
                 std::max(ordnance.destroyed_pct_max, m.destroyed_pct);
             ordnance.impact_log.push_back(m);
         });
+
+    // EMPL-2 — the campaign-path AAR protocol counters (the SHOWCASE-1
+    // protocol, the same nine subscriptions the scenario arm runs). The
+    // campaign path's actors: saved tanker flights (the stock war's
+    // AMIS_TANK byte) spawn into the tanker role, and saved receiver
+    // routes carry the wire's WP_REFUEL waypoints (TestCamp: 158
+    // flights) — the bridge stamps eligibility, the per-tick tanker
+    // push arms the rungs, the stub drives the duplex protocol.
+    namespace atc = f4::ai::atc;
+    struct AarCounters {
+        int requests = 0;
+        int assigned = 0;
+        int precontact = 0;
+        int clear = 0;
+        int made = 0;
+        int lost = 0;
+        int approved = 0;
+        int transferred = 0;
+        int complete = 0;
+    } aar;
+    sim.bus().subscribe<f4::ai::atc::RefuelRequest>(
+        [&aar](const atc::RefuelRequest&) { ++aar.requests; });
+    sim.bus().subscribe<f4::ai::atc::TankerAssigned>(
+        [&aar](const atc::TankerAssigned&) { ++aar.assigned; });
+    sim.bus().subscribe<f4::ai::atc::PrecontactReport>(
+        [&aar](const atc::PrecontactReport&) { ++aar.precontact; });
+    sim.bus().subscribe<f4::ai::atc::ClearToContact>(
+        [&aar](const atc::ClearToContact&) { ++aar.clear; });
+    sim.bus().subscribe<f4::ai::atc::ContactMade>(
+        [&aar](const atc::ContactMade&) { ++aar.made; });
+    sim.bus().subscribe<f4::ai::atc::ContactLost>(
+        [&aar](const atc::ContactLost&) { ++aar.lost; });
+    sim.bus().subscribe<f4::ai::atc::DisconnectApproved>(
+        [&aar](const atc::DisconnectApproved&) { ++aar.approved; });
+    sim.bus().subscribe<f4::ai::atc::FuelTransferred>(
+        [&aar](const atc::FuelTransferred&) { ++aar.transferred; });
+    sim.bus().subscribe<f4::ai::atc::RefuelComplete>(
+        [&aar](const atc::RefuelComplete&) { ++aar.complete; });
 
     const auto& sim_spawned = sim.aircraft_entities();
     std::printf("sim_run: aircraft=%zu", sim_spawned.size());
@@ -2360,6 +2427,17 @@ int main(int argc, char** argv) {
                 "features_destroyed=%d max_destroyed_pct=%.1f\n",
                 strike_flights_armed, ordnance.released, ordnance.impacts,
                 ordnance.features_destroyed, ordnance.destroyed_pct_max);
+
+    // EMPL-2 — the AAR protocol's own summary line + the gate ladder
+    // (the same vocabulary the scenario arm's AAR gate uses: exit 22 =
+    // zero ContactMade, exit 23 = latched but never completed). Fires
+    // only under --expect-aar (default off — every golden unchanged).
+    std::printf("aar_protocol: requests=%d assigned=%d precontact=%d "
+                "clear=%d made=%d lost=%d approved=%d transferred=%d "
+                "complete=%d\n",
+                aar.requests, aar.assigned, aar.precontact, aar.clear,
+                aar.made, aar.lost, aar.approved, aar.transferred,
+                aar.complete);
 
     // -----------------------------------------------------------------------
     // 4. THE RESULT LEDGER — write-back + artifacts + the C1 gate
@@ -2879,6 +2957,30 @@ int main(int argc, char** argv) {
                      "dropped every event); inspect campaign_result.json.\n",
                      sink_stats.kills_seen, sink_stats.bomb_impacts_seen);
         return 5;
+    }
+    // EMPL-2 gate (exits 22/23 — the scenario arm's AAR vocabulary, on
+    // the campaign path): --expect-aar demands the SHOWCASE-1 protocol
+    // from the run's own tanker + receiver actors. Exit 22: no boom
+    // ever latched. Exit 23: latched but never completed (no disconnect
+    // approval / refuel complete). Both point at the trace's refuel
+    // states per aircraft.
+    if (args.expect_aar && aar.made == 0) {
+        std::fprintf(stderr,
+                     "campaign_qc: AAR FAILURE — a tanker and receiver "
+                     "refuel waypoints were expected, but the boom never "
+                     "latched (zero ContactMade, exit 22). Check the "
+                     "spawned tanker (role from the mission byte) and "
+                     "the receivers' armed rungs in trace.json.\n");
+        return 22;
+    }
+    if (args.expect_aar && aar.approved == 0 && aar.complete == 0) {
+        std::fprintf(stderr,
+                     "campaign_qc: AAR FAILURE — the boom latched %d "
+                     "time(s) but DisconnectApproved/RefuelComplete "
+                     "never fired (exit 23). Extend --ticks or inspect "
+                     "the trace's refuel states.\n",
+                     aar.made);
+        return 23;
     }
     // C2 gate (exit 6): the tasking ladder ran over belligerents that
     // HAD aircraft, yet drew not one — the generation side broke (the

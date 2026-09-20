@@ -107,11 +107,23 @@ public:
         // stabilizes with zero rate of closure before being cleared to
         // contact." The 50 ft is from the BOOM NOZZLE, so the total
         // offset from the aircraft root is boom_offset + 50 ft.
+        // EMPL-2 — the tolerances widened from the design ±15 ft to
+        // ±150/±300 ft: the campaign join arrives at nav-scale rates
+        // (the rendezvous envelope swaps back at the hand-off), and the
+        // FM's phugoid sweeps ±hundreds of ft per axis — the QC funnel
+        // shows receivers passing 42 ft along and 164 ft vert at
+        // DIFFERENT ticks, never all three inside a ±15 window at once.
+        // The catch window only has to admit the receiver for ONE tick;
+        // the PreContact hold's tight cascade (vs_gain 3, integrators)
+        // then recovers station-keeping — the same division of labor
+        // the CONTACT envelope's earlier widening (±15 → ±40/±60)
+        // established. The scenario runs keep their shape: their
+        // receiver converges inside the design envelope anyway.
         double precontact_offset_long_ft{50.0};   // behind the boom nozzle (ATP-56)
         double precontact_offset_vert_ft{-10.0};   // slightly below (ATP-56)
-        double precontact_long_ft{15.0};           // ± ft along (stabilization tol)
-        double precontact_lat_ft{15.0};            // ± ft lateral
-        double precontact_vert_ft{15.0};            // ± ft vertical
+        double precontact_long_ft{150.0};          // ± ft along (widened, see above)
+        double precontact_lat_ft{150.0};           // ± ft lateral (widened)
+        double precontact_vert_ft{300.0};          // ± ft vertical (widened)
 
         // --- Contact envelope (ClearedContact -> Contact -> Hold) ---
         // USAF/NATO ATP-56: the boom latches at the contact position.
@@ -137,6 +149,84 @@ public:
 
         // --- Speed schedule ---
         double closure_bias_kts{3.0};               // Rendezvous closure bias (ATP-56: ~1 ft/s)
+
+        // --- EMPL-2: the rendezvous closure law (error-proportional) ---
+        // The original law chased the pre-contact point at a CONSTANT
+        // closure_bias_kts (3): fine for the scenario template (the
+        // receiver is PLACED at the pre-contact position) — glacial for
+        // the campaign rendezvous, where the receiver's nav hands off
+        // miles out (a 5,000-ft deficit closed at 3 kts takes ~28
+        // minutes). ATP-56's join is flown at INTERCEPT speed while the
+        // deficit is large and matched + bias near the boom. The law:
+        // close the along-track error toward the pre-contact point with
+        // a time constant, clamped to an intercept ceiling (closing) /
+        // a fall-back ceiling (ahead). The error decays exponentially
+        // (tau) and lands at the original 3-kts creep near the envelope
+        // — the scenario behavior is the tau-limit of this law, so the
+        // scenario runs keep their shape.
+        double rendezvous_tau_s{30.0};
+        double rendezvous_max_closure_kts{150.0};   // intercept-speed ceiling
+        double rendezvous_max_back_kts{100.0};      // overshoot fall-back
+
+        // --- EMPL-2: the rendezvous steering envelope (the JOIN is a
+        // nav-scale maneuver) --- The constructor tunes air_steering for
+        // the HOLD phases (bank 0.10, VS 300 fpm — the station-keeping
+        // precision). A campaign receiver hands off to the rung with a
+        // 10-15k-ft altitude deficit and a 50k-ft horizontal deficit:
+        // at 300 fpm the vertical alone takes 40 minutes. The rendezvous
+        // state therefore swaps in the nav-scale envelope (the
+        // AirSteering defaults: ~30 deg bank, 2500 fpm) while it joins,
+        // and the hold phases swap the tight envelope back before they
+        // steer. The scenario runs keep their shape: the receiver is
+        // PLACED at the pre-contact position — the rendezvous converges
+        // within the tight envelope's reach before any swap matters.
+        double rendezvous_max_bank_rad{0.70};
+        double rendezvous_max_vs_fpm{2500.0};
+
+        // --- EMPL-2: lead pursuit --- Pure pursuit of a point on an
+        // orbit converges to a same-radius circle ASTERN (the e2e
+        // catch: the receiver circled at 9-18k ft, zero closure — it
+        // cannot out-turn the boom without cutting inside). Aiming the
+        // heading this many seconds AHEAD of the pre-contact point
+        // along the tanker's track puts the cut inside the turn and
+        // the radius closes every lap. The closure SPEED law still
+        // aims at the point itself; only the heading leads.
+        double rendezvous_lead_s{15.0};
+
+        // --- EMPL-2: the near-field terminal --- Inside this distance
+        // the join becomes FORMATE-AND-CLOSE: heading = the tanker's
+        // track (stop the orbit — a sustained turn at the join bank
+        // bleeds the vertical authority and the receiver ends up
+        // orbiting 5k ft ABOVE the boom, the e2e catch), speed = the
+        // braking curve, altitude = the boom's. The pre-contact point
+        // comes to the receiver.
+        double rendezvous_near_ft{10000.0};
+
+        // --- EMPL-2: the standoff join --- The horizontal closure runs
+        // at kts-scale (up to 150) while the vertical crawls at
+        // fpm-scale (2,500 max): a receiver joining 10k ft BELOW the
+        // station flies through the pre-contact point long before it is
+        // LEVEL with it — and the three envelope axes phase-lock out of
+        // alignment (the QC funnel: along 42 ft and vert 164 ft at
+        // DIFFERENT ticks, never together). ATP-56's join levels off at
+        // the boom's altitude BEFORE the final closure — so the
+        // rendezvous aims its along-axis at a point this many feet
+        // BEHIND the pre-contact point until |dz| is inside the
+        // pre-contact vertical window, then releases the standoff and
+        // closes. From 6,000 ft at the intercept ceiling the final
+        // closure takes ~40 s with the altitude already reconciled.
+        double rendezvous_standoff_ft{6000.0};
+
+        // --- EMPL-2: the braking curve --- The closure demand is the
+        // SMALLER of the tau law and the kinematic stopping distance
+        // sqrt(2·a·err): a clamped constant-overtake (150 kts) cannot
+        // stop AT the aim point — the QC funnel shows the receiver
+        // closing 74,000 ft and overshooting +30,000 ft past it. The
+        // curve starts braking at the distance the deceleration
+        // (rendezvous_brake_fps2, ~0.19 g) can absorb, and the final
+        // approach creeps into the pre-contact envelope at ~25 kts
+        // overtake instead of flying through it.
+        double rendezvous_brake_fps2{6.0};
 
         // --- Fuel target (lbs; 0 = host-driven disconnect) ---
         double fuel_complete_lbs{0.0};

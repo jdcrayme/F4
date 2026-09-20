@@ -90,6 +90,9 @@ void NavigationModule::set_route(std::vector<Waypoint> route) {
     station_done_ = false;
     station_elapsed_ = 0.0;
     loop_start_ = loop_end_ = 0;
+    // EMPL-1a: a re-tasked module must not inherit the previous route's
+    // attack run (same rule as the station hold above).
+    attack_engaged_ = false;
     // NAV-B: the first leg emanates from where the aircraft is when the
     // FIRST update() runs (see update() — set_route can be called before
     // any state has been cached, e.g. the Enroute start-phase handoff,
@@ -153,6 +156,21 @@ AIControlOutput NavigationModule::update(double dt, const flight::IAircraftState
         if (sm_.current() == before) break;
     }
 
+    // EMPL-1a: engage the attack run the tick its delivery waypoint
+    // becomes current — the virtual leg anchors where the aircraft
+    // ACTUALLY is (after capture/consolidation, so a spawn established
+    // mid-leg engages from the consolidated position, the same rule as
+    // leg_from_ above). Keyed by index: the same waypoint never
+    // re-anchors (a re-armed stick on a re-flown leg keeps its line).
+    if (sm_.current() == NavigationState::ToWaypoint &&
+        wp_index_ < route_.size() &&
+        is_ag_delivery_action(route_[wp_index_].action) &&
+        (!attack_engaged_ || attack_from_wp_ != wp_index_)) {
+        attack_from_ = current_position_;
+        attack_from_wp_ = wp_index_;
+        attack_engaged_ = true;
+    }
+
     switch (sm_.current()) {
         case NavigationState::ToWaypoint:
             return controls_for_waypoint();
@@ -210,8 +228,14 @@ void NavigationModule::check_waypoint_capture()
     // run: the turn lead put the closest approach 7,160 ft wide of the
     // target with a ~5,700 ft envelope — no release). Zero lead on
     // delivery waypoints: fly THROUGH the point, turn after.
+    // EMPL-2: a CAMPAIGN WP_REFUEL waypoint is must-fly for the same
+    // reason — it IS the declared rendezvous, the point the receiver's
+    // pairing and join are keyed on (a 180° corner's clamped lead
+    // sequenced the waypoint before the receiver ever flew its leg:
+    // the e2e catch).
     if (wp_index_ + 1 < route_.size() &&
-        !is_ag_delivery_action(route_[wp_index_].action)) {
+        !is_ag_delivery_action(route_[wp_index_].action) &&
+        !is_campaign_refuel_action(route_[wp_index_].action)) {
         constexpr double GRAVITY_FPS2 = 32.174;
         // NAV-B: turn geometry needs TRUE airspeed — the aircraft turns at
         // TAS, but the interface only exposes CAS. At 10,000 ft the ISA
@@ -378,9 +402,22 @@ AIControlOutput NavigationModule::controls_for_waypoint() const
     // specified altitude (1500 ft) for the glideslope-from-below intercept.
     // The landing module's altitude gate (check_fix_reached) handles the
     // descent to pattern altitude before the intercept begins.
+    // EMPL-1a: a DELIVERY waypoint is not floored either — it flies its
+    // own altitude. The campaign bridge floors delivery waypoints at
+    // 1,500 ft MSL (kMinDeliveryWaypointAltFt — the release envelope's
+    // design dz); the 3,000 ft terrain floor silently overrode it and
+    // DOUBLED the throw (dz 3,000 -> R ~9,200 ft at 400 kts), which
+    // stretched the stick's along-track spread and halved the angular
+    // budget at the release boundary. The campaign world is flat (the
+    // save convention — objectives at z=0, no terrain in the world), so
+    // the 1,500 ft delivery altitude is safe there; a terrain-aware
+    // world owns its own delivery floor (the M4.5 profile tranche).
     const bool is_last_wp = (wp_index_ >= route_.size() - 1);
-    double target_alt = is_last_wp ? wp.position.z
-                                   : std::max(wp.position.z, TERRAIN_CLEARANCE_FLOOR_MSL);
+    const bool is_delivery_wp = is_ag_delivery_action(wp.action);
+    double target_alt =
+        (is_last_wp || is_delivery_wp)
+            ? wp.position.z
+            : std::max(wp.position.z, TERRAIN_CLEARANCE_FLOOR_MSL);
     return air_steering.steer(desired_hdg, target_alt, speed,
                               steering_input());
 }
@@ -394,19 +431,62 @@ double NavigationModule::nav_heading_rad() const
     if (wp_index_ >= route_.size()) return current_heading_rad_;
     const auto& wp = route_[wp_index_];
 
-    // EMPL-1: a delivery waypoint's leg is an ATTACK RUN, not a
-    // navigation leg. FreeFalcon's strike pass homes the airframe at the
-    // target (the DigitalBrain's pure pursuit on the run-in); the LNAV
-    // centerline law below leaves a residual cross-track through the
-    // release point (the TestCamp INTSTRIKE sweep: ~400 ft at the
-    // |d - R| crossing, 3x the CCIP tolerance — the trigger never
-    // satisfied and the stick never fell). Pursuit guidance converges
-    // the flight path THROUGH the aim point, which is exactly the
-    // geometry the StrikeModule's release gate models. Zero-lead
-    // fly-through (NAV-B) already sequences the corner after the point;
-    // this completes the fly-through contract on the steering side.
-    // Every non-delivery leg keeps the LNAV law byte-identically.
+    // EMPL-1a: a delivery waypoint's leg is an ATTACK RUN, not a
+    // navigation leg — and it is flown as a VIRTUAL LNAV leg THROUGH
+    // the aim, anchored at the engagement position (frozen in update()).
+    //
+    // History: NAV-B's original leg law left a ~400 ft corner residual
+    // through the release point (the trigger starved — exit 4); EMPL-1's
+    // interim fix was pure pursuit at the point, which restored the
+    // release but EXPOSED the next defect: a pursuit curve of a
+    // stationary point CONSERVES its entry lateral offset almost to the
+    // target (bearing rate ~ offset/distance — the offset only kills in
+    // the last few hundred feet). The TestCamp INTSTRIKE stick released
+    // ~6 deg off bearing at ~6,700 ft: 675 of the 682-889 ft miss was
+    // LATERAL, under 100 ft along-track, and every bomb missed the
+    // feature grid wide (features_destroyed=0, EMPL-1a's gate).
+    //
+    // The virtual leg fixes the convergence: the NAV-B cross-track law
+    // on the line attack_from_ -> aim drives the offset down
+    // EXPONENTIALLY and holds the line, and the line ENDS at the aim —
+    // so at the release boundary the track passes through the aim in
+    // BOTH axes, which is exactly the geometry the bomb's straight-line
+    // flyout assumes. Every non-delivery leg keeps the LNAV law
+    // byte-identically.
     if (is_ag_delivery_action(wp.action)) {
+        if (attack_engaged_) {
+            const double adx = wp.position.x - attack_from_.x;
+            const double ady = wp.position.y - attack_from_.y;
+            const double alen = std::sqrt(adx * adx + ady * ady);
+            if (alen >= attack_min_virtual_leg_ft) {
+                const double course =
+                    AirSteering::bearing_to(attack_from_, wp.position);
+                const double leg_len = std::max(1.0, alen);
+                // Right unit vector of the virtual leg (ENU; compass
+                // course convention) — the same construction the real
+                // leg uses below.
+                const double right_x = ady / leg_len;
+                const double right_y = -adx / leg_len;
+                const double xte =
+                    (current_position_.x - attack_from_.x) * right_x
+                  + (current_position_.y - attack_from_.y) * right_y;
+                // NAV-B/B2 correction (mirrored from the leg law below;
+                // the gains are the module's own, so a retune moves both).
+                const double corr_p =
+                    std::clamp(std::atan2(-xte, xte_gain_ft),
+                               -max_intercept_rad, max_intercept_rad);
+                const double closing = AirSteering::heading_error(
+                    current_heading_rad_, course);
+                const double corr =
+                    std::clamp(corr_p - xte_damp_gain * std::sin(closing),
+                               -max_intercept_rad, max_intercept_rad);
+                return course + corr;
+            }
+        }
+        // Degenerate virtual leg (never engaged — e.g. a bare
+        // nav_heading_rad() probe — or engaged too close to the aim for
+        // a stable anchored course): pure pursuit at the point, exact
+        // where the offset has already converged.
         return AirSteering::bearing_to(current_position_, wp.position);
     }
 

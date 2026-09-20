@@ -46,6 +46,11 @@ f4_simulation_add_test(test_frames                 test_frames.cpp)
 f4_simulation_add_test(test_real_layout_derivation test_real_layout_derivation.cpp)
 f4_simulation_add_test(test_digi_mission           test_digi_mission.cpp)
 f4_simulation_add_test(test_aar_e2e                 test_aar_e2e.cpp)   # Tranche D (AAR)
+f4_simulation_add_test(test_campaign_aar            test_campaign_aar.cpp)  # EMPL-2 (campaign-path AAR)
+target_compile_definitions(test_campaign_aar PRIVATE
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
 f4_simulation_add_test(test_formation_acceptance   test_formation_acceptance.cpp)  # Tranche C
 f4_simulation_add_test(test_intercept_convergence    test_intercept_convergence.cpp)
 f4_simulation_add_test(test_fcs_trace_pipeline     test_fcs_trace_pipeline.cpp)

@@ -523,6 +523,15 @@ private:
     /// kinematically (straight-and level; ScriptedTanker holds heading/
     /// alt/speed constant).
     void push_tanker_picture(double dt);
+    /// EMPL-2 — the campaign-path tanker discovery: scan the registered
+    /// aircraft for brains carrying the tanker role (the bridge stamps
+    /// it from the mission byte at spawn). Campaign tankers spawn on
+    /// tasking cycles — MID-RUN — so the initialize-time scan the
+    /// scenario path runs cannot see them; the per-tick picture push
+    /// rescans whenever needed (a despawned tanker simply vanishes from
+    /// the next scan — self-healing by construction). First carrier =
+    /// the scenario path's tanker (single-tanker worlds by design).
+    [[nodiscard]] std::vector<entities::EntityId> find_tanker_entities_();
     /// The arbiter's safety rungs (M3-arbiter): every tick BEFORE world
     /// update, push each airborne aircraft brain (a) its TERRAIN picture
     /// — elevation under the jet + the max elevation in the look-ahead
@@ -723,6 +732,22 @@ private:
     /// WP_REFUEL waypoint. Cached at initialize() so the per-tick
     /// push_tanker_picture arming decision is a single bool read.
     bool scenario_has_refuel_waypoint_{false};
+    /// EMPL-2 — at least one REGISTERED aircraft carries the campaign
+    /// receiver eligibility (the bridge stamps it when the flight's
+    /// route carries a campaign WP_REFUEL). register_aircraft sets it
+    /// on registration; the per-tick tanker push early-outs while both
+    /// this and the scenario gate are false — a run with no refuel
+    /// actors pays nothing for the AAR walk.
+    bool campaign_has_refuel_receivers_{false};
+    /// EMPL-2 — the STICKY receiver→tanker pairing (receiver EntityId
+    /// value → paired tanker EntityId value). The nearest-station pick
+    /// is a PLANNING decision — recomputing it per tick lets two
+    /// tankers orbiting near a rendezvous point flip the picture
+    /// mid-join and the pursuit never converges. Held while the paired
+    /// tanker lives and stays airborne; erased on the hysteresis
+    /// release (the tanker left the release ring). Bounded by the
+    /// receiver count.
+    std::unordered_map<std::uint32_t, std::uint32_t> receiver_pairing_;
 
     // SimData AI data (BRAINDAT.brn + FORMDAT.FIL, converted to canonical
     // JSON by f4-convert). OWNED HERE because both consumers take

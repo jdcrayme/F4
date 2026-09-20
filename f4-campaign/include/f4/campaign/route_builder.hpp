@@ -127,10 +127,13 @@ inline constexpr std::uint16_t kWpfCriticalMask = 0x07FF;
 inline constexpr std::uint8_t kWpNothing = 0;
 inline constexpr std::uint8_t kWpTakeoff = 1;
 inline constexpr std::uint8_t kWpAssemble = 2;
-/// CAMP-ATM-1 — the refuel waypoint (campwp.h WP_REFUEL): the tanker
-/// waypoint — the orbit-approach point where package aircraft top off
-/// before joining the station. Turnpoint-flagged (never eliminated).
-inline constexpr std::uint8_t kWpRefuel = 3;
+/// EMPL-2 — the refuel waypoint: campwp.h WP_REFUEL is 4 (the byte the
+/// real saves carry on receiver routes — TestCamp: 158 flights). The
+/// former value 3 was WP_POSTASSEMBLE — the tanker's own stamped
+/// waypoint was one byte off the wire vocabulary, and the sim-side
+/// receiver eligibility (the bridge's route scan) would never have read
+/// it. Turnpoint-flagged (never eliminated).
+inline constexpr std::uint8_t kWpRefuel = 4;
 inline constexpr std::uint8_t kWpLand = 7;
 
 /// Does this profile's route DELIVER ordnance on an objective? The C3

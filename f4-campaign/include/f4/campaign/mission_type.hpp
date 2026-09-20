@@ -132,6 +132,34 @@ static_assert(kMissionTypeNames[kMissionAship] == "AMIS_ASHIP");
     return mission_byte == kMissionAship;
 }
 
+// EMPL-2 — the TANKER bytes. Two of them, because the pipeline carries
+// two vocabularies and the saves use BOTH:
+//   * kMissionTanker (27, "AMIS_TANKER") — this table's own row and the
+//     byte the ATM's ADDTANKER filings emit (file_support_flight_ uses
+//     mission_type_byte("AMIS_TANKER")).
+//   * kMissionTank (39, "AMIS_TANK") — the byte the STOCK WAR actually
+//     files for tankers in real saves (TestCamp: 78 flights, byte 27
+//     absent — MISSION_QC_COOKBOOK §3.1's "two traps" note). The
+//     original game's name for the refuel mission; the G2 interdiction
+//     pool's "TANK's armor" reading is about target SELECTION for
+//     ladder-generated TANK requests, not about the saved flights.
+// FreeFalcon's own mission.h renumbers the tanker a third time
+// (AMIS_TANKER = 28 in THEIR enum) — the reference's role identity
+// (TankerBrain / I_AM_A_TANKER keyed on its AMIS_TANKER) is what this
+// predicate serves, not its byte literal.
+inline constexpr std::uint8_t kMissionTanker = 27;
+inline constexpr std::uint8_t kMissionTank = 39;
+static_assert(kMissionTypeNames[kMissionTanker] == "AMIS_TANKER");
+static_assert(kMissionTypeNames[kMissionTank] == "AMIS_TANK");
+
+/// EMPL-2 — tanker-hood across the pipeline's vocabularies (both wire
+/// bytes). Drives the sim-side tanker role (spawn_aircraft_for_flight's
+/// brain.set_tanker) — the role the AAR redesign's tanker discovery,
+/// picture push, and traffic-picture skip all key on.
+[[nodiscard]] constexpr bool mission_is_tanker(std::uint8_t mission_byte) {
+    return mission_byte == kMissionTanker || mission_byte == kMissionTank;
+}
+
 // ============================================================================
 // Mission categories (B.3 tranche)
 // ============================================================================

@@ -28,6 +28,7 @@
 #include "f4/simulation/frames.hpp"
 
 #include <f4/ai/brain_component.hpp>
+#include <f4/simulation/campaign_origin.hpp>
 #include <f4/ai/atc/atc_interface.hpp>
 #include <f4/ai/atc/stub_atc.hpp>
 #include <f4/ai/atc/tower_atc.hpp>
@@ -349,6 +350,16 @@ bool Simulation::register_aircraft(entities::EntityId id) {
         if (existing == id) return false;  // idempotent
     }
     aircraft_entities_.push_back(id);
+    // EMPL-2 — note the AAR receiver eligibility (the bridge stamps it
+    // at spawn; the per-tick tanker push early-outs while no receiver
+    // and no tanker exist anywhere in the run).
+    {
+        entities::EntityHandle h(id, &world_);
+        if (auto* brain = h.get<f4::ai::BrainComponent>();
+            brain != nullptr && brain->refuel_eligible()) {
+            campaign_has_refuel_receivers_ = true;
+        }
+    }
     return true;
 }
 
@@ -1160,43 +1171,265 @@ void Simulation::push_tanker_picture(double dt) {
     // TankerPicture, then push it to every receiver (non-tanker
     // aircraft with a REFUEL waypoint).
     (void)dt;   // the tanker's own FM advances in world_.update_all
-    if (tanker_entity_.value == 0) return;   // no tanker in this scenario
-    if (!scenario_has_refuel_waypoint_) return;
 
-    entities::EntityHandle tanker_h(tanker_entity_, &world_);
-    const auto* tf = tanker_h.get<entities::TransformComponent>();
-    const auto* fm = tanker_h.get<f4::flight::FlightModelComponent>();
-    if (tf == nullptr || fm == nullptr) return;
-
-    // Build the tanker picture from the real FM.
-    f4::ai::modules::TankerPicture p{};
-    p.valid = fm->state().gear.inAir;
-    p.position = tf->position;
-    p.altitude_msl_ft = tf->position.z;
-    p.speed_kts = fm->state().vcas;
-    // Heading: prefer the velocity-derived heading (the tanker's nose IS
-    // its velocity vector at formation distances). When the velocity is
-    // zero (the first tick — no position delta yet), fall back to the
-    // FM's psi (the heading the FM was initialized with). Without this
-    // fallback the heading defaults to 0 (north) and the pre-contact
-    // point is computed in the wrong place.
-    const auto vel = tf->velocity();
-    if (std::hypot(vel.x, vel.y) > 1.0) {
-        p.heading_rad = std::atan2(vel.x, vel.y);
-    } else {
-        p.heading_rad = f4::flight::to_radians(fm->state().kin.psi);
+    // EMPL-2 — no refuel actors anywhere (no scenario refuel waypoint,
+    // no campaign receiver registered): pay nothing.
+    if (!scenario_has_refuel_waypoint_ && !campaign_has_refuel_receivers_) {
+        return;
     }
 
-    // Push to every receiver (non-tanker aircraft). The tanker itself
-    // is skipped (it's the tanker, not a receiver).
+    // The tanker roster — rescanned each tick the push runs (a scan is
+    // one flag read per registered aircraft): campaign tankers spawn
+    // MID-RUN on tasking cycles, and a despawned tanker simply drops
+    // out of the next scan (self-healing by construction).
+    const auto tankers = find_tanker_entities_();
+    if (tankers.empty()) return;
+
+    // EMPL-2 DEBUG (env-gated; remove after the acceptance run).
+    static FILE* aar_debug = []() -> FILE* {
+        const char* v = std::getenv("F4_AAR_DEBUG");
+        return v != nullptr ? stderr : nullptr;
+    }();
+    if (aar_debug != nullptr && (tick_count() % 6000) == 0) {
+        std::fprintf(aar_debug,
+                     "[aar-push] t=%d tankers=%zu scen_gate=%d camp_gate=%d\n",
+                     tick_count(), tankers.size(),
+                     scenario_has_refuel_waypoint_ ? 1 : 0,
+                     campaign_has_refuel_receivers_ ? 1 : 0);
+    }
+
+    // Picture builder: the tanker's real FM, one per tanker per tick.
+    auto build_picture = [](entities::EntityWorld& world,
+                            entities::EntityId id)
+        -> std::optional<f4::ai::modules::TankerPicture> {
+        entities::EntityHandle th(id, &world);
+        const auto* tf = th.get<entities::TransformComponent>();
+        const auto* fm = th.get<f4::flight::FlightModelComponent>();
+        if (tf == nullptr || fm == nullptr) return std::nullopt;
+        f4::ai::modules::TankerPicture p{};
+        p.valid = fm->state().gear.inAir;
+        p.position = tf->position;
+        p.altitude_msl_ft = tf->position.z;
+        p.speed_kts = fm->state().vcas;
+        // Heading: prefer the velocity-derived heading (the tanker's
+        // nose IS its velocity vector at formation distances). When the
+        // velocity is zero (the first tick — no position delta yet),
+        // fall back to the FM's psi (the heading the FM was initialized
+        // with). Without this fallback the heading defaults to 0
+        // (north) and the pre-contact point is computed in the wrong
+        // place.
+        const auto vel = tf->velocity();
+        if (std::hypot(vel.x, vel.y) > 1.0) {
+            p.heading_rad = std::atan2(vel.x, vel.y);
+        } else {
+            p.heading_rad = f4::flight::to_radians(fm->state().kin.psi);
+        }
+        return p;
+    };
+
+    // =================================================================
+    // SCENARIO CONTRACT (unchanged): the scenario's single tanker (the
+    // initialize scan found it; the roster's first carrier is the same
+    // aircraft). Every non-tanker scenario aircraft is a receiver —
+    // arm it unconditionally and push THE tanker's picture.
+    // =================================================================
+    if (scenario_has_refuel_waypoint_) {
+        tanker_entity_ = tankers.front();
+        // Hand the stub its tanker config (the RefuelRequest ->
+        // TankerAssigned answer carries the live id; the receiver
+        // steers on the PICTURE, not this). Configured on first
+        // discovery — set_tanker is idempotent, so re-discovery after
+        // a despawn just refreshes it.
+        if (atc_) {
+            entities::EntityHandle th(tanker_entity_, &world_);
+            const auto* tf = th.get<entities::TransformComponent>();
+            const auto* fm = th.get<f4::flight::FlightModelComponent>();
+            f4::ai::atc::TankerConfig tc;
+            tc.tanker_entity_id = tanker_entity_.value;
+            if (tf) tc.position = tf->position;
+            if (tf) tc.altitude_ft = tf->position.z;
+            if (fm) tc.speed_kts = fm->state().vcas;
+            atc_->set_tanker(tc);
+        }
+        auto p = build_picture(world_, tanker_entity_);
+        if (!p) {
+            tanker_entity_ = entities::EntityId{};
+            return;
+        }
+        for (const auto eid : aircraft_entities_) {
+            if (eid.value == tanker_entity_.value) continue;
+            entities::EntityHandle h(eid, &world_);
+            auto* brain = h.get<f4::ai::BrainComponent>();
+            if (brain == nullptr || brain->is_tanker()) continue;
+            brain->set_refuel_armed(true);
+            brain->update_tanker_picture(*p);
+        }
+        return;
+    }
+
+    // =================================================================
+    // EMPL-2 — THE CAMPAIGN CONTRACT: per-receiver TANKER PAIRING (the
+    // reference's FindNearestActiveTanker). A real save fields MANY
+    // tankers, each paired to the receivers its own planner stamped:
+    // the receiver's WP_REFUEL waypoint IS the declared rendezvous —
+    // the station the planner picked. So: an eligible receiver whose
+    // nav is flying its refuel leg is paired with the tanker whose
+    // position is nearest THE WAYPOINT, and armed only when that
+    // tanker is inside the join ring (the receiver ferried there at
+    // cruise; the rung joins). Arming any earlier (first tanker /
+    // spawn-time) diverts receivers off their routes — the QC catch:
+    // 21 receivers beelined to a boom 60+ NM away, strike releases
+    // dropped 12 → 8.
+    // =================================================================
+    struct TankerPic {
+        entities::EntityId id;
+        f4::ai::modules::TankerPicture p;
+    };
+    std::vector<TankerPic> pics;
+    pics.reserve(tankers.size());
+    for (const auto id : tankers) {
+        auto p = build_picture(world_, id);
+        if (p) pics.push_back(TankerPic{id, *p});
+    }
+    if (pics.empty()) return;
+
+    constexpr double kAarJoinRingFt = 52800.0;   // 10 NM — the orbit's scale
+
     for (const auto eid : aircraft_entities_) {
-        if (eid.value == tanker_entity_.value) continue;   // skip the tanker
         entities::EntityHandle h(eid, &world_);
         auto* brain = h.get<f4::ai::BrainComponent>();
         if (brain == nullptr || brain->is_tanker()) continue;
-        brain->set_refuel_armed(true);
-        brain->update_tanker_picture(p);
+        if (!brain->refuel_eligible()) continue;
+        const auto leg_pos = brain->refuel_waypoint_position();
+        if (!leg_pos) continue;   // not on its refuel leg
+
+        // Pair — STICKY (the reference's FindNearestActiveTanker is a
+        // PLANNING pick, not a per-tick re-sort). The QC catch: two
+        // tankers orbiting near a receiver's waypoint flip the nearest
+        // pick every few seconds — the receiver's picture jumped between
+        // tankers 40 NM apart mid-join and the pursuit never converged
+        // (dist 39k → 72k ft in one re-pick). So: keep the receiver's
+        // cached tanker while it stays alive and airborne; re-pick only
+        // when there is no cached tanker left to hold.
+        const TankerPic* best = nullptr;
+        const auto pit = receiver_pairing_.find(eid.value);
+        if (pit != receiver_pairing_.end()) {
+            for (const auto& tp : pics) {
+                if (tp.id.value == pit->second) {
+                    best = &tp;
+                    break;
+                }
+            }
+        }
+        if (best == nullptr) {
+            double best_d2 = 0.0;
+            for (const auto& tp : pics) {
+                if (!tp.p.valid) continue;
+                const double dx = leg_pos->x - tp.p.position.x;
+                const double dy = leg_pos->y - tp.p.position.y;
+                const double d2 = dx * dx + dy * dy;
+                if (best == nullptr || d2 < best_d2) {
+                    best = &tp;
+                    best_d2 = d2;
+                }
+            }
+            if (best != nullptr) {
+                receiver_pairing_[eid.value] = best->id.value;
+            }
+        }
+        if (best == nullptr) {
+            // Every tanker grounded right now: keep the receiver
+            // unarmed (no request storms) and unpictured.
+            continue;
+        }
+        // The join ring: arm when the PAIRED tanker is inside it (the
+        // receiver's own position vs the tanker — the rung's pursuit
+        // closes the last miles with the rendezvous closure law).
+        // Hysteresis: an armed receiver whose tanker has LEFT (the
+        // 30-min station hold expired and the tanker flew home — the
+        // 60-min QC run's tail) is DISARMED at twice the ring — the
+        // rung hands back to nav, the receiver resumes its route, and
+        // it re-arms if the tanker (or another pairing) comes back.
+        // Without the release the receiver chases a departing tanker
+        // across the theater (the QC catch: armed receivers 250 NM
+        // from a tanker on approach).
+        const auto* own_tf = h.get<entities::TransformComponent>();
+        if (own_tf != nullptr) {
+            const double dx = own_tf->position.x - best->p.position.x;
+            const double dy = own_tf->position.y - best->p.position.y;
+            const double dz = own_tf->position.z - best->p.position.z;
+            const double d2 = dx * dx + dy * dy + dz * dz;
+            if (brain->refuel_armed()) {
+                const auto st = brain->refuel().state();  // f4::ai::modules::RefuelState
+                const bool mid_protocol =
+                    st != f4::ai::modules::RefuelState::Rendezvous &&
+                    st != f4::ai::modules::RefuelState::NoTanker;
+                if (d2 > (2.0 * kAarJoinRingFt) * (2.0 * kAarJoinRingFt) &&
+                    !mid_protocol) {
+                    brain->set_refuel_armed(false);
+                    // Release the pairing too — the tanker left and the
+                    // receiver re-airs: the next re-pick (nearest to
+                    // the rendezvous point) may find its replacement.
+                    receiver_pairing_.erase(eid.value);
+                }
+            } else if (d2 <= kAarJoinRingFt * kAarJoinRingFt) {
+                brain->set_refuel_armed(true);
+            }
+        }
+        brain->update_tanker_picture(best->p);
+
+        // EMPL-2 DEBUG (env-gated; remove after the acceptance run):
+        // the armed receiver's join funnel every 600 ticks.
+        static FILE* aar_debug = []() -> FILE* {
+            const char* v = std::getenv("F4_AAR_DEBUG");
+            return v != nullptr ? stderr : nullptr;
+        }();
+        if (aar_debug != nullptr && (tick_count() % 600) == 0) {
+            const auto* own_tf2 = h.get<entities::TransformComponent>();
+            const auto* org = h.get<CampaignOriginComponent>();
+            if (own_tf2 != nullptr) {
+                // The pre-contact envelope's own frame: along/lat/vert
+                // vs precontact_point() in the tanker's heading frame
+                // (the same math in_precontact_envelope runs).
+                const auto pp = brain->refuel().precontact_point();
+                const double hdg = best->p.heading_rad;
+                const double fx = std::sin(hdg), fy = std::cos(hdg);
+                const double rx = own_tf2->position.x - pp.x;
+                const double ry = own_tf2->position.y - pp.y;
+                const double along = rx * fx + ry * fy;
+                const double lat = rx * fy - ry * fx;
+                const double vert = own_tf2->position.z - pp.z;
+                std::fprintf(aar_debug,
+                             "[aar-join] t=%d ac=%u mb=%u armed=%d "
+                             "state=%s in_pc=%d dist_ft=%.0f along=%.0f "
+                             "lat=%.0f vert=%.0f\n",
+                             tick_count(), eid.value,
+                             (org != nullptr) ? org->mission_byte : 0u,
+                             brain->refuel_armed() ? 1 : 0,
+                             brain->refuel().state_name().c_str(),
+                             brain->refuel().in_precontact_envelope() ? 1 : 0,
+                             std::hypot(own_tf2->position.x - best->p.position.x,
+                                        own_tf2->position.y - best->p.position.y),
+                             along, lat, vert);
+            }
+        }
     }
+}
+
+std::vector<entities::EntityId> Simulation::find_tanker_entities_() {
+    // EMPL-2 — the tanker-role scan (the same predicate initialize()
+    // runs for the scenario path, now callable per tick for the
+    // campaign path's mid-run spawns). First carrier = the scenario
+    // path's tanker; the roster serves the campaign path's per-receiver
+    // nearest-station pairing (the reference's FindNearestActiveTanker
+    // — see CAMP_EMPLOYMENT_PLAN.md §3).
+    std::vector<entities::EntityId> out;
+    for (const auto eid : aircraft_entities_) {
+        entities::EntityHandle h(eid, &world_);
+        const auto* brain = h.get<f4::ai::BrainComponent>();
+        if (brain != nullptr && brain->is_tanker()) out.push_back(eid);
+    }
+    return out;
 }
 
 void Simulation::push_air_picture_(double dt) {
@@ -1474,20 +1707,22 @@ void Simulation::push_safety_pictures() {
 
         // --- Traffic picture ---------------------------------------------
         std::vector<f4::ai::modules::CollisionAvoidModule::Intruder> traffic;
-        // Is this aircraft the tanker? If so, skip refuel-armed receivers
+        // Is this aircraft a TANKER? If so, skip refuel-armed receivers
         // (the tanker shouldn't avoid the receiver it's refueling).
-        const bool self_is_tanker = (self.id.value == tanker_entity_.value);
+        // EMPL-2: tanker-HOOD is the brain's role flag, not one cached
+        // id — a campaign world fields many tankers, and a receiver
+        // must not break against cooperative platforms (its own
+        // tanker's boom, or another's orbit).
+        const bool self_is_tanker = self.brain->is_tanker();
         for (const auto& other : airborne) {
             if (other.id == self.id) continue;
-            // AAR redesign: skip the tanker in ALL traffic pictures — it's
-            // a cooperative platform, not an intruder. Skip refuel-armed
+            // AAR redesign: skip TANKERS in ALL traffic pictures — they're
+            // cooperative platforms, not intruders. Skip refuel-armed
             // receivers from the TANKER's traffic (the tanker shouldn't
             // avoid the receiver it's refueling).
-            if (other.id.value == tanker_entity_.value) continue;
+            if (other.brain->is_tanker()) continue;
             if (self_is_tanker) {
-                auto* other_brain = entities::EntityHandle(other.id, &world_)
-                    .get<f4::ai::BrainComponent>();
-                if (other_brain && other_brain->refuel_armed()) continue;
+                if (other.brain->refuel_armed()) continue;
             }
             const double dx = other.tf->position.x - pos.x;
             const double dy = other.tf->position.y - pos.y;
@@ -1682,6 +1917,20 @@ void Simulation::spawn_from_campaign_flights() {
         throw std::runtime_error(
             "Simulation::spawn_from_campaign_flights: no Flight-class units "
             "found in the world JSON — cannot spawn any aircraft");
+    }
+
+    // EMPL-2 — note the AAR receiver eligibility over the bulk spawn
+    // (the bridge stamps it per brain at spawn; this walk flips the
+    // per-tick tanker push's cheap gate). register_aircraft does the
+    // same for bus-fed late spawns; the bulk path assigns the roster
+    // directly, so it marks the flag here.
+    for (const auto eid : aircraft_entities_) {
+        entities::EntityHandle h(eid, &world_);
+        if (auto* brain = h.get<f4::ai::BrainComponent>();
+            brain != nullptr && brain->refuel_eligible()) {
+            campaign_has_refuel_receivers_ = true;
+            break;
+        }
     }
 
     // 5b. C6: arm every spawned campaign aircraft (the mission-role
@@ -1992,9 +2241,13 @@ void Simulation::tick(double dt) {
     // AAR redesign: push the tanker picture to receivers (the tanker is
     // a real aircraft; push_tanker_picture reads its FM). No-op when the
     // scenario has no tanker.
-    if (tanker_entity_.value != 0) {
-        push_tanker_picture(dt);
-    }
+    // EMPL-2 — the call is UNCONDITIONAL now: the campaign path's
+    // tankers spawn MID-RUN (tasking cycles), so the old
+    // tanker_entity_-set gate starved the lazy discovery — a campaign
+    // run never pushed a picture, never armed a receiver. The push's
+    // own gates (no refuel actors anywhere → return; no tanker in the
+    // roster → return) keep the no-op cost at two bool reads.
+    push_tanker_picture(dt);
 
     // The arbiter's safety rungs (M3): terrain + traffic pictures BEFORE
     // the brains run — the ground-avoid and collision-avoid modules are

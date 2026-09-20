@@ -635,6 +635,7 @@ void Campaign::run_tasking_cycle_atm_() {
                     ++routes_built_;
                     if (rb.safe_path_searched) ++route_safe_searches_;
                     if (rb.direct_fallback) ++route_fallbacks_;
+                    stamp_receiver_refuel_(flights, ft, package_routes);
                 } else {
                     ++routes_failed_;
                 }
@@ -760,6 +761,71 @@ void Campaign::run_tasking_cycle_atm_() {
         }
     } else {
         (void)atm_->drain_slot_denials();
+    }
+}
+
+void Campaign::stamp_receiver_refuel_(
+        const std::vector<FlightTasking>& flights, const FlightTasking& main,
+        std::unordered_map<std::uint32_t, std::vector<RouteWaypoint>>&
+            package_routes) {
+    // The strategy arm is the one source of tanker filings — a package
+    // under the disarmed arm has no support flights to find. (The
+    // session's route_cfg.tanker_refuel_waypoints arm — the TANKER's
+    // own stamp — rides the same switch; the receiver stamp keys on the
+    // Campaign's own flag, one source of truth upstream.)
+    if (!cfg_.strategy_layer) return;
+
+    // The package's tanker filing: role Support, a tanker byte, same
+    // package. One tanker feeds a whole raid (FindSupportFlights'
+    // share-or-file) — the FIRST filing's station is the rendezvous for
+    // every package it covers; the share check already pinned covered
+    // packages to the same station, so the station IS the shared pick.
+    const FlightTasking* tanker = nullptr;
+    for (const auto& f : flights) {
+        if (f.package_id == main.package_id && f.role == FlightRole::Support &&
+            mission_is_tanker(f.mission)) {
+            tanker = &f;
+            break;
+        }
+    }
+    if (tanker == nullptr || tanker->target_vu == 0) return;
+
+    // The station's grid position — the objectives walk (the same
+    // resolution the RouteBuilder runs for the orbit's anchor; the
+    // anchor parks ON this position, so the receiver's refuel point
+    // coincides with the tanker's hold loop).
+    int sx = 0, sy = 0;
+    bool found = false;
+    if (objectives_ != nullptr) {
+        for (int i = 0; i < objectives_->objective_count(); ++i) {
+            if (objectives_->id_num(i) != tanker->target_vu) continue;
+            sx = objectives_->x(i);
+            sy = objectives_->y(i);
+            found = true;
+            break;
+        }
+    }
+    if (!found) return;
+
+    auto it = package_routes.find(main.package_id);
+    if (it == package_routes.end()) return;
+    auto& route = it->second;
+
+    // Insert BEFORE the TARGET waypoint (the ingress side — the package
+    // tops off, then pushes). The target waypoint carries the package's
+    // mission altitude; the refuel leg rides it. Turnpoint-flagged:
+    // never eliminated (the tanker's own stamp's rule).
+    for (std::size_t i = 0; i < route.size(); ++i) {
+        if ((route[i].flags & kWpfTarget) == 0) continue;
+        RouteWaypoint rw;
+        rw.x = static_cast<std::int16_t>(sx);
+        rw.y = static_cast<std::int16_t>(sy);
+        rw.altitude_ft = route[i].altitude_ft;
+        rw.action = kWpRefuel;
+        rw.flags = kWpfTurnPoint;
+        route.insert(route.begin() + static_cast<std::ptrdiff_t>(i), rw);
+        ++receiver_refuel_waypoints_;
+        break;
     }
 }
 

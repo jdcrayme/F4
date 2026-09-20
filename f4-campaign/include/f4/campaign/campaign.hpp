@@ -368,6 +368,15 @@ public:
         return route_fallbacks_;
     }
 
+    /// EMPL-2 — the receiver refuel stamps: package routes that gained
+    /// a WP_REFUEL waypoint because the package's support filings
+    /// include a tanker (the reference's tanker-waypoint shape — every
+    /// flight in a tanker-covered package tops off at the station).
+    /// Zero unless the strategy arm filed tankers this session.
+    [[nodiscard]] int receiver_refuel_waypoints() const noexcept {
+        return receiver_refuel_waypoints_;
+    }
+
     /// C4: the ATM pipeline's telemetry (requests, packages, escorts,
     /// slot snaps, recoveries) — null when the pipeline is not armed
     /// (the legacy ladder's own counters above stand in).
@@ -507,6 +516,23 @@ private:
     /// and slot scheduling (7) here, one intent per flight.
     void run_tasking_cycle_atm_();
 
+    /// EMPL-2 — the receiver refuel stamp (the reference's
+    /// tanker-waypoint shape, camptask/mission.cpp: every non-tanker
+    /// flight in a mission gains a WP_REFUEL waypoint at the covering
+    /// tanker's position — FindNearestActiveTanker's station pick).
+    /// Runs when a package's MAIN route just built: finds the package's
+    /// tanker filing (role Support, tanker byte, same package), inserts
+    /// a turnpoint-flagged WP_REFUEL at the tanker's station position
+    /// before the route's TARGET waypoint (the package tops off BEFORE
+    /// the push — the tanker's own stamp's rule, mirrored at the
+    /// receiver). Strategy-armed only (the arm that files the tankers);
+    /// escorts inherit the stamped route via the package map. Counts
+    /// one receiver_refuel_waypoints_ per stamp.
+    void stamp_receiver_refuel_(
+        const std::vector<FlightTasking>& flights, const FlightTasking& main,
+        std::unordered_map<std::uint32_t, std::vector<RouteWaypoint>>&
+            package_routes);
+
     /// C4: mission recovery — every completed flight's survivors
     /// return to the ledger's tasking pool (rides the tick, after the
     /// cycles — same position as the reinforcement cadence).
@@ -617,6 +643,8 @@ private:
     int routes_failed_ = 0;
     int route_safe_searches_ = 0;
     int route_fallbacks_ = 0;
+    /// EMPL-2 — the receiver refuel stamps (see the accessor).
+    int receiver_refuel_waypoints_ = 0;
 
     /// C4: the flight-id counter (distinct from the package counter —
     /// multi-flight packages share package_id; flight ids stay unique
