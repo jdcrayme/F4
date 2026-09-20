@@ -5,6 +5,64 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## QC-ANCHOR — every QC template anchors to its real runway; the landing capture gap closes
+
+- **QC-ANCHOR** — the 16 runway-anchored QC templates (all but
+  `tanker_track` and `on_glideslope`, see below) now fly in the actual
+  world through the QC-WORLD overlay and the headless `campaign_qc`
+  matrix alike: each gained an `airbase_source` block (Kunsan, the
+  `digi_full_mission` anchor) and `"waypoints_frame": "runway"`.
+  `derive_real_airbase` grew the machinery that makes this safe for
+  the whole library: per-aircraft **routes and spawn-in-air spots
+  rotate with the waypoints** (an anchored spawn-in-air scenario used
+  to drop its aircraft at the raw frame origin — the theater datum, in
+  the sea west of Korea), **spawn headings rotate too** (a receiver
+  authored BEHIND its tanker silently became abeam — tanker_track's
+  contact count went 4 → 0 before this), and a **start_in_approach
+  spawn re-anchors its altitude onto the derived beam**
+  (threshold_alt + along·tan(3°), the LandingModule's own formula —
+  on_glideslope's authored 794-ft spawn presumed a 50-ft field;
+  Kunsan's real elevation is 0). Results: **`landing_only` PASSES
+  (exit 0)** — the approach-capture gap from the SHOWCASE-1 board
+  (gate 24, InterceptFinal going around every run) is closed: full
+  InterceptFinal → OnFinal → Flare → Rollout → TaxiIn, touchdown
+  confirmed. Two templates REGRESSED under anchoring and were
+  reverted to the sandbox frame, with the traces to autopsy the
+  follow-up: `tanker_track` (the anchored airfield lets the tanker
+  turn back and LAND after its route — the receiver station-keeps
+  ~1,200 ft behind through the turn and the ±15 ft latch never
+  aligns; contact 0, exit 22), and `on_glideslope` (all-GoAround:
+  the 7,000-ft establish floor vs the rotated spawn range). Also in
+  this tranche: **FlightRecorder snapshots carry callsigns now**
+  (campaign flights: the CS%03u-%u origin stamp; scenario aircraft:
+  the roster-order template callsign — the replay/QC menus no longer
+  label tracks with raw entity ids); the **terrain auto-load
+  resolution ladder** (the world JSON's bare `terrain_file` name now
+  resolves through Data/Theater/<theater>/ instead of failing on
+  every standard-layout load — the stale "Auto-load terrain failed"
+  error is gone); and the **screenshot path fix**
+  (`take_screenshot_to` early-returned on a STALE file from a previous
+  run while the fresh shot sat orphaned in the CWD). And a
+  disproof: the "map goes black at high zoom" report was the open
+  ocean — the far-tile sea color, not a rendering bug (verified:
+  terrain renders at zoom 24 over land,
+  `Testing/zoom_land.png`). Follow-ups surfaced by this tranche, with
+  evidence: the anchored `tanker_track` AAR latch (the receiver
+  station-keeps ~1,200 ft behind through the tanker's route-complete
+  turn; the ±15 ft latch never aligns — contact 0, exit 22; the
+  un-anchored 4/3-contact baseline is restored and passes) and
+  `on_glideslope`'s all-GoAround re-approach under anchoring (the
+  7,000-ft establish floor vs the rotated spawn range; reverted).
+  Strike-gap note: the campaign→sim target propagation the cookbook
+  flagged (§5) already has its in-tree A-G tranche (loader
+  mission_target → FlightPlanComponent::target → the plan builder's
+  delivery-waypoint fallback), but the empirical TestCamp matrix is
+  currently BLOCKED by a new finding — the **Release `campaign_qc`
+  crashes with 0xC0000409 (fail-fast) on any world load** (Debug
+  parses the same file fine but is ~50× too slow for the 15-min
+  horizon). Fix the Release crash, then re-run the cookbook matrix;
+  the strike gap may already be closed.
+
 ## QC-WORLD — Mission QC flights fly in the actual world, on the world map
 
 - **QC-WORLD** — the Mission QC window's **"Fly in world"** button (and

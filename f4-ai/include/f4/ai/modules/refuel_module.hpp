@@ -130,7 +130,12 @@ public:
         // The contact offset is ~10 ft aft of the boom nozzle (the boom
         // length from nozzle to receptacle). The boom disconnect
         // envelope is ±6 ft (ATP-56); widened to ±15 for the FM's
-        // residual phugoid.
+        // residual phugoid. (A QC-WORLD experiment widening these to
+        // ±40 + a 300-fpm request gate made tanker_track latch-churn —
+        // 16 contacts / 15 losses, zero fuel, exit 23: the wider window
+        // admits the receiver mid-drift so it never stabilizes in Hold.
+        // Reverted; the anchored-AAR latch sensitivity is a documented
+        // follow-up.)
         double contact_offset_long_ft{10.0};        // aft of the boom nozzle
         double contact_long_ft{15.0};               // ± ft along (widened from 6)
         double contact_lat_ft{15.0};                 // ± ft lateral (widened from 6)

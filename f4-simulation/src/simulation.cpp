@@ -2076,6 +2076,58 @@ void Simulation::derive_real_airbase() {
             wp.position.y = thr.y - rx * sh + ry * ch;
             // z (MSL) authored absolute — unchanged.
         }
+        // Per-aircraft positions are authored in the SAME runway frame
+        // (x = right of heading, y = downrange about the threshold; z
+        // absolute MSL): the air-phase routes and the spawn-in-air spots.
+        // Without this, an anchored spawn-in-air scenario drops its
+        // aircraft at the raw frame origin — the theater datum, in the
+        // sea west of Korea. (Grounded parking:auto spots are resolved
+        // from the derived layout below and ignore the authored value;
+        // rotating it anyway is harmless.)
+        for (auto& ac : scenario_.aircraft) {
+            for (auto& wp : ac.route) {
+                const double rx = wp.position.x;
+                const double ry = wp.position.y;
+                wp.position.x = thr.x + rx * ch + ry * sh;
+                wp.position.y = thr.y - rx * sh + ry * ch;
+            }
+            const double rx = ac.parking_spot.x;
+            const double ry = ac.parking_spot.y;
+            ac.parking_spot.x = thr.x + rx * ch + ry * sh;
+            ac.parking_spot.y = thr.y - rx * sh + ry * ch;
+            // The INITIAL HEADING is authored in the same frame — rotate
+            // it too, or authored relationships that depend on facing
+            // (a receiver spawned BEHIND its tanker; a parked aircraft
+            // aligned with its runway) silently become abeam/sideways:
+            // tanker_track's receiver, rotated out of the tanker's
+            // wake, never re-latched (contact 4 → 0).
+            ac.heading_rad = std::fmod(ac.heading_rad + hs + 6.283185307179586,
+                                       6.283185307179586);
+        }
+
+        // start_in_approach: the aircraft spawns ON the glideslope. The
+        // authored spawn altitude presumed the HAND-BUILT field's
+        // elevation (on_glideslope: 50 ft); the derived objective's real
+        // elevation differs (Kunsan: 0), so the beam — threshold alt +
+        // along * tan(3°), the LandingModule's own formula — dropped
+        // ~50 ft and left the authored spawn high at the capture edge
+        // (on_glideslope regressed to an all-GoAround run, gate 24).
+        // Re-anchor the spawn altitude onto the derived beam. (The
+        // rotation above preserved the horizontal range to the
+        // threshold, so the beam altitude at the spawn is computed from
+        // the already-rotated position.)
+        if (scenario_.start_in_approach) {
+            constexpr double kGsTan = 0.05240777928304121;  // tan(3 deg)
+            for (auto& ac : scenario_.aircraft) {
+                if (!ac.spawn_in_air) continue;
+                const double dx = ac.parking_spot.x -
+                                  scenario_.airfield.threshold_position.x;
+                const double dy = ac.parking_spot.y -
+                                  scenario_.airfield.threshold_position.y;
+                ac.parking_spot.z = scenario_.airfield.threshold_altitude_ft +
+                                    std::hypot(dx, dy) * kGsTan;
+            }
+        }
         scenario_.waypoints_runway_frame = false;   // normalized
     }
 
@@ -2576,6 +2628,7 @@ void Simulation::record_snapshot() {
         (tick_ % static_cast<std::uint64_t>(scenario_.record_every)) != 0) {
         return;
     }
+    std::size_t roster_index = 0;  // scenario-order position (callsigns)
     for (const auto eid : aircraft_entities_) {
         f4::recorder::FlightSnapshot snap;
         snap.sim_time_s = sim_time_s_;
@@ -2588,6 +2641,22 @@ void Simulation::record_snapshot() {
             snap.position = tf->position;
             snap.altitude_msl_ft = tf->position.z;
         }
+
+        // The callsign — replay/QC menus label tracks with it instead of
+        // the raw entity id. Campaign flights carry an origin stamp
+        // (CS%03u-%u, the inspector's convention); scenario-list flights
+        // resolve by roster order (aircraft_entities_ is built in
+        // scenario order — see the wingman-pair note below).
+        if (auto* org = h.get<f4::simulation::CampaignOriginComponent>(); org) {
+            char cs[32];
+            std::snprintf(cs, sizeof(cs), "CS%03u-%u",
+                          static_cast<unsigned>(org->callsign_id),
+                          static_cast<unsigned>(org->callsign_num));
+            snap.callsign = cs;
+        } else if (roster_index < scenario_.aircraft.size()) {
+            snap.callsign = scenario_.aircraft[roster_index].callsign;
+        }
+        ++roster_index;
 
         auto* fm = h.get<f4::flight::FlightModelComponent>();
         if (fm) {

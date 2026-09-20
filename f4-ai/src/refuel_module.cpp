@@ -358,7 +358,9 @@ void RefuelModule::check_in_contact_envelope()
     // damper takes several seconds to kill it, during which the receiver
     // drifts out of the ±15 ft envelope. Waiting for |VS| < 150 before
     // requesting contact ensures the receiver enters Hold with a small
-    // enough VS that the damper holds the ±15 ft envelope.
+    // enough VS that the damper holds the ±15 ft envelope. (A QC-WORLD
+    // experiment relaxing this to 300 fpm — with the envelope widened —
+    // latch-churned 16/15 with zero fuel transferred; reverted.)
     if (in_contact_envelope() && !published_contact_request_ && bus_ && tanker_id_ != 0) {
             atc::ContactRequest req;
             req.receiver_id = ownship_id_;

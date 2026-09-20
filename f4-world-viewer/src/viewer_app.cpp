@@ -51,15 +51,25 @@ bool take_screenshot_to(const std::string& requested) {
     std::error_code ec;
     const fs::path want = fs::absolute(fs::path{requested}, ec);
     if (ec || want.empty()) return false;
-    if (fs::exists(want, ec)) return true;  // raylib wrote it in place
+    // The FRESH shot is whatever raylib just wrote — normally the leaf
+    // name in the CWD (raylib drops the directory part). Copy it over
+    // the wanted path UNCONDITIONALLY: an early `exists(want) → done`
+    // here once satisfied itself with a STALE file from a previous run
+    // while the new shot sat orphaned in the CWD.
     const fs::path landed = fs::current_path(ec) / want.filename();
     if (ec) return false;
-    if (!fs::exists(landed, ec)) return false;
-    std::error_code ec2;
-    fs::copy_file(landed, want, fs::copy_options::overwrite_existing, ec2);
-    if (ec2) return false;
-    fs::remove(landed, ec2);
-    return true;
+    if (fs::exists(landed, ec)) {
+        std::error_code eq_ec;
+        if (fs::exists(want, eq_ec) && fs::equivalent(landed, want, eq_ec)) {
+            return true;  // CWD == the wanted directory — already in place
+        }
+        std::error_code ec2;
+        fs::copy_file(landed, want, fs::copy_options::overwrite_existing, ec2);
+        if (ec2) return false;
+        fs::remove(landed, ec2);
+        return true;
+    }
+    return fs::exists(want, ec);  // raylib wrote in place after all
 }
 
 } // namespace

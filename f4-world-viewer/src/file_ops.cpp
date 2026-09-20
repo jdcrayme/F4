@@ -141,13 +141,45 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
     // to the .cam's directory (e.g. "terrain.json"), and that path may
     // not resolve correctly from CWD.
     if (!impl_->terrain_file_ref.empty() && !impl_->terrain_loaded) {
-        try {
-            impl_->terrain.load_terrain_json(
-                std::filesystem::path(path.parent_path()) / impl_->terrain_file_ref);
-            impl_->terrain_loaded = true;
-            impl_->status_msg += "  + terrain: " + impl_->terrain_file_ref;
-        } catch (const std::exception& e) {
-            impl_->last_error = "Auto-load terrain failed: " + std::string(e.what());
+        // Resolution ladder: the world JSON names its terrain with a bare
+        // filename ("korea.terrain.json") that only resolves by accident —
+        // the standard export layout puts the terrain at
+        // Data/Theater/<theater>/terrain.json, NOT beside the world JSON
+        // (the old single-shot join failed on every standard-layout load).
+        // Try beside the world first (import layouts keep them together),
+        // then the standard theater layout, then CWD-relative.
+        std::vector<std::filesystem::path> candidates;
+        candidates.push_back(std::filesystem::path(path.parent_path()) /
+                             impl_->terrain_file_ref);
+        const auto data_dir = discover_data_dir();
+        if (!data_dir.empty() && !impl_->theater_name.empty()) {
+            candidates.push_back(data_dir / "Theater" / impl_->theater_name /
+                                 "terrain.json");
+            candidates.push_back(data_dir / "Theater" / impl_->theater_name /
+                                 impl_->terrain_file_ref);
+        }
+        candidates.push_back(std::filesystem::path(impl_->terrain_file_ref));
+        bool loaded = false;
+        std::string last_err;
+        for (const auto& cand : candidates) {
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(cand, ec)) continue;
+            try {
+                impl_->terrain.load_terrain_json(cand);
+                impl_->terrain_loaded = true;
+                impl_->last_terrain_json_path = cand;
+                impl_->status_msg += "  + terrain: " + cand.string();
+                loaded = true;
+                break;
+            } catch (const std::exception& e) {
+                last_err = e.what();
+            }
+        }
+        if (!loaded) {
+            impl_->last_error = "Auto-load terrain failed: " +
+                                (last_err.empty()
+                                     ? std::string("no candidate path exists")
+                                     : last_err);
         }
     }
     // The world names a theater ("korea") — if an install is configured,
