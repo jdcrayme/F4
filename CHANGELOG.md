@@ -5,6 +5,49 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## EMPL-2 — the campaign-path AAR chain closes; the receiver joins, latches, and refuels
+
+- **EMPL-2** — a campaign-spawned tanker/receiver pair flies the full USAF
+  protocol: `test_campaign_aar` (the REAL spawn path — campaign bridge,
+  mission-byte tanker role, saved-shape WP_REFUEL receiver) reaches
+  Rendezvous → PreContact → ClearedContact → Hold with fuel →
+  BackingOut → Departing → Done, `RefuelComplete` fired (the event
+  existed; nothing published it). The tranche's work was the terminal
+  servo, five stacked defects each caught by the e2e trace: (1) the
+  rendezvous near-field track formate had NO lateral feedback — a
+  receiver joining the orbiting tanker abeam formated its displaced
+  line forever (the lateral rejoin blend fixes it); (2) PreContact/
+  ClearedContact displaced beyond station-keep tolerance had no
+  recovery — the new `StationLost` hand-back returns them to
+  Rendezvous; (3) the join vertical stack — the station-keep pitch
+  tune was outvoted by thrust at join scale (rendezvous now flies the
+  PreContact tune always), the capped VS lead shapes the arrival
+  (uncapped it crawled at deficit/60), and the closure cap is
+  sign-aware (full ceiling level, 90 kts below the boom, none above);
+  (4) the terminal station servo — the wingman's linear lateral law,
+  the 5° heading deadband bypassed (degree-scale corrections were
+  invisible), the closure bias symmetric (±8 kts), and a direct
+  along-axis throttle bias (the energy-coupled speed loop held +1 kt
+  of the tanker's regardless of an 8-kt command; the receiver parked
+  +42 ft off the boom all run); (5) the Hold servo — a 10× lateral
+  gain plus lateral-rate damping (P-only pumped ±15 ft and
+  ContactLost fired on every swing edge) — and CONTACT
+  STABILIZATION: the paired tanker flies its station hold straight
+  while a receiver is mid-protocol (corner captures skipped, the
+  station clock paused, the racetrack re-forms on release). Also:
+  **EMPL-1b** — `record_snapshot` fills `target_position`/
+  `target_description` on the aircraft snapshot path (the campaign
+  traces' dead field that misled §5; ~110k live samples on the ladder
+  run). **tanker_track re-anchors** to Kunsan (`airbase_source` +
+  `waypoints_frame`, the last reverted template): exit 0 with 4
+  contacts and `complete=1` — the full procedure including
+  `RefuelComplete` at the real runway; the track lengthens to 500k ft
+  so the tanker's recovery no longer interrupts the run. The named
+  follow-up: a LIVE TestCamp run still shows zero AAR traffic — the
+  single-byte `--mission` filter can't spawn a tanker and a refuel-leg
+  receiver together, and the ladder's synthetic spawns don't carry
+  their stamped refuel legs to the bridge (plan §3).
+
 ## QC-ANCHOR — every QC template anchors to its real runway; the landing capture gap closes
 
 - **QC-ANCHOR** — the 16 runway-anchored QC templates (all but

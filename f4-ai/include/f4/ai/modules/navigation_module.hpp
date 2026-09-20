@@ -159,6 +159,22 @@ public:
         return station_elapsed_;
     }
 
+    /// EMPL-2 — contact stabilization: while set (a receiver is
+    /// mid-protocol on this TANKER), the station hold flies its current
+    /// leg STRAIGHT — corner captures are skipped and the station clock
+    /// does not advance — and clearing it re-forms the racetrack (the
+    /// corner the leg was aimed at is treated as captured, so the wrap
+    /// rule either re-forms the circuit or releases an expired hold).
+    /// A ±15-ft boom latch cannot survive a racetrack's corner turn,
+    /// and a tanker stabilized on its refueling track IS the real
+    /// procedure (the e2e catch: the linear lateral servo's equilibrium
+    /// against the orbit's curvature parked the receiver ~700 ft abeam
+    /// — the contact envelope never sampled inside).
+    void set_contact_stabilized(bool on) noexcept;
+    [[nodiscard]] bool contact_stabilized() const noexcept {
+        return contact_stabilized_;
+    }
+
     /// NAV-B: the LNAV desired heading for the ACTIVE leg — leg course +
     /// cross-track correction (see controls_for_waypoint). Pure function
     /// of the cached state; call after update(). Exposed for unit tests
@@ -297,6 +313,7 @@ private:
     double station_elapsed_{0.0};
     std::size_t loop_start_{0};   // the anchor's index
     std::size_t loop_end_{0};     // the span's last corner
+    bool contact_stabilized_{false};  // EMPL-2: fly the hold leg straight
 
     // Cached state for control logic (refreshed each update()).
     geo::WorldPosition current_position_;

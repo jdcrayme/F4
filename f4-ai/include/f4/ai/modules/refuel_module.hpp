@@ -69,7 +69,11 @@ enum class RefuelEvent {
     ReceiverRequestsDisconnect,  // host/fuel-target triggered (Hold -> BackingOut)
     DisconnectApproved,    // DisconnectApproved received (PreContact/BackingOut -> Departing)
     ReachedDeparture,      // descended 1000 ft below tanker (Departing -> Done)
-    TankerLost            // tanker picture invalid (any active -> NoTanker)
+    TankerLost,           // tanker picture invalid (any active -> NoTanker)
+    StationLost           // displaced beyond station-keep tolerance while
+                          // PreContact/ClearedContact (both -> Rendezvous):
+                          // neither state has a law that REJOINS from miles
+                          // out, so the join hands back to the one that does
 };
 
 // ============================================================================
@@ -207,6 +211,108 @@ public:
         // comes to the receiver.
         double rendezvous_near_ft{10000.0};
 
+        // --- EMPL-2: the lateral rejoin blend --- The near-field
+        // formate commands the tanker's TRACK, which never kills a
+        // cross-track offset: a receiver joining the orbit ABEAM (the
+        // campaign e2e catch — 2,000-8,000 ft of lateral drift the
+        // along-axis closure law cannot touch) formated the displaced
+        // line forever, dist parked at 6-10k ft, zero envelope samples.
+        // The near-field heading now blends toward the pursue bearing
+        // by the lateral offset against the pre-contact point: dead
+        // astern keeps the pure formate (the sustained-turn fix);
+        // displaced, the blend steers back onto the boom's line. This
+        // many feet of |lat| reaches full pursue.
+        double rendezvous_rejoin_lat_ft{2000.0};
+
+        // --- EMPL-2: the level-first closure cap --- ATP-56's join is
+        // SEQUENCED: level beside the boom, THEN close. A hot along-
+        // closure while vertically displaced ends with the braking
+        // dumped into a climb AROUND the boom (the e2e catch: a +150-kt
+        // closure braking from 2,000 ft below ballooned the receiver
+        // 3,300 ft above the boom, and the station-keep pitch loop
+        // crawled back down for 10 minutes while the orbit swept the
+        // point away). While |dz| is outside the pre-contact window the
+        // closing branch caps its overtake here (gentle progress, no
+        // energy to dump); inside the window the full intercept ceiling
+        // applies and the braking curve owns the stop.
+        double rendezvous_level_closure_kts{90.0};
+
+        // --- EMPL-2: the rendezvous VS lead --- The module's air_steering
+        // pitch tune is a STATION-KEEP tune (±100 ft): flown at join
+        // scale it climbs at the full VS cap and only starts bleeding
+        // ~1,500 ft before the boom's altitude — every pass overshot
+        // ~3,000 ft HIGH (the e2e catch: climb 8k ft, blow through
+        // cp.z at 2,500 fpm, spend 10 minutes crawling back down while
+        // the orbit sweeps the aim away). The altitude aim subtracts
+        // the current climb momentum (VS · this many seconds): at
+        // 2,500 fpm the loop levels off 2,500 ft early, arriving at
+        // cp.z with ~zero residual rate; level, the lead is zero and
+        // the aim is exact.
+        double rendezvous_vs_lead_s{60.0};
+        // The lead is a CAPPED BIAS, not a feedback law: uncapped,
+        // aim = cp.z − VS·τ enforces VS = deficit/τ near the target —
+        // a 60-s time constant that crawled the last ~1,000 ft at
+        // ~16 fpm (the scenario e2e's 360-s budget expired mid-crawl
+        // after a transient hand-back). The cap bounds the early
+        // level-off; the inner loop owns the remaining deficit at its
+        // own (much faster) closure rate.
+        double rendezvous_vs_lead_max_ft{800.0};
+
+        // --- EMPL-2: the terminal bank authority --- PreContact and
+        // ClearedContact steer with the module's station-keep bank cap
+        // (0.10 rad): at 400 kts that turns at 0.27 deg/s, so a lateral
+        // correction commanded by the terminal blend took over a minute
+        // to lay the receiver onto the boom's line — the orbit swung
+        // the frame away faster than the receiver could follow (the
+        // e2e weave: lat oscillating ±800 ft, never inside the ±150
+        // window long enough to latch). Terminal steering swaps in this
+        // cap (save/steer/restore, the rendezvous pattern); aligned
+        // (lat ~ 0) the blend is zero and no bank is demanded, so the
+        // latch-holding behavior is untouched.
+        double terminal_max_bank_rad{0.35};
+
+        // The terminal lateral law is the WINGMAN's linear cross-track
+        // correction (heading = tanker track − gain·lat, clamped): the
+        // wingman values — a formation slot survives a maneuvering lead
+        // with them, which is exactly the terminal AAR problem (the
+        // campaign tanker ORBITS its station; the scenario tanker's
+        // straight track never exercised the servo).
+        double terminal_lateral_gain_rad_per_ft{0.00012};
+        double terminal_max_correction_rad{0.35};
+
+        // --- EMPL-2: the HOLD lateral gain --- an order tighter than
+        // the terminal gain above: a ~1-degree heading-tracking trim
+        // error at 400 kts drifts the receiver 8 ft/s off the boom,
+        // and at the wingman gain a ±15-ft error commands 0.1 degrees
+        // of correction — noise against the drift (the e2e churn:
+        // latched, drifted out, ContactLost in under 10 s, the 20-s
+        // hold timer never expired). At this gain ±15 ft commands
+        // ~1 degree — the drift is countered at the latch scale where
+        // the hold lives.
+        double hold_lateral_gain_rad_per_ft{0.0012};
+        // The proportional term alone pumps an undamped ±15-ft
+        // oscillation at the heading servo's bandwidth (the e2e: lat
+        // swinging zero-to-±15 every 1.5 s, ContactLost on each swing
+        // edge). This much correction per ft/s of drift damps it.
+        double hold_lateral_damp_rad_per_fps{0.012};
+
+        // --- EMPL-2: the station-lost hand-back --- PreContact
+        // station-keeps and ClearedContact formates the tanker's track
+        // with an 8-kt closure bias: neither law REJOINS from miles
+        // out. A receiver that entered the protocol transiently (the
+        // campaign e2e catch: two flights climbing out of the SAME
+        // airbase satisfy the pre-contact envelope during the climb)
+        // or whose boom was swept away (the orbit's curvature, a
+        // tanker turning to recover) sat displaced 9-14k ft forever.
+        // Displaced beyond these tolerances — debounced — the join
+        // hands back to Rendezvous, whose law closes from any
+        // geometry. Thresholds clear the normal station-keeps
+        // (ClearedContact is entered ~980 ft astern by design; the
+        // ±300-ft pre-contact window plus margin covers vert).
+        double station_lost_horiz_ft{1500.0};
+        double station_lost_vert_ft{500.0};
+        double station_lost_debounce_s{3.0};
+
         // --- EMPL-2: the standoff join --- The horizontal closure runs
         // at kts-scale (up to 150) while the vertical crawls at
         // fpm-scale (2,500 max): a receiver joining 10k ft BELOW the
@@ -335,6 +441,7 @@ private:
     // Transition checks (called from update before control dispatch).
     void check_at_precontact();        // Rendezvous/BackingOut -> PreContact
     void check_in_contact_envelope();  // ClearedContact -> publish ContactRequest
+    void check_station_lost();         // PreContact/ClearedContact -> Rendezvous
     void check_contact_lost();         // Hold -> PreContact
     void check_auto_disconnect();      // Hold -> BackingOut (host/fuel/timeout)
     void check_reached_departure();    // Departing -> Done
@@ -375,6 +482,10 @@ private:
     double hold_time_s_{0.0};
     double state_time_s_{0.0};   // time in the current state
     double precontact_stable_time_s_{0.0};  // time spent stabilized at precontact (|VS| < 200)
+    double station_lost_time_s_{0.0};       // debounce for the displaced hand-back
+    double hold_lat_rate_fps_{0.0};         // lateral drift rate (Hold damping)
+    double hold_lat_last_ft_{0.0};
+    bool hold_lat_init_{false};
 
     fsm::StateMachine<RefuelState, RefuelEvent> sm_;
 };

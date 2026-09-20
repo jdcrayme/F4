@@ -355,20 +355,24 @@ strike-target gap.
   mission target attached, which the A-G tranche resolves through to
   the StrikeModule. The §5 workflow (gate → ledger → trace autopsy)
   remains the template for the next catch.
-* AAR cannot engage from the CAMPAIGN path at all: `set_tanker(true)`
-  exists only on the scenario-list spawn path (`sc.tanker` in the
-  handoff JSON), and `push_tanker_picture` scans only the scenario's
-  own waypoint list — so a saved AMIS_TANK flight spawns as an
-  ordinary nav flight and no receiver ever arms (`refuel_armed` is
-  scenario-arm-only). §8's AAR gate therefore only exercises the
-  scenario templates. Closing the campaign loop (tanker role from the
-  mission byte + refuel waypoints from saved/synthetic routes) is the
-  natural next engine tranche after §5.
-* `landing_only`'s InterceptFinal goes around every time (§8, exit
-  24) — the glide-slope capture from an approach start never converts
-  to a touchdown, while `on_glideslope` (already ON the slope) lands
-  fine. The gap is between those two, and the traces bracket it.
-* Trace snapshots carry empty `callsign` (group by `entity_id`).
+* AAR campaign-path engagement is RESOLVED at the engine level
+  (EMPL-2): the tanker role keys the mission byte (AMIS_TANK 39 /
+  AMIS_TANKER 27), receiver eligibility keys the route's WP_REFUEL
+  legs, and the per-tick tanker push pairs/arms campaign receivers —
+  `test_campaign_aar` flies the full USAF protocol (Rendezvous → … →
+  Done, fuel transferred, `RefuelComplete` fired) through the real
+  campaign spawn path, and the anchored `tanker_track` scenario flies
+  it end to end at Kunsan (exit 0, 4 contacts, `complete=1`). Named
+  follow-up: a LIVE TestCamp run still shows zero AAR traffic — the
+  single-byte `--mission` filter can't spawn a tanker and a refuel-leg
+  receiver together, and the ladder's synthetic spawns don't yet carry
+  their stamped refuel legs to the bridge (CAMP_EMPLOYMENT_PLAN §3).
+* ~~`landing_only`'s InterceptFinal goes around every time~~
+  RESOLVED (QC-ANCHOR): full InterceptFinal → OnFinal → Flare →
+  Rollout → TaxiIn with touchdown, exit 0.
+* ~~Trace snapshots carry empty `callsign`~~ RESOLVED (QC-ANCHOR):
+  campaign flights carry the CS%03u-%u origin stamp; scenario flights
+  resolve by roster order.
 * The tasking ladder cannot be *asked* for a mission type — generation
   is strategic (profiles × situation), the filter only gates spawns.
   Showcase scenarios (§7) are the deterministic answer.

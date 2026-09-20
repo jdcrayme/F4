@@ -1,8 +1,11 @@
 # CAMP_EMPLOYMENT_PLAN.md
 > **Status**: Active. EMPL-1 LANDED (as-built, this patch series — the campaign
 > A-G employment chain closes end to end). EMPL-1a LANDED (impact precision —
-> the stick destroys features). EMPL-2 (campaign-path AAR) and
-> EMPL-3 (approach capture) are scoped, not started.
+> the stick destroys features). EMPL-1b LANDED (recorder intended-path fields).
+> EMPL-2 LANDED (campaign-path AAR — the receiver joins, latches, and
+> refuels from campaign-spawned flights). EMPL-3 LANDED via the QC-ANCHOR
+> tranche (landing_only passes; see CHANGELOG).
+> The open item is the stick aim-point element (§2.6).
 > **Source of Truth**: [FreeFalcon/freefalcon-central](https://github.com/FreeFalcon/freefalcon-central) (develop branch)
 > **Companions**: [MISSION_QC_COOKBOOK.md](MISSION_QC_COOKBOOK.md) (§5's strike gap is
 > this plan's EMPL-1; §9's campaign AAR is EMPL-2), [CAMPAIGN_LOOP_PLAN.md](CAMPAIGN_LOOP_PLAN.md),
@@ -158,44 +161,96 @@ scenario's own directory, so the documented
 
 ### 2.6 Named follow-ups (open, in order)
 
-1. **EMPL-1b — recorder intended-path fields.** Fill
-   `target_description`/`target_position` on the aircraft snapshot path
-   (brain nav state is already in hand at `record_snapshot`). Acceptance:
-   the QC trace carries the current waypoint's target on every sample of a
-   campaign run; §5-style autopsies stop reading dead fields.
+1. ~~**EMPL-1b — recorder intended-path fields.**~~ **LANDED (EMPL-2
+   tranche).** `record_snapshot` fills `target_position` +
+   `target_description` (the nav's active waypoint: its name — the
+   route builder's `WPn:<descriptor>` — plus `tgt=<id>` when the leg
+   carries a strike target) on every aircraft sample. Acceptance met:
+   the campaign traces carry the current waypoint on ~110k samples of
+   the ladder run; §5-style autopsies stop reading dead fields.
 2. **Stick aim-point element.** The brain's "first alive feature" is the
    nominal rule; the save's own per-mission aim-point index (the mission
    element's feature target) replaces it with the mission-element tranche.
 
-## 3. EMPL-2 — campaign-path AAR (scoped, not started)
+## 3. EMPL-2 — campaign-path AAR (LANDED)
 
-Cookbook §9 / SHOWCASE-1: AAR cannot engage from the CAMPAIGN path at all.
-Scope confirmed in code: the receiver's refuel rung arms only when the
-scenario carries a `WP_REFUEL(20)` waypoint (`Simulation::push_tanker_picture`
-checks `scenario_.waypoints` + per-aircraft routes only), and the campaign
-bridge never stamps one — `set_tanker` + the tanker-picture push are
-scenario-list-only. The ATM strategy layer already files tanker filings
-(`route_cfg.tanker_refuel_waypoints` exists in the session's route config);
-the work is wiring the saved/ladder tasking's tanker pairing into:
+The campaign AAR chain closes end to end: the tanker role keys the
+mission byte across both vocabularies (AMIS_TANK 39, the stock war's;
+AMIS_TANKER 27, the ATM filings' — `mission_is_tanker`), receiver
+eligibility keys the route's WP_REFUEL legs, the per-tick tanker push
+pairs receivers to tankers (FindNearestActiveTanker, sticky while the
+tanker lives), arms inside a 10-NM join ring with a 2×-ring hysteresis
+release, and the RefuelModule flies the join into the full USAF
+protocol — Rendezvous → PreContact → ClearedContact → Hold →
+BackingOut → Departing → Done, with `RefuelComplete` published on Done
+(the event existed; nothing published it before).
 
-1. a `WP_REFUEL` stamp on the receiver's route at the tasking's rendezvous
-   (the ACTION tables' tanker waypoint row is the reference shape), and
-2. the tanker picture push for campaign-spawned receivers (the same
-   per-tick gate the scenario path runs).
+The tranche's real work was the TERMINAL SERVO — five stacked defects,
+each caught by the e2e trace and fixed in place:
 
-Acceptance: a TANK-filtered campaign run reaches `ContactMade` →
-`RefuelComplete` (the SHOWCASE-1 protocol counts), saved and ladder alike;
-`test_aar_e2e` stays green.
+1. **The lateral rejoin blend** (`controls_for_rendezvous`): the
+   near-field track formate had no cross-track feedback — a receiver
+   joining the orbiting tanker ABEAM formated its displaced line
+   forever (2-8k ft of lat, dist parked 6-10k, zero envelope samples).
+   The near-field heading now blends toward the pursue bearing by the
+   lateral offset (`rendezvous_rejoin_lat_ft`).
+2. **The station-lost hand-back** (`StationLost`): PreContact/
+   ClearedContact displaced beyond station-keep tolerance
+   (1,500/500 ft, 3-s debounce) had no recovery law — the campaign e2e
+   entered the protocol transiently during a co-based climb-out and sat
+   displaced 9-14k ft forever. Both states hand back to Rendezvous.
+3. **The join vertical stack**: the station-keep pitch tune is a
+   ±100-ft servo — at join scale the thrust coupling outvoted it (the
+   receiver climbed at +500 fpm against a −700 fpm command). Rendezvous
+   now flies the PreContact vertical tune (vs_gain 3) always, with a
+   CAPPED VS lead (subtract VS·60 s, clamp ±800 ft) shaping the
+   arrival, and a SIGN-AWARE closure cap: full ceiling level; 90 kts
+   overtake below the boom (level first — ATP-56); none above it.
+4. **The terminal station servo** (PreContact/ClearedContact/Hold):
+   the wingman's linear cross-track correction on the station, the
+   heading deadband (`approach_aileron_threshold_rad`) bypassed
+   (degree-scale corrections were invisible — steer() banks only above
+   5°), the closure bias made SYMMETRIC (±8 kts — an ahead-of-boom
+   entry had no fall-back), and a direct along-axis throttle bias
+   (±0.12) — the energy-coupled speed loop held +1 kt of the tanker's
+   regardless of an 8-kt command and the receiver parked +42 ft off
+   the receptacle all run.
+5. **The Hold servo + contact stabilization**: Hold steers its station
+   with a 10× lateral gain and a lateral-rate damper (the P-only loop
+   pumped ±15 ft; ContactLost fired on every swing edge), and the
+   paired TANKER flies its station hold STRAIGHT while a receiver is
+   mid-protocol (`NavigationModule::set_contact_stabilized` — corner
+   captures skipped, the station clock paused, the racetrack re-forms
+   on release): a ±15-ft latch cannot survive a corner turn, and a
+   stabilized tanker is the real procedure.
 
-## 4. EMPL-3 — approach capture (scoped, not started)
+Acceptance: `test_campaign_aar` (the REAL spawn path — campaign bridge,
+mission bytes, saved-shape WP_REFUEL routes) flies the full protocol
+with fuel transferred and `RefuelComplete` fired; `test_aar_e2e` (the
+scenario sibling over `tanker_track.json`) stays green — now ANCHORED
+(see below), 4 contacts, `complete=1`.
 
-SHOWCASE-1: `landing_only` FAILS exit 24 — `InterceptFinal` goes around
-every run; the approach-capture gap is a one-command reproduction with a
-trace. The landing module's capture envelope vs the scenario's approach
-geometry is the work item; the LANDING_PRECISION plan owns the subsystem —
-this tranche is the scenario-path acceptance arm of it (fix lands there,
-the repro flips here). Acceptance: `landing_only` reaches `OnFinal →
-Flare → Rollout → TaxiIn` (exit 0).
+**Named follow-up (the fleet-scale on-save demo):** the campaign e2e
+proves the engine chain on the save's own shape, but a LIVE TestCamp
+run still shows zero AAR traffic for a structural reason: the
+single-byte `--mission` filter cannot spawn a tanker AND a refuel-leg
+receiver together (TANK-only runs are all tankers; the 158 WP_REFUEL
+carriers are other bytes), and the synthetic ladder spawns don't yet
+carry their stamped refuel legs to the bridge
+(`campaign_has_refuel_receivers_` stayed false with 33 stamps filed —
+the b3 loop's synthetic route path drops the stamp). The demo needs
+either a two-byte spawn mix or the b3-loop stamp carry-through — the
+next engine tranche, not a servo problem.
+
+## 4. EMPL-3 — approach capture (LANDED via QC-ANCHOR)
+
+The scenario-path acceptance arm closed in the QC-ANCHOR tranche:
+`landing_only` PASSES (exit 0) — full InterceptFinal → OnFinal →
+Flare → Rollout → TaxiIn with touchdown, at the real Kunsan runway.
+The landing module's capture envelope work lives in the QC-ANCHOR
+entry (CHANGELOG) and the LANDING_PRECISION plan owns the subsystem;
+the LANDING_PRECISION Tranche B (taxi-back, PLT_PARK data) remains its
+open item.
 
 ## 5. Conventions
 

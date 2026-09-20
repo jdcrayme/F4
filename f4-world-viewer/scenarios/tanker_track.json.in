@@ -3,6 +3,13 @@
   "theater": "korea",
   "terrain_json_path": "@F4_TERRAIN_JSON@",
   "theater_dir": "@F4_SCENARIO_THEATER_DIR@",
+  "airbase_source": {
+    "world_json": "@F4_WORLD_JSON@",
+    "class_table": "@F4_DIGI_CLASS_TABLE@",
+    "grid_x": 234,
+    "grid_y": 655,
+    "active_heading_deg": 20
+  },
   "aircraft": [
     {
       "callsign": "SHELL01",
@@ -17,7 +24,7 @@
       "team": "blue",
       "tanker": true,
       "route": [
-        { "name": "TRACK_END", "position": { "x": -200000.0, "y": 0.0, "z": 10000.0 },
+        { "name": "TRACK_END", "position": { "x": -500000.0, "y": 0.0, "z": 10000.0 },
           "speed_kts": 300.0 }
       ]
     },
@@ -43,6 +50,7 @@
       ]
     }
   ],
+  "waypoints_frame": "runway",
   "airfield": {
     "active_runway_id": 36,
     "active_runway_name": "Rwy 36",
@@ -56,7 +64,7 @@
   },
   "start_enroute": true,
   "sim_dt": 0.016666666666666666,
-  "total_ticks": 21600,
+  "total_ticks": 28800,
   "record": true,
   "record_path": "@F4_BINARY_DIR@/tanker_track_trace.json"
 }

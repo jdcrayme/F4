@@ -64,6 +64,10 @@ Data/**
 
 # Generated from TestCamp.cam by cam2json (regenerable on demand)
 /TestCamp.world.json
+/testcamp.world.json
+
+# campaign_qc --out-dir artifacts (traces, summaries — regenerable)
+qc/
 build*.log
 
 # Agent session artifacts (never tracked)

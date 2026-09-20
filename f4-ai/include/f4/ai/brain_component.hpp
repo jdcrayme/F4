@@ -1239,6 +1239,15 @@ public:
     [[nodiscard]] modules::RefuelModule&       refuel()       noexcept { return refuel_; }
     [[nodiscard]] const modules::RefuelModule& refuel() const noexcept { return refuel_; }
 
+    /// EMPL-2 — contact-stabilization passthrough. The host sets this
+    /// on a TANKER whose paired receiver is mid-protocol (see
+    /// NavigationModule::set_contact_stabilized): the station hold
+    /// flies straight and the racetrack re-forms on release.
+    void set_contact_stabilized(bool on) { nav_.set_contact_stabilized(on); }
+    [[nodiscard]] bool contact_stabilized() const noexcept {
+        return nav_.contact_stabilized();
+    }
+
     /// Legacy alias for the Phase A API (tests + hosts configure the
     /// takeoff module through this).
     [[nodiscard]] modules::TakeoffModule&       module()       noexcept { return takeoff_; }

@@ -1185,19 +1185,6 @@ void Simulation::push_tanker_picture(double dt) {
     const auto tankers = find_tanker_entities_();
     if (tankers.empty()) return;
 
-    // EMPL-2 DEBUG (env-gated; remove after the acceptance run).
-    static FILE* aar_debug = []() -> FILE* {
-        const char* v = std::getenv("F4_AAR_DEBUG");
-        return v != nullptr ? stderr : nullptr;
-    }();
-    if (aar_debug != nullptr && (tick_count() % 6000) == 0) {
-        std::fprintf(aar_debug,
-                     "[aar-push] t=%d tankers=%zu scen_gate=%d camp_gate=%d\n",
-                     tick_count(), tankers.size(),
-                     scenario_has_refuel_waypoint_ ? 1 : 0,
-                     campaign_has_refuel_receivers_ ? 1 : 0);
-    }
-
     // Picture builder: the tanker's real FM, one per tanker per tick.
     auto build_picture = [](entities::EntityWorld& world,
                             entities::EntityId id)
@@ -1293,6 +1280,18 @@ void Simulation::push_tanker_picture(double dt) {
     }
     if (pics.empty()) return;
 
+    // EMPL-2 — contact stabilization: defaulted OFF each tick, set
+    // again below for any tanker whose paired receiver is mid-protocol
+    // (clearing it is what re-forms the racetrack — see
+    // NavigationModule::set_contact_stabilized).
+    for (const auto& tp : pics) {
+        entities::EntityHandle th(tp.id, &world_);
+        if (auto* tbrain = th.get<f4::ai::BrainComponent>();
+            tbrain != nullptr && tbrain->contact_stabilized()) {
+            tbrain->set_contact_stabilized(false);
+        }
+    }
+
     constexpr double kAarJoinRingFt = 52800.0;   // 10 NM — the orbit's scale
 
     for (const auto eid : aircraft_entities_) {
@@ -1301,7 +1300,17 @@ void Simulation::push_tanker_picture(double dt) {
         if (brain == nullptr || brain->is_tanker()) continue;
         if (!brain->refuel_eligible()) continue;
         const auto leg_pos = brain->refuel_waypoint_position();
-        if (!leg_pos) continue;   // not on its refuel leg
+        // EMPL-2 — the leg flag gates the FIRST arm (a receiver not
+        // flying its refuel leg yet is left alone), but a receiver
+        // MID-PROTOCOL keeps its live picture even after it flies past
+        // the waypoint and the flag drops — freezing the picture here
+        // decayed the boom geometry and churned ContactLost (the e2e
+        // cycle: Hold → stale picture → drift → ContactLost → …).
+        const auto rst = brain->refuel().state();
+        const bool mid_protocol =
+            rst != f4::ai::modules::RefuelState::Rendezvous &&
+            rst != f4::ai::modules::RefuelState::NoTanker;
+        if (!leg_pos && !mid_protocol) continue;
 
         // Pair — STICKY (the reference's FindNearestActiveTanker is a
         // PLANNING pick, not a per-tick re-sort). The QC catch: two
@@ -1322,11 +1331,23 @@ void Simulation::push_tanker_picture(double dt) {
             }
         }
         if (best == nullptr) {
+            // Pairing key: the rendezvous waypoint — or, for a receiver
+            // already mid-protocol with its leg flag dropped, its own
+            // position (the protocol owns the pairing; the sticky cache
+            // below keeps it stable).
+            geo::WorldPosition pick_key;
+            if (leg_pos) {
+                pick_key = *leg_pos;
+            } else if (const auto* self_tf =
+                           h.get<entities::TransformComponent>();
+                       self_tf != nullptr) {
+                pick_key = self_tf->position;
+            }
             double best_d2 = 0.0;
             for (const auto& tp : pics) {
                 if (!tp.p.valid) continue;
-                const double dx = leg_pos->x - tp.p.position.x;
-                const double dy = leg_pos->y - tp.p.position.y;
+                const double dx = pick_key.x - tp.p.position.x;
+                const double dy = pick_key.y - tp.p.position.y;
                 const double d2 = dx * dx + dy * dy;
                 if (best == nullptr || d2 < best_d2) {
                     best = &tp;
@@ -1360,10 +1381,6 @@ void Simulation::push_tanker_picture(double dt) {
             const double dz = own_tf->position.z - best->p.position.z;
             const double d2 = dx * dx + dy * dy + dz * dz;
             if (brain->refuel_armed()) {
-                const auto st = brain->refuel().state();  // f4::ai::modules::RefuelState
-                const bool mid_protocol =
-                    st != f4::ai::modules::RefuelState::Rendezvous &&
-                    st != f4::ai::modules::RefuelState::NoTanker;
                 if (d2 > (2.0 * kAarJoinRingFt) * (2.0 * kAarJoinRingFt) &&
                     !mid_protocol) {
                     brain->set_refuel_armed(false);
@@ -1378,39 +1395,16 @@ void Simulation::push_tanker_picture(double dt) {
         }
         brain->update_tanker_picture(best->p);
 
-        // EMPL-2 DEBUG (env-gated; remove after the acceptance run):
-        // the armed receiver's join funnel every 600 ticks.
-        static FILE* aar_debug = []() -> FILE* {
-            const char* v = std::getenv("F4_AAR_DEBUG");
-            return v != nullptr ? stderr : nullptr;
-        }();
-        if (aar_debug != nullptr && (tick_count() % 600) == 0) {
-            const auto* own_tf2 = h.get<entities::TransformComponent>();
-            const auto* org = h.get<CampaignOriginComponent>();
-            if (own_tf2 != nullptr) {
-                // The pre-contact envelope's own frame: along/lat/vert
-                // vs precontact_point() in the tanker's heading frame
-                // (the same math in_precontact_envelope runs).
-                const auto pp = brain->refuel().precontact_point();
-                const double hdg = best->p.heading_rad;
-                const double fx = std::sin(hdg), fy = std::cos(hdg);
-                const double rx = own_tf2->position.x - pp.x;
-                const double ry = own_tf2->position.y - pp.y;
-                const double along = rx * fx + ry * fy;
-                const double lat = rx * fy - ry * fx;
-                const double vert = own_tf2->position.z - pp.z;
-                std::fprintf(aar_debug,
-                             "[aar-join] t=%d ac=%u mb=%u armed=%d "
-                             "state=%s in_pc=%d dist_ft=%.0f along=%.0f "
-                             "lat=%.0f vert=%.0f\n",
-                             tick_count(), eid.value,
-                             (org != nullptr) ? org->mission_byte : 0u,
-                             brain->refuel_armed() ? 1 : 0,
-                             brain->refuel().state_name().c_str(),
-                             brain->refuel().in_precontact_envelope() ? 1 : 0,
-                             std::hypot(own_tf2->position.x - best->p.position.x,
-                                        own_tf2->position.y - best->p.position.y),
-                             along, lat, vert);
+        // EMPL-2 — a receiver mid-protocol stabilizes its PAIRED tanker
+        // straight: no racetrack corners, no station-clock advance. A
+        // ±15-ft boom latch cannot survive a corner turn; a stabilized
+        // tanker is also the real procedure ("tanker's in stable
+        // position").
+        if (mid_protocol) {
+            entities::EntityHandle th(best->id, &world_);
+            if (auto* tbrain = th.get<f4::ai::BrainComponent>();
+                tbrain != nullptr) {
+                tbrain->set_contact_stabilized(true);
             }
         }
     }
@@ -2675,6 +2669,27 @@ void Simulation::record_snapshot() {
         if (auto* brain = h.get<f4::ai::BrainComponent>(); brain) {
             snap.ai_mode = brain->mode_name();
             snap.ai_state = brain->state_name();
+
+            // EMPL-1b — the intended-path fields on the AIRCRAFT snapshot
+            // path. The campaign path never filled them, so §5-style QC
+            // autopsies read a dead field on every sample (the
+            // ground-strike harness fills its own; the campaign runs
+            // never did). The brain's current steer point is the nav's
+            // active waypoint: its position, its index, and — the
+            // employment story — the waypoint's strike target when the
+            // leg carries one.
+            const auto& plan = brain->mission_plan();
+            const auto wp_idx = brain->navigation().current_waypoint_index();
+            if (wp_idx < plan.route.size()) {
+                const auto& wp = plan.route[wp_idx];
+                snap.target_position = wp.position;
+                std::string wp_desc =
+                    wp.name.empty() ? "WP" + std::to_string(wp_idx) : wp.name;
+                if (wp.target_id != 0) {
+                    wp_desc += " tgt=" + std::to_string(wp.target_id);
+                }
+                snap.target_description = std::move(wp_desc);
+            }
         }
 
         // Control commands (Tranche A4): the AI's last PilotInput, the

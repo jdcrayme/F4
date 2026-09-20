@@ -55,14 +55,31 @@ namespace entities = f4::entities;
 
 namespace {
 
+// Fixture resolution (the suite-wide convention — see
+// test_bvr_intercept_harness.cpp): generic_string() keeps the paths
+// forward-slash, because they are embedded in scenario JSON documents
+// (a Windows backslash path JSON-escapes: "\f" in f16.json is a form
+// feed, "\U" in C:\Users is invalid).
+std::string fixture_dir(const char* macro_dir) {
+    const char* env = std::getenv(macro_dir);
+    std::string dir = env ? env : "";
+    return dir;
+}
+
 #ifdef F4_GENERATED_FIXTURES_DIR
-const std::filesystem::path f16_config_path =
-    std::filesystem::path(F4_GENERATED_FIXTURES_DIR) / "f16.json";
-const std::filesystem::path class_table_path =
-    std::filesystem::path(F4_SOURCE_FIXTURES_DIR) / "falcon4.ct.json";
+const std::string f16_config_path =
+    (std::filesystem::path(fixture_dir("F4_GENERATED_FIXTURES_DIR").empty()
+         ? F4_GENERATED_FIXTURES_DIR
+         : fixture_dir("F4_GENERATED_FIXTURES_DIR")) / "f16.json")
+        .generic_string();
+const std::string class_table_path =
+    (std::filesystem::path(fixture_dir("F4_SOURCE_FIXTURES_DIR").empty()
+         ? F4_SOURCE_FIXTURES_DIR
+         : fixture_dir("F4_SOURCE_FIXTURES_DIR")) / "falcon4.ct.json")
+        .generic_string();
 #else
-const std::filesystem::path f16_config_path = "generated_fixtures/f16.json";
-const std::filesystem::path class_table_path = "falcon4.ct.json";
+const std::string f16_config_path = "generated_fixtures/f16.json";
+const std::string class_table_path = "falcon4.ct.json";
 #endif
 
 // A two-flight world: one tanker (mission 39 — the stock war's tanker
@@ -135,13 +152,17 @@ Scenario make_aar_scenario(const std::filesystem::path& dir,
         out << "{\n";
         out << "  \"name\": \"campaign_aar_e2e\",\n";
         out << "  \"spawn_mode\": \"campaign_flights\",\n";
-        out << "  \"world_json_path\": \"" << world_path.string() << "\",\n";
+        // generic_string: the paths are embedded in a scenario JSON
+        // document — Windows backslashes would JSON-escape ("\U" in
+        // C:\Users is invalid; the suite-wide convention).
+        out << "  \"world_json_path\": \"" << world_path.generic_string()
+            << "\",\n";
         out << "  \"class_table_path\": \""
-            << class_table_path.string() << "\",\n";
+            << class_table_path << "\",\n";
         out << "  \"aircraft\": [{\n";
         out << "    \"callsign\": \"AAR\",\n";
         out << "    \"aircraft_config_path\": \""
-            << f16_config_path.string() << "\",\n";
+            << f16_config_path << "\",\n";
         out << "    \"aircraft_name\": \"F-16C_50\",\n";
         out << "    \"vis_type_index\": 1052,\n";
         out << "    \"parking_spot\": {\"x\": 0.0, \"y\": 0.0, \"z\": 0.0},\n";
@@ -234,15 +255,16 @@ TEST(CampaignAarE2E, SavedTankerAndReceiverFlyTheFullProcedure) {
 
     constexpr double kDt = 1.0 / 60.0;
     constexpr int kMaxTicks = 108000;   // 30 min — takeoff, transit, join
+    // The join funnel trace (F4_AAR_DEBUG=1): both aircraft's state
+    // every 60 s — the acceptance run's evidence.
+    const bool aar_debug = std::getenv("F4_AAR_DEBUG") != nullptr;
     for (int i = 0; i < kMaxTicks; ++i) {
         sim.tick(kDt);
-        // TEMP DIAGNOSTIC: every 60 s print both aircraft's states.
-        if (i % 600 == 0) {
+        if (aar_debug && i % 600 == 0) {
             const auto* rtf = receiver_h.get<entities::TransformComponent>();
             const auto* ttf = tanker_h.get<entities::TransformComponent>();
             const auto* rfm = receiver_h.get<f4::flight::FlightModelComponent>();
-            const auto* tfm = tanker_h.get<f4::flight::FlightModelComponent>();
-            if (rtf != nullptr && ttf != nullptr) {
+            if (rtf != nullptr && ttf != nullptr && rfm != nullptr) {
                 const double dist = std::hypot(rtf->position.x - ttf->position.x,
                                                rtf->position.y - ttf->position.y);
                 std::printf("[diag] t=%6.1fs phase=%s refuel_leg=%d "

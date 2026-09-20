@@ -77,6 +77,7 @@ RefuelModule::build_sm()
         .event_name(RefuelEvent::DisconnectApproved,    "DisconnectApproved")
         .event_name(RefuelEvent::ReachedDeparture,      "ReachedDeparture")
         .event_name(RefuelEvent::TankerLost,            "TankerLost")
+        .event_name(RefuelEvent::StationLost,           "StationLost")
 
         // --- Transitions ---
         .on(RefuelState::NoTanker, RefuelState::Rendezvous,
@@ -97,6 +98,10 @@ RefuelModule::build_sm()
             RefuelEvent::DisconnectApproved, nullptr, nullptr, "tanker_cleared_departure")
         .on(RefuelState::BackingOut, RefuelState::Departing,
             RefuelEvent::DisconnectApproved, nullptr, nullptr, "tanker_cleared_departure")
+        .on(RefuelState::PreContact, RefuelState::Rendezvous,
+            RefuelEvent::StationLost, nullptr, nullptr, "station_lost_rejoin")
+        .on(RefuelState::ClearedContact, RefuelState::Rendezvous,
+            RefuelEvent::StationLost, nullptr, nullptr, "station_lost_rejoin")
         .on(RefuelState::Departing, RefuelState::Done,
             RefuelEvent::ReachedDeparture, nullptr, nullptr, "descended_to_departure_alt")
         .on(RefuelState::Rendezvous, RefuelState::NoTanker,
@@ -168,7 +173,18 @@ RefuelModule::build_sm()
             }
         })
         .on_enter(RefuelState::Done, [this](const RefuelEvent&) {
-            // The brain reads is_complete() to hand back to the nav module.
+            // The brain reads is_complete() to hand back to the nav
+            // module. The completion event: the QC ladder's
+            // RefuelComplete counter (the SHOWCASE-1 acceptance gate)
+            // subscribes to this — nobody published it before EMPL-2's
+            // campaign e2e asked for it by name.
+            if (bus_ && tanker_id_ != 0) {
+                atc::RefuelComplete done;
+                done.receiver_id = ownship_id_;
+                done.tanker_id = tanker_id_;
+                done.fuel_transferred_lbs = fuel_received_lbs_;
+                bus_->publish(done);
+            }
         })
         .build();
 }
@@ -262,6 +278,45 @@ AIControlOutput RefuelModule::update(double dt, const flight::IAircraftState* st
 
     state_time_s_ += dt;
 
+    // The station-lost debounce accumulation (the check fires from the
+    // transition loop below; the timer needs dt, which the checks don't
+    // carry). Displacement is measured against the PRE-CONTACT point —
+    // the station both states are supposed to hold.
+    {
+        const auto sls = sm_.current();
+        if (sls == RefuelState::PreContact || sls == RefuelState::ClearedContact) {
+            const auto pp = precontact_point();
+            const bool displaced =
+                std::hypot(current_position_.x - pp.x,
+                           current_position_.y - pp.y)
+                    > config.station_lost_horiz_ft ||
+                std::abs(current_position_.z - pp.z)
+                    > config.station_lost_vert_ft;
+            station_lost_time_s_ =
+                displaced ? station_lost_time_s_ + dt : 0.0;
+        } else {
+            station_lost_time_s_ = 0.0;
+        }
+    }
+
+    // The Hold lateral drift rate (read by controls_for_hold — that
+    // state is const). Same boom-frame cross-track the hold steers on.
+    if (sm_.current() == RefuelState::Hold && tanker_picture_.valid) {
+        const auto cp = contact_point();
+        const double hh = tanker_picture_.heading_rad;
+        const double hx = current_position_.x - cp.x;
+        const double hy = current_position_.y - cp.y;
+        const double lat = hx * std::cos(hh) - hy * std::sin(hh);
+        if (hold_lat_init_ && dt > 0.0) {
+            hold_lat_rate_fps_ = (lat - hold_lat_last_ft_) / dt;
+        }
+        hold_lat_last_ft_ = lat;
+        hold_lat_init_ = true;
+    } else {
+        hold_lat_init_ = false;
+        hold_lat_rate_fps_ = 0.0;
+    }
+
     // Geometry transition checks (bounded loop for chained transitions).
     for (int iter = 0; iter < 4; ++iter) {
         const auto before = sm_.current();
@@ -271,34 +326,39 @@ AIControlOutput RefuelModule::update(double dt, const flight::IAircraftState* st
                 check_at_precontact();
                 break;
             case RefuelState::PreContact:
+                check_station_lost();
                 // USAF stabilization: only publish PrecontactReport after
                 // the receiver has been at the pre-contact position with
                 // |VS| < 200 fpm for 2 s. This prevents entering
                 // ClearedContact with a large climb rate from the spawn
                 // transient (the receiver would climb out of the contact
                 // envelope before the boom could latch).
-                if (std::abs(current_vs_fpm_) < 200.0) {
-                    precontact_stable_time_s_ += dt;
-                } else {
-                    precontact_stable_time_s_ = 0.0;
-                }
-                if (precontact_stable_time_s_ > 2.0 &&
-                    !published_precontact_report_ && bus_ && tanker_id_ != 0) {
-                    // Require |VS| < 100 fpm (tighter than the ContactLost
-                    // gate's 200) so the receiver enters ClearedContact with
-                    // a small enough VS that the Hold's VS damper can kill
-                    // it before the receiver drifts out of the ±15 ft
-                    // contact envelope.
+                if (sm_.current() == RefuelState::PreContact) {
                     if (std::abs(current_vs_fpm_) < 200.0) {
-                        atc::PrecontactReport rep;
-                        rep.receiver_id = ownship_id_;
-                        rep.tanker_id = tanker_id_;
-                        bus_->publish(rep);
-                        published_precontact_report_ = true;
+                        precontact_stable_time_s_ += dt;
+                    } else {
+                        precontact_stable_time_s_ = 0.0;
+                    }
+                    if (precontact_stable_time_s_ > 2.0 &&
+                        !published_precontact_report_ && bus_ &&
+                        tanker_id_ != 0) {
+                        // Require |VS| < 100 fpm (tighter than the
+                        // ContactLost gate's 200) so the receiver enters
+                        // ClearedContact with a small enough VS that the
+                        // Hold's VS damper can kill it before the receiver
+                        // drifts out of the ±15 ft contact envelope.
+                        if (std::abs(current_vs_fpm_) < 200.0) {
+                            atc::PrecontactReport rep;
+                            rep.receiver_id = ownship_id_;
+                            rep.tanker_id = tanker_id_;
+                            bus_->publish(rep);
+                            published_precontact_report_ = true;
+                        }
                     }
                 }
                 break;
             case RefuelState::ClearedContact:
+                check_station_lost();
                 check_in_contact_envelope();
                 break;
             case RefuelState::Hold:
@@ -344,6 +404,26 @@ void RefuelModule::check_at_precontact()
     if (in_precontact_envelope()) {
         sm_.process(RefuelEvent::AtPrecontactPos);
     }
+}
+
+// Displaced beyond the station-keep tolerances while PreContact or
+// ClearedContact: hand the join back to Rendezvous. Neither state has
+// a law that REJOINS from miles out — PreContact station-keeps,
+// ClearedContact formates the tanker's track with an 8-kt closure bias
+// (14,000 ft takes half an hour) — so the campaign e2e catch (a
+// protocol entered transiently during a co-based climb-out, then
+// displaced 9-14k ft) sat in ClearedContact forever. The debounce
+// timer is accumulated in update(); here it only fires.
+void RefuelModule::check_station_lost()
+{
+    const auto s = sm_.current();
+    if (s != RefuelState::PreContact && s != RefuelState::ClearedContact) {
+        return;
+    }
+    if (!tanker_picture_.valid) return;   // TankerLost owns the invalid case
+    if (station_lost_time_s_ < config.station_lost_debounce_s) return;
+    station_lost_time_s_ = 0.0;
+    sm_.process(RefuelEvent::StationLost);
 }
 
 void RefuelModule::check_in_contact_envelope()
@@ -498,17 +578,47 @@ AIControlOutput RefuelModule::controls_for_rendezvous() const
     const geo::WorldPosition aim_pos{aim_x, aim_y, cp.z};
 
     // EMPL-2 — the near-field terminal (see the config block): inside
-    // rendezvous_near_ft the heading becomes the TANKER'S TRACK —
-    // formate behind the boom and let the closure law close — instead
-    // of chasing a point on an orbit (the sustained-turn trap: the
+    // rendezvous_near_ft the join becomes formate-and-close instead of
+    // chasing a point on an orbit (the sustained-turn trap: the
     // receiver circled 5k ft above the boom, never descending).
     double desired_heading;
     if (dist_cp_ft < config.rendezvous_near_ft) {
-        desired_heading = tanker_picture_.heading_rad;
+        // EMPL-2 — the lateral rejoin blend (see the config block): the
+        // track formate needs a LATERAL closure term. The tanker's
+        // track alone never kills a cross-track offset — the along-axis
+        // closure law has no authority over lat — so the campaign e2e
+        // catch (a receiver joining the ORBITING tanker abeam) formated
+        // its displaced line forever: 2-8k ft of lat drift, dist parked
+        // at 6-10k ft, zero envelope samples. Blend the track heading
+        // toward the pursue bearing by the lateral offset against the
+        // pre-contact point: dead astern keeps the pure formate (the
+        // sustained-turn fix); displaced, the blend carries the
+        // receiver back onto the boom's line — which the orbit's
+        // curvature keeps sweeping away from a fixed-offset formate.
+        const double lat_cp_ft = (current_position_.x - cp.x) * std::cos(h)
+                               - (current_position_.y - cp.y) * std::sin(h);
+        const double pursue_hdg =
+            AirSteering::bearing_to(current_position_, aim_pos);
+        const double rejoin_blend = std::clamp(
+            std::abs(lat_cp_ft) / config.rendezvous_rejoin_lat_ft, 0.0, 1.0);
+        desired_heading =
+            tanker_picture_.heading_rad +
+            wrap_heading_err(pursue_hdg - tanker_picture_.heading_rad) *
+                rejoin_blend;
     } else {
         desired_heading = AirSteering::bearing_to(current_position_, aim_pos);
     }
-    const double target_alt = cp.z;
+    // EMPL-2 — the rendezvous VS lead (see the config block): subtract
+    // the climb momentum from the altitude aim so the join arrives at
+    // the boom's altitude WITH ~zero VS instead of blowing through it
+    // at the full VS cap (every pass overshot ~3,000 ft high and the
+    // station-keep pitch loop crawled back for 10 minutes). CAPPED —
+    // uncapped, the lead degenerates into a 1/τ proportional law that
+    // crawls the final deficit at ~16 fpm.
+    const double vs_lead_ft = std::clamp(
+        current_vs_fpm_ * (config.rendezvous_vs_lead_s / 60.0),
+        -config.rendezvous_vs_lead_max_ft, config.rendezvous_vs_lead_max_ft);
+    const double target_alt = cp.z - vs_lead_ft;
 
     // EMPL-2 — the rendezvous closure law: error-proportional (tau),
     // CAPPED by the kinematic braking curve sqrt(2·a·err) — the
@@ -531,9 +641,25 @@ AIControlOutput RefuelModule::controls_for_rendezvous() const
         const double demand_fps =
             std::min(err_ft / std::max(config.rendezvous_tau_s, 1.0),
                      std::sqrt(2.0 * config.rendezvous_brake_fps2 * err_ft));
+        // EMPL-2 — the level-first closure cap (see the config block):
+        // the full ceiling is only available LEVEL with the boom — and
+        // it is SIGN-AWARE. Below the boom: close gently (90 kts) —
+        // level off, then close. Above the boom: NO closure at all —
+        // the +25-kt overtake's thrust drives a climb the join-scale
+        // pitch authority cannot counter (the scenario e2e trace:
+        // commanded −700 fpm, actual +500 fpm — the receiver rode its
+        // throttle up and away from the boom). Match speed, descend,
+        // then close.
+        double closure_cap_kts;
+        if (std::abs(dz) <= config.precontact_vert_ft) {
+            closure_cap_kts = config.rendezvous_max_closure_kts;
+        } else if (dz < 0.0) {
+            closure_cap_kts = config.rendezvous_level_closure_kts;
+        } else {
+            closure_cap_kts = 0.0;
+        }
         target_speed_vcas +=
-            std::max(std::min(demand_fps / kFpsPerKt,
-                              config.rendezvous_max_closure_kts),
+            std::max(std::min(demand_fps / kFpsPerKt, closure_cap_kts),
                      config.closure_bias_kts);
     } else {
         // Overshot (ahead): fall back below the tanker's speed, under
@@ -559,10 +685,30 @@ AIControlOutput RefuelModule::controls_for_rendezvous() const
     // reach before the swap could matter.
     const double save_bank = air_steering.max_bank_rad;
     const double save_maxvs = air_steering.max_vs_fpm;
+    const double save_vsgain = air_steering.vs_gain;
+    const double save_altint = air_steering.alt_integral_gain;
+    const double save_altintmax = air_steering.alt_integral_max;
     air_steering.max_bank_rad = config.rendezvous_max_bank_rad;
     air_steering.max_vs_fpm = config.rendezvous_max_vs_fpm;
+    // EMPL-2 — join-scale vertical authority: the rendezvous state
+    // ALWAYS flies the PreContact tune (vs_gain 3, the strong
+    // integral). The constructor's station-keep tune (vs_gain 0.5) is
+    // a ±100-ft servo: at join scale the phugoid/thrust coupling
+    // outvotes it (the receiver rode its throttle to +500 fpm against
+    // a −700 fpm command — the scenario e2e trace), and a hysteresis
+    // dead zone between the strong latch and the standoff release
+    // deadlocked the join 6,000 ft astern / 330 ft high (the soft tune
+    // closed a 330-ft deficit at −5 fpm). The capped VS lead above
+    // shapes the arrival; the strong tune just executes it. PreContact
+    // proves this tune inside ±300 ft.
+    air_steering.vs_gain = 3.0;
+    air_steering.alt_integral_gain = 0.6;
+    air_steering.alt_integral_max = 200.0;
     auto out = air_steering.steer(desired_heading, target_alt, target_speed_vcas,
                                   steering_input());
+    air_steering.vs_gain = save_vsgain;
+    air_steering.alt_integral_gain = save_altint;
+    air_steering.alt_integral_max = save_altintmax;
     air_steering.max_bank_rad = save_bank;
     air_steering.max_vs_fpm = save_maxvs;
     return out;
@@ -591,8 +737,48 @@ AIControlOutput RefuelModule::controls_for_precontact() const
     air_steering.alt_integral_max = 200.0;
     air_steering.attitude_gain = 1.5;
     air_steering.pitch_rate_damp = 0.8;
-    auto out = air_steering.steer(tanker_picture_.heading_rad, pp.z,
+    // EMPL-2 — the terminal lateral correction: the WINGMAN's linear
+    // cross-track law (lateral_error -> a bounded heading correction on
+    // the lead's track; right of station -> turn left). The bare
+    // tanker-track heading has NO lateral feedback — a 73-ft residual
+    // at ClearedContact entry grew 30 ft/s under the orbit's curvature
+    // (the e2e trace: lat 73 -> 1,589 ft in 39 s, station-lost,
+    // rejoin, churn) — and a pursue-BEARING blend swings the commanded
+    // heading wildly as the station crosses the track. The linear law
+    // is what holds a formation slot on a maneuvering lead.
+    const double thdg = tanker_picture_.heading_rad;
+    const double trx = current_position_.x - pp.x;
+    const double trY = current_position_.y - pp.y;
+    const double tlat = trx * std::cos(thdg) - trY * std::sin(thdg);
+    const double tcorr = std::clamp(
+        config.terminal_lateral_gain_rad_per_ft * tlat,
+        -config.terminal_max_correction_rad,
+        config.terminal_max_correction_rad);
+    const double desired_hdg = thdg - tcorr;
+    const double save_bank2 = air_steering.max_bank_rad;
+    const double save_thr2 = air_steering.approach_aileron_threshold_rad;
+    air_steering.max_bank_rad = config.terminal_max_bank_rad;
+    // EMPL-2 — the heading deadband gate: steer() banks only for
+    // errors above ~5 degrees (the cruise rudder is zeroed below it),
+    // so a degree-scale lateral correction was INVISIBLE — the hold
+    // drifted out of the ±15 envelope untouched (the e2e exits at
+    // lat exactly ±15, corr never executed). Terminal steering banks
+    // on any error.
+    air_steering.approach_aileron_threshold_rad = 0.0;
+    auto out = air_steering.steer(desired_hdg, pp.z,
                                   tanker_picture_.speed_kts, steering_input());
+    air_steering.max_bank_rad = save_bank2;
+    air_steering.approach_aileron_threshold_rad = save_thr2;
+    // EMPL-2 — direct along-axis throttle bias (PreContact
+    // station-keep): the cascade's speed loop shares the throttle with
+    // the energy-coupling term, so fine speed commands don't move the
+    // receiver relative to the boom. The station is a THROTTLE
+    // problem — bias the actuator on the along error. 0.0015/ft: ±15
+    // ft ↔ a 2% delta; ±80 ft rails the ±0.12 band.
+    const double tlong_pp = trx * std::sin(thdg) + trY * std::cos(thdg);
+    out.throttle_cmd = std::clamp(
+        out.throttle_cmd + std::clamp(0.0015 * (-tlong_pp), -0.12, 0.12),
+        air_steering.throttle_min, 1.0);
     air_steering.vs_gain = save_vs;
     air_steering.max_vs_fpm = save_maxvs;
     air_steering.alt_integral_gain = save_alt_int;
@@ -642,11 +828,52 @@ AIControlOutput RefuelModule::controls_for_cleared_contact() const
     // (~0.1 ft/s, 120 s stuck at -52 ft in the trace) and the E2E
     // expired 12 s into Hold, never reaching Departing/Done.
     const double closure_gap = -along_err_ft();
-    const double closure_bias = std::clamp(0.05 * closure_gap, 0.0, 8.0);
+    // EMPL-2 — SYMMETRIC bias: the clamp used to floor at 0, so a
+    // receiver that entered ClearedContact with along-track momentum
+    // and settled AHEAD of the receptacle (the e2e trace: parked at
+    // +90-110 ft, the latch window ±15) had no fall-back law at all.
+    // The P gain is 0.2 (was 0.05): at 400 kts a 2.5-kt correction
+    // (50 ft at 0.05) is eaten by the throttle loop's phugoid
+    // equilibrium — the receiver parked +50 ft off the boom all run.
+    // 0.2/ft capped ±8 executes decisively and decays to ~3 kts at
+    // the ±15 latch window.
+    const double closure_bias = std::clamp(0.2 * closure_gap, -8.0, 8.0);
     const double target_speed = tanker_picture_.speed_kts + closure_bias;
-    auto out = air_steering.steer(tanker_picture_.heading_rad,
+    // EMPL-2 — the terminal lateral correction (see
+    // controls_for_precontact): the wingman's linear cross-track law on
+    // the CONTACT point (the receptacle this state closes on).
+    const auto cp_st = contact_point();
+    const double thdg = tanker_picture_.heading_rad;
+    const double trx = current_position_.x - cp_st.x;
+    const double trY = current_position_.y - cp_st.y;
+    const double tlat = trx * std::cos(thdg) - trY * std::sin(thdg);
+    const double tcorr = std::clamp(
+        config.terminal_lateral_gain_rad_per_ft * tlat,
+        -config.terminal_max_correction_rad,
+        config.terminal_max_correction_rad);
+    const double desired_hdg = thdg - tcorr;
+    const double save_bank2 = air_steering.max_bank_rad;
+    const double save_thr2 = air_steering.approach_aileron_threshold_rad;
+    air_steering.max_bank_rad = config.terminal_max_bank_rad;
+    // EMPL-2 — the heading deadband gate: steer() banks only for
+    // errors above ~5 degrees (the cruise rudder is zeroed below it),
+    // so a degree-scale lateral correction was INVISIBLE — the hold
+    // drifted out of the ±15 envelope untouched (the e2e exits at
+    // lat exactly ±15, corr never executed). Terminal steering banks
+    // on any error.
+    air_steering.approach_aileron_threshold_rad = 0.0;
+    auto out = air_steering.steer(desired_hdg,
                                   tanker_picture_.altitude_msl_ft,
                                   target_speed, steering_input());
+    air_steering.max_bank_rad = save_bank2;
+    air_steering.approach_aileron_threshold_rad = save_thr2;
+    // EMPL-2 — direct along-axis throttle bias (see controls_for_precontact):
+    // the closure bias rides target_speed, but the energy coupling
+    // held the actual speed at +1 kt of the tanker's regardless — the
+    // receiver parked +42 ft off the receptacle all run. This closes.
+    out.throttle_cmd = std::clamp(
+        out.throttle_cmd + std::clamp(0.0015 * closure_gap, -0.12, 0.12),
+        air_steering.throttle_min, 1.0);
     air_steering.vs_gain = save_vs;
     air_steering.max_vs_fpm = save_maxvs;
     air_steering.alt_integral_gain = save_alt_int;
@@ -690,9 +917,40 @@ AIControlOutput RefuelModule::controls_for_hold() const
     air_steering.alt_integral_max = 0.0;
     air_steering.attitude_gain = 0.3;
     air_steering.pitch_rate_damp = 0.5;
-    auto out = air_steering.steer(tanker_picture_.heading_rad,
+    // EMPL-2 — the HOLD station servo. The bare tanker-speed target
+    // holds whatever relative speed the receiver entered with: half a
+    // knot of trim noise integrates into along-track drift, and the
+    // ±15-ft envelope trips ContactLost in under a minute (the
+    // campaign e2e churn: latched → drifted to +45 ft → ContactLost →
+    // re-latch, the 20-s hold timer never expired). Same symmetric
+    // along bias + linear lateral correction ClearedContact flies, so
+    // the boom station is SERVED, not remembered.
+    const double hold_gap = -along_err_ft();
+    const double hold_bias = std::clamp(0.2 * hold_gap, -8.0, 8.0);
+    const auto cp_h = contact_point();
+    const double hhdg = tanker_picture_.heading_rad;
+    const double hrx = current_position_.x - cp_h.x;
+    const double hry = current_position_.y - cp_h.y;
+    const double hlat = hrx * std::cos(hhdg) - hry * std::sin(hhdg);
+    const double hcorr = std::clamp(
+        config.hold_lateral_gain_rad_per_ft * hlat +
+            config.hold_lateral_damp_rad_per_fps * hold_lat_rate_fps_,
+        -config.terminal_max_correction_rad, config.terminal_max_correction_rad);
+    // EMPL-2 — the deadband gate (see controls_for_precontact): the
+    // hold's degree-scale corrections bank immediately.
+    const double save_thr2 = air_steering.approach_aileron_threshold_rad;
+    air_steering.approach_aileron_threshold_rad = 0.0;
+    auto out = air_steering.steer(hhdg - hcorr,
                                   tanker_picture_.altitude_msl_ft,
-                                  tanker_picture_.speed_kts, steering_input());
+                                  tanker_picture_.speed_kts + hold_bias,
+                                  steering_input());
+    air_steering.approach_aileron_threshold_rad = save_thr2;
+    // EMPL-2 — the direct along-axis throttle bias here too (see
+    // controls_for_cleared_contact): the ±15-ft envelope is served by
+    // the actuator, not remembered by the speed target.
+    out.throttle_cmd = std::clamp(
+        out.throttle_cmd + std::clamp(0.0015 * hold_gap, -0.12, 0.12),
+        air_steering.throttle_min, 1.0);
     air_steering.vs_gain = save_vs;
     air_steering.max_vs_fpm = save_maxvs;
     air_steering.alt_integral_gain = save_alt_int;

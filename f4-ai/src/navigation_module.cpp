@@ -114,7 +114,10 @@ AIControlOutput NavigationModule::update(double dt, const flight::IAircraftState
     wp_timer_ += dt;
     // P7 — the station hold's clock runs while the hold is armed (the
     // racetrack keeps flying; the hold is what the loop IS).
-    if (holding_) station_elapsed_ += dt;
+    // The stabilized hold does not burn its clock: the receiver owns
+    // the tanker for the protocol's duration (the release path resumes
+    // the racetrack with the remaining station time).
+    if (holding_ && !contact_stabilized_) station_elapsed_ += dt;
 
     // NAV-B: resolve the first leg's anchor on the first cached update —
     // the leg emanates from where the aircraft actually is (an offset
@@ -309,7 +312,10 @@ void NavigationModule::check_waypoint_capture()
         (wp_timer_ > min_wp_dwell_s && dist < abeam_capture_ft &&
          off_nose > abeam_bearing_rad);
 
-    if (captured) {
+    // EMPL-2 — contact stabilization gates the capture: a stabilized
+    // tanker flies its leg STRAIGHT through the corner (see the header
+    // note); the release path re-forms the racetrack.
+    if (captured && !contact_stabilized_) {
         // NAV-B: the new leg emanates from the waypoint we just captured.
         leg_from_ = route_[wp_index_].position;
 
@@ -346,6 +352,33 @@ void NavigationModule::check_waypoint_capture()
                 holding_ = false;
                 station_done_ = true;
             }
+        }
+    }
+}
+
+// ============================================================================
+// Contact stabilization (EMPL-2)
+// ============================================================================
+void NavigationModule::set_contact_stabilized(bool on) noexcept
+{
+    if (contact_stabilized_ == on) return;
+    contact_stabilized_ = on;
+    if (on || !holding_) return;
+    // Release: the leg's corner may now be far behind — treat it
+    // captured and turn to the next racetrack corner. This is the same
+    // wrap rule the capture path runs: the circuit re-forms while the
+    // station clock runs, or the hold releases and the route resumes.
+    leg_from_ = route_[wp_index_].position;
+    ++wp_index_;
+    wp_timer_ = 0.0;
+    if (wp_index_ >= route_.size()) {
+        sm_.process(NavigationEvent::WaypointCaptured);
+    } else if (wp_index_ - 1 == loop_end_) {
+        if (station_elapsed_ < route_[loop_start_].station_time_s) {
+            wp_index_ = loop_start_;
+        } else {
+            holding_ = false;
+            station_done_ = true;
         }
     }
 }
