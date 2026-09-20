@@ -85,6 +85,9 @@ fs::path build_root() {
     return base / "..";
 }
 
+// (The shared qc_build_root/qc_trace_path definitions live AFTER the
+// anonymous namespace — external linkage.)
+
 // The scenarios directories to scan, most-specific first. The viewer
 // binary lives at <build>/f4-world-viewer[/Debug] and the templates at
 // <build>/scenarios.
@@ -108,7 +111,7 @@ std::vector<fs::path> scenario_dirs() {
 //     build root                          record_path convention
 std::vector<fs::path> trace_candidates(const std::string& stem) {
     std::vector<fs::path> out;
-    out.push_back(build_root() / "qc" / stem / "trace.json");
+    out.push_back(qc_trace_path(stem));
     out.push_back("qc" / fs::path(stem) / "trace.json");
     out.push_back(exe_dir() / ".." / "qc" / stem / "trace.json");
     out.push_back(exe_dir() / ".." / (stem + "_trace.json"));
@@ -118,7 +121,7 @@ std::vector<fs::path> trace_candidates(const std::string& stem) {
 // Where the Record button's recorder writes for a template — the first
 // trace convention, so the rescan finds the artifacts by construction.
 fs::path mission_qc_out_dir(const std::string& stem) {
-    return build_root() / "qc" / stem;
+    return qc_build_root() / "qc" / stem;
 }
 
 // Locate the sibling campaign_qc recorder in the build tree. Prefer the
@@ -183,12 +186,23 @@ MissionQcJob spawn_record_job(const std::string& stem, const fs::path& tool,
     return job;
 }
 
+// Shared trace conventions (declared in viewer_state.hpp) are defined
+// AFTER this anonymous namespace — they need external linkage (the
+// QC-world overlay in qc_world_view.cpp links against them).
+
 } // namespace
+
+// Shared trace conventions — see viewer_state.hpp. Defined here (next to
+// build_root, whose walk they reuse) with external linkage.
+std::filesystem::path qc_build_root() { return build_root(); }
+std::filesystem::path qc_trace_path(const std::string& stem) {
+    return build_root() / "qc" / stem / "trace.json";
+}
 
 void ViewerApp::draw_mission_qc_view() {
     if (!impl_->show_mission_qc) return;
 
-    ImGui::SetNextWindowSize(ImVec2(760, 440), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(900, 440), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Mission QC", &impl_->show_mission_qc)) {
         ImGui::End();
         return;
@@ -264,14 +278,15 @@ void ViewerApp::draw_mission_qc_view() {
                             "generated into build/scenarios.");
     }
 
-    // One row per template: name, trace status, the two action buttons.
+    // One row per template: name, trace status, the three action buttons.
     // The table stays tiny; no clipper needed.
-    if (ImGui::BeginTable("mission_qc", 4,
+    if (ImGui::BeginTable("mission_qc", 5,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("scenario", ImGuiTableColumnFlags_WidthStretch, 2.0f);
         ImGui::TableSetupColumn("trace", ImGuiTableColumnFlags_WidthStretch, 3.0f);
         ImGui::TableSetupColumn("replay", ImGuiTableColumnFlags_WidthFixed, 110.0f);
         ImGui::TableSetupColumn("record", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+        ImGui::TableSetupColumn("world", ImGuiTableColumnFlags_WidthFixed, 110.0f);
         ImGui::TableHeadersRow();
         for (const auto& e : impl_->mission_qc_entries) {
             ImGui::TableNextRow();
@@ -316,6 +331,14 @@ void ViewerApp::draw_mission_qc_view() {
                     impl_->status_msg = "Mission QC: recording " + e.name +
                                         " (headless campaign_qc)...";
                 }
+            }
+            ImGui::TableNextColumn();
+            // QC-WORLD: fly this template as an overlay on the world map
+            // (real runway via airbase_source; trails on the canvas;
+            // selectable into the Inspector + 3D chase). Stop any current
+            // run first — fly_scenario_in_world does that itself.
+            if (ImGui::Button(("Fly in world##" + e.name).c_str())) {
+                fly_scenario_in_world(e.scenario_path);
             }
         }
         ImGui::EndTable();

@@ -841,6 +841,77 @@ void ViewerApp::draw_inspector() {
                         }
                     }
                 }
+            } else if (impl_->sel_kind ==
+                           Impl::SelectionKind::QcAircraft &&
+                       impl_->scenario_player.active()) {
+                // QC-WORLD: a Mission QC overlay aircraft — an entity in
+                // the SCENARIO sim's world (Impl::qc_handle, third id
+                // space). Same component readout as the session's live
+                // aircraft; identity comes from the template (scenario
+                // aircraft don't all carry a campaign origin).
+                auto h = impl_->qc_handle(impl_->sel_entity);
+                auto* tf = h.get<f4::entities::TransformComponent>();
+                auto* fm = h.get<f4::flight::FlightModelComponent>();
+                auto* brain = h.get<f4::ai::BrainComponent>();
+                if (!tf || !fm) {
+                    ImGui::TextDisabled("Invalid QC entity (run stopped?)");
+                } else {
+                    ImGui::Text("QC Aircraft — %s",
+                                impl_->scenario_player.scenario.name.c_str());
+                    ImGui::Separator();
+                    if (auto* org =
+                            h.get<f4::simulation::CampaignOriginComponent>()) {
+                        ImGui::Text("Callsign:  CS%03u-%u",
+                                    static_cast<unsigned>(org->callsign_id),
+                                    static_cast<unsigned>(org->callsign_num));
+                        ImGui::Text("Team:      %d (%s)", org->team_slot,
+                                    impl_->team_name_for_slot(
+                                        org->team_slot));
+                    }
+                    if (brain) {
+                        ImGui::Text("Phase:     %s", brain->phase_name());
+                    }
+                    const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
+                    ImGui::Text("Position:  (%.0f, %.0f) grid  %.0f ft MSL",
+                                gx, gy, tf->position.z);
+                    const auto& kin = fm->model().state().kin;
+                    const double vt =
+                        std::sqrt(static_cast<double>(kin.xdot) * kin.xdot +
+                                  static_cast<double>(kin.ydot) * kin.ydot);
+                    ImGui::Text("Velocity:  %.0f ft/s (%.0f kts)  alt %.0f ft",
+                                vt, vt * 0.592483801, tf->position.z);
+                    ImGui::Text("Airborne:  %s",
+                                fm->model().state().gear.inAir ? "yes" : "no");
+                    if (brain && !brain->mission_plan().route.empty()) {
+                        ImGui::Separator();
+                        if (ImGui::TreeNode(
+                                "qc_flight_plan",
+                                "Flight plan (%d wps)",
+                                static_cast<int>(
+                                    brain->mission_plan().route.size()))) {
+                            ImGui::Text("idx  x    y    alt     action");
+                            int wi = 0;
+                            for (const auto& w :
+                                 brain->mission_plan().route) {
+                                char action_buf[40];
+                                std::snprintf(action_buf, sizeof(action_buf),
+                                              "%u (%s)",
+                                              static_cast<unsigned>(w.action),
+                                              f4::viewer::wp_action_name(
+                                                  w.action));
+                                ImGui::Text("%-4d %-4.0f %-4.0f %-7.0f %-19s",
+                                            wi++,
+                                            w.position.x / 1024.0,
+                                            w.position.y / 1024.0,
+                                            w.position.z,
+                                            action_buf);
+                            }
+                            ImGui::TreePop();
+                        }
+                    }
+                    ImGui::TextDisabled("G or the QC panel toggles map "
+                                        "follow; the 3D tab chases it.");
+                }
             }
         // (No ImGui::End() here — caller owns the window.)
 }

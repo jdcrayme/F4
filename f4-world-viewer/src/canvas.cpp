@@ -174,6 +174,31 @@ void ViewerApp::handle_input() {
             }
         }
 
+        // QC-WORLD: the overlay run's aircraft — same pick convention as
+        // the live layer (10 px, nearest wins). They live in the SCENARIO
+        // sim's world (SelectionKind::QcAircraft discriminates the id
+        // space; Impl::qc_handle resolves).
+        if (impl_->scenario_player.active() &&
+            impl_->scenario_player.world_overlay) {
+            const float ltol = 10.0f / impl_->cam_zoom;
+            f4::entities::EntityId qc_best;
+            float qc_d2 = ltol * ltol;
+            for (const auto eid : impl_->qc_aircraft()) {
+                auto h = impl_->qc_handle(eid);
+                auto* tf = h.get<f4::entities::TransformComponent>();
+                if (!tf) continue;
+                const float lx = Impl::grid_x(tf), ly = Impl::grid_y(tf);
+                const float dx = lx - gx, dy = ly - gy;
+                const float d2 = dx * dx + dy * dy;
+                if (d2 < qc_d2) { qc_d2 = d2; qc_best = eid; }
+            }
+            if (qc_best.valid()) {
+                impl_->sel_kind = Impl::SelectionKind::QcAircraft;
+                impl_->sel_entity = qc_best;
+                return;
+            }
+        }
+
         // Try objectives first (drawn on top of terrain).
         if (impl_->show_objectives && impl_->world_loaded) {
             f4::entities::EntityId best_id;
@@ -1032,6 +1057,147 @@ void ViewerApp::draw_canvas() {
                                 static_cast<int>(p.y),
                                 s * 0.6f + 4.0f,
                                 Color{255, 255, 0, 255});
+            }
+        }
+    }
+
+    // --- QC-WORLD: the Mission QC overlay run -----------------------------
+    //
+    // The scenario Simulation flies its template against the REAL world
+    // (airbase_source anchoring resolves the real runway at initialize);
+    // its aircraft positions are absolute theater ENU feet, so /1024 is
+    // the same grid the canvas draws in — the QC flight renders as just
+    // another map layer: trail (where it has been), route (where it is
+    // going), fighter symbols, and the active runway centerline.
+    if (impl_->scenario_player.active() &&
+        impl_->scenario_player.world_overlay) {
+        auto& sp = impl_->scenario_player;
+        const float s = std::clamp(8.0f + impl_->cam_zoom * 2.0f, 12.0f, 36.0f);
+        const float cull_margin = s + 8.0f;
+        const float sx_min = -cull_margin;
+        const float sx_max = static_cast<float>(impl_->window_w) + cull_margin;
+        const float sy_min = -cull_margin;
+        const float sy_max = static_cast<float>(impl_->window_h) + cull_margin;
+        const bool draw_wp_labels = impl_->cam_zoom > 3.0f;
+        const bool selected_is_qc =
+            impl_->sel_kind == Impl::SelectionKind::QcAircraft;
+
+        // The active runway centerline (derived from the real PHD layout
+        // when the template anchors via airbase_source) — the takeoff
+        // runway, visible.
+        {
+            const auto& af = sp.scenario.airfield;
+            const Vector2 a = impl_->world_to_screen(
+                static_cast<float>(af.threshold_position.x / 1024.0),
+                static_cast<float>(af.threshold_position.y / 1024.0));
+            const Vector2 b = impl_->world_to_screen(
+                static_cast<float>(af.runway_end_position.x / 1024.0),
+                static_cast<float>(af.runway_end_position.y / 1024.0));
+            DrawLineEx(a, b, 3.0f, Color{210, 210, 200, 170});
+            DrawCircleV(a, 3.0f, Color{210, 210, 200, 220});
+            if (draw_wp_labels) {
+                DrawText("RWY", static_cast<int>(a.x) + 5,
+                         static_cast<int>(a.y) - 6, 9,
+                         Color{210, 210, 200, 220});
+            }
+        }
+
+        // Trails — where each QC aircraft HAS been (movement-gated
+        // samples; see Impl::qc_trails). Older segments fade; the
+        // selected aircraft's trail draws brighter and thicker.
+        for (const auto& [eid_value, trail] : impl_->qc_trails) {
+            if (trail.size() < 2) continue;
+            const bool mine = selected_is_qc &&
+                              impl_->sel_entity.value == eid_value;
+            const unsigned char base_a = mine ? 235 : 150;
+            const float w = mine ? 2.5f : 1.5f;
+            // QC cyan; the selection's trail yellow to match the ring.
+            const Color c = mine ? Color{255, 230, 80, 255}
+                                 : Color{80, 200, 220, 255};
+            Vector2 prev = impl_->world_to_screen(
+                static_cast<float>(trail.front().first / 1024.0),
+                static_cast<float>(trail.front().second / 1024.0));
+            for (std::size_t i = 1; i < trail.size(); ++i) {
+                const Vector2 q = impl_->world_to_screen(
+                    static_cast<float>(trail[i].first / 1024.0),
+                    static_cast<float>(trail[i].second / 1024.0));
+                // Fade the oldest half so the head of the path reads.
+                const unsigned char a = static_cast<unsigned char>(
+                    base_a * (i < trail.size() / 2 ? 0.45 : 1.0));
+                DrawLineEx(prev, q, w, Color{c.r, c.g, c.b, a});
+                prev = q;
+            }
+        }
+
+        for (const auto eid : impl_->qc_aircraft()) {
+            auto h = impl_->qc_handle(eid);
+            auto* tf = h.get<f4::entities::TransformComponent>();
+            if (!tf) continue;
+            const float gx = Impl::grid_x(tf), gy = Impl::grid_y(tf);
+            const Vector2 p = impl_->world_to_screen(gx, gy);
+            if (p.x < sx_min || p.x > sx_max ||
+                p.y < sy_min || p.y > sy_max) {
+                continue;
+            }
+
+            // Team color when the template stamped an owner; QC cyan
+            // otherwise (scenario templates' aircraft don't all carry a
+            // campaign origin).
+            auto* org = h.get<f4::simulation::CampaignOriginComponent>();
+            RlColor c = org ? color_for_owner(org->team_slot)
+                            : RlColor{80, 200, 220, 255};
+
+            // Route polyline (BELOW the symbol): the selected aircraft's
+            // always; the rest when "all flight plans" is on.
+            const bool route_selected =
+                selected_is_qc && impl_->sel_entity == eid;
+            if ((route_selected || impl_->show_all_routes)) {
+                auto* brain = h.get<f4::ai::BrainComponent>();
+                if (brain && !brain->mission_plan().route.empty()) {
+                    Vector2 prev = p;
+                    int idx = 0;
+                    for (const auto& w : brain->mission_plan().route) {
+                        const Vector2 q = impl_->world_to_screen(
+                            static_cast<float>(w.position.x / 1024.0),
+                            static_cast<float>(w.position.y / 1024.0));
+                        DrawLineEx(prev, q, route_selected ? 2.5f : 1.5f,
+                                   Color{c.r, c.g, c.b,
+                                         static_cast<unsigned char>(
+                                             route_selected ? 235 : 150)});
+                        DrawCircleV(q, 2.5f, Color{c.r, c.g, c.b, 200});
+                        if (draw_wp_labels) {
+                            char lbl[8];
+                            std::snprintf(lbl, sizeof(lbl), "%d", idx);
+                            DrawText(lbl,
+                                     static_cast<int>(q.x + 4),
+                                     static_cast<int>(q.y - 6), 9,
+                                     Color{c.r, c.g, c.b, 220});
+                        }
+                        prev = q;
+                        ++idx;
+                    }
+                }
+            }
+
+            // Symbol: fighter glyph with a cyan outline — visibly a QC
+            // aircraft even when a session paints its own picture on top.
+            const RlColor outline{80, 200, 220, 255};
+            auto* fm = h.get<f4::flight::FlightModelComponent>();
+            const bool airborne = fm && fm->model().state().gear.inAir;
+            if (!airborne) {
+                c.r = static_cast<unsigned char>(c.r * 0.55f + 64);
+                c.g = static_cast<unsigned char>(c.g * 0.55f + 64);
+                c.b = static_cast<unsigned char>(c.b * 0.55f + 64);
+            }
+            f4::renderer::draw_symbol(
+                f4::renderer::SymbolKind::UnitFighter,
+                p.x, p.y, s, c, outline);
+
+            if (route_selected) {
+                DrawCircleLines(static_cast<int>(p.x),
+                                static_cast<int>(p.y),
+                                s * 0.6f + 4.0f,
+                                Color{255, 230, 80, 255});
             }
         }
     }

@@ -116,6 +116,11 @@ public:
     /// (the --mission-qc CLI flag — headless screenshot proofs, the
     /// --ct-preview pattern).
     void open_mission_qc_window();
+    /// QC-WORLD: the small overlay playback panel (template name, sim
+    /// clock, pause/resume, speed, follow, stop) — drawn from
+    /// draw_imgui while a world-overlay run is active. See
+    /// qc_world_view.cpp.
+    void draw_qc_world_panel();
 
     /// Open the Install Diagnostics modal (Tools > Install Diagnostics).
     /// Builds the full diagnostic report from the current Installation
@@ -203,6 +208,29 @@ public:
     // Throws on parse / asset load failure. Resolves asset paths relative
     // to the scenario file's parent directory.
     void load_scenario(const std::filesystem::path& json_path);
+
+    /// QC-WORLD: load a scenario and fly it as an OVERLAY on the world
+    /// map (the campaign canvas) instead of the sandbox scenario view —
+    /// the aircraft take off from the template's real runway
+    /// (airbase_source anchoring; hand-authored templates fly their
+    /// absolute-ENU route as-is), draw their paths on the map, and are
+    /// selectable into the Inspector + 3D chase view. Requires a loaded
+    /// world; auto-loads the template's airbase_source world JSON when
+    /// none is loaded. Forces recording on at the Mission QC menu's
+    /// qc/<stem>/trace.json convention so Open replay works on the run.
+    /// Starts RUNNING at 1x. Throws on parse / load failure.
+    void fly_scenario_in_world(const std::filesystem::path& json_path);
+    /// QC-WORLD: stop the overlay run — flush the FlightRecorder trace
+    /// (Open replay consumes it), tear the scenario state down, clear
+    /// the QC selection + trails. No-op when nothing runs. Overlay mode
+    /// never built the sandbox's GL resources, so teardown is CPU-side
+    /// only.
+    void stop_scenario_run();
+    /// QC-WORLD: per-frame overlay upkeep, called from run()'s frame
+    /// scope — sample the per-aircraft trails (movement-gated) and
+    /// apply the 2D map follow (cam_x/cam_y track the selected QC
+    /// aircraft). No-op when the overlay isn't running.
+    void qc_world_frame_update();
 
     /// Set the initial window size (the --width/--height CLI flags). Must
     /// be called before run().

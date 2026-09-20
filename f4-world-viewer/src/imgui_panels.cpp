@@ -725,6 +725,11 @@ void ViewerApp::draw_imgui() {
     // recorded traces → replay). See mission_qc_view.cpp.
     draw_mission_qc_view();
 
+    // QC-WORLD: the overlay run's playback panel (pause/speed/follow/
+    // stop) — the sandbox scenario player's own panel doesn't draw in
+    // this mode; the campaign canvas is the view. See qc_world_view.cpp.
+    draw_qc_world_panel();
+
     rlImGuiEnd();
 }
 

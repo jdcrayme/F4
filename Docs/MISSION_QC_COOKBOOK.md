@@ -313,6 +313,18 @@ proofs. The recorder's console output lands in `qc/<stem>.log`
 (the gate messages + the verdict echo), and the exit code is what
 the status line reports ("gate 24 — no touchdown").
 
+**Fly it in the actual world.** The window's **Fly in world** button
+(QC-WORLD) runs the same template as an overlay on the world map: the
+flight departs its real runway (templates with `airbase_source` —
+`digi_full_mission` is the exemplar — anchor to the real objective's
+PHD runway; hand-authored templates fly their absolute-ENU route),
+draws its trail + planned route on the canvas, and is click-selectable
+into the Inspector and the 3D chase view. The QC panel pauses/resumes
+(Space), scales time, toggles map follow (G), and stops the run —
+which flushes the trace to the same `qc/<stem>/trace.json`, so the
+replay loop closes on world runs too. `--qc-world <scenario>` is the
+headless form.
+
 **What the first sweep already caught (the summary is the story):**
 
 * `tanker_track` PASSES the full USAF procedure — but the receiver

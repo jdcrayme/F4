@@ -107,6 +107,7 @@ add_library(f4_world_viewer STATIC
     src/diagnostics.cpp
     src/snapshot.cpp
     src/record_runner.cpp
+    src/qc_world_view.cpp
     src/canvas.cpp
     src/imgui_panels.cpp
     src/inspector_panel.cpp

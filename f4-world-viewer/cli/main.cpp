@@ -126,6 +126,9 @@ int main(int argc, char** argv) {
                                           // QC window on start (the
                                           // --ct-preview pattern — headless
                                           // proofs of roster + record buttons)
+    std::string qc_world_scenario;        // --qc-world <path>: fly the
+                                          // scenario as an overlay on the
+                                          // world map (QC-WORLD)
     bool auto_session = false;            // --session: start the campaign loop
     bool auto_play = false;               // --play: session starts RUNNING
                                           // (headless smoke: verify time
@@ -202,6 +205,13 @@ int main(int argc, char** argv) {
             ct_preview_entity = std::atoi(argv[++i]);
         } else if (a == "--mission-qc") {
             show_mission_qc = true;
+        } else if (a == "--qc-world" && i + 1 < argc) {
+            // QC-WORLD: fly the scenario as an overlay on the world map
+            // (real runway via airbase_source; trails on the canvas).
+            // Pair with --screenshot for headless proofs; --speed cranks
+            // the overlay's time scale so the takeoff is airborne by the
+            // shot.
+            qc_world_scenario = argv[++i];
         } else if (a == "--session") {
             // Start the live campaign session over the loaded world
             // right after the CLI loads settle (headless smoke tests:
@@ -307,6 +317,16 @@ int main(int argc, char** argv) {
     // --screenshot for headless proof of the roster + record buttons).
     if (show_mission_qc) {
         app.open_mission_qc_window();
+    }
+
+    // Apply --qc-world: fly the scenario as an overlay on the world map
+    // (after the loads above — the overlay needs the world; auto-loads
+    // the template's airbase_source world when none was given).
+    if (!qc_world_scenario.empty()) {
+        app.fly_scenario_in_world(qc_world_scenario);
+        if (scenario_speed != 1.0) {
+            app.set_time_scale(scenario_speed);
+        }
     }
 
     // Print install diagnostics to stderr + exit (no GUI). Useful for

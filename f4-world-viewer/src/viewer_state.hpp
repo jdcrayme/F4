@@ -147,6 +147,18 @@ inline RlColor to_rl(const f4::terrain::Color4& c) {
     return {c.r, c.g, c.b, c.a};
 }
 
+// ---------------------------------------------------------------------------
+// QC-WORLD / MISSION-QC trace conventions (shared by mission_qc_view.cpp,
+// which defines them, and qc_world_view.cpp, which writes to them).
+// qc_build_root: the build tree root — the dir containing f4-simulation/
+// (multi-config MSVC layouts add a per-config layer under each target).
+// qc_trace_path: qc/<stem>/trace.json under it — the Mission QC menu's
+// first trace candidate (what the Record button writes, what Open
+// replay reads, what a CLI campaign_qc run from the build root writes).
+// ---------------------------------------------------------------------------
+std::filesystem::path qc_build_root();
+std::filesystem::path qc_trace_path(const std::string& stem);
+
 // V-CAMP: the campaign session's speed presets (shared by run()'s
 // advance call and the Campaign window's radio buttons). Scales apply
 // to WALL-CLOCK time; the session's sim tick is fixed (the "Fix Your
@@ -547,7 +559,11 @@ struct ViewerApp::Impl {
     // the entity id in sel_entity too, but the entity lives in the
     // SESSION's world (a different EntityWorld with its own id space —
     // id values may collide between worlds, so the kind discriminates).
-    enum class SelectionKind { None, Objective, Unit, LiveAircraft };
+    // QcAircraft is the third id space: the QC-world overlay's scenario
+    // Simulation (see ScenarioPlayerState::world_overlay) — resolve
+    // through Impl::qc_handle, never session_handle/handle.
+    enum class SelectionKind { None, Objective, Unit, LiveAircraft,
+                               QcAircraft };
     SelectionKind sel_kind = SelectionKind::None;
     f4::entities::EntityId sel_entity;  // valid when sel_kind != None
 
@@ -608,6 +624,25 @@ struct ViewerApp::Impl {
             if (sh.get<f4::entities::UnitCoreComponent>()) return sh;
         }
         return handle(id);
+    }
+    /// The QC-world overlay's handle: an entity in the scenario
+    /// Simulation's own EntityWorld (the third id space — see
+    /// SelectionKind::QcAircraft). Only valid while the overlay run is
+    /// active (scenario_player.active()).
+    [[nodiscard]] f4::entities::EntityHandle
+    qc_handle(f4::entities::EntityId id) const {
+        return f4::entities::EntityHandle(id,
+            const_cast<f4::entities::EntityWorld*>(
+                &scenario_player.sim->world()));
+    }
+    /// The QC-world overlay's aircraft roster (empty when no overlay
+    /// run) — the scenario Simulation's flying entities.
+    [[nodiscard]] const std::vector<f4::entities::EntityId>&
+    qc_aircraft() const {
+        static const std::vector<f4::entities::EntityId> empty;
+        return (scenario_player.active() && scenario_player.world_overlay)
+                   ? scenario_player.sim->aircraft_entities()
+                   : empty;
     }
     /// The session's live aircraft roster (empty when no session).
     [[nodiscard]] const std::vector<f4::entities::EntityId>&
@@ -794,6 +829,20 @@ struct ViewerApp::Impl {
     std::string mission_qc_tool;
     bool mission_qc_tool_checked = false;
     std::vector<MissionQcJob> mission_qc_jobs;
+    // QC-WORLD: the overlay run's per-aircraft flight paths ("see their
+    // paths on the world map"). Keyed by scenario-world EntityId value;
+    // each trail is a movement-gated polyline of ENU FEET (a point is
+    // appended only when the aircraft moved > kQcTrailMinStepFt from the
+    // last, so taxi/crawl speeds don't spam points and a whole mission
+    // fits the cap). Sampled per frame in qc_world_frame_update(); drawn
+    // by the canvas QC layer.
+    static constexpr std::size_t kQcTrailMaxPoints = 4000;
+    std::unordered_map<std::uint64_t,
+                       std::vector<std::pair<double, double>>> qc_trails;
+    // QC-WORLD: 2D map follow — cam_x/cam_y track the selected QC
+    // aircraft every frame (the Inspector's 3D chase view runs off the
+    // selection itself). Toggled from the QC panel / G.
+    bool qc_follow_selected = false;
     // POLISH-2.4: minimap in the bottom-right corner of the canvas.
     // Shows the whole 1024×1024 theater at a glance: terrain thumbnail
     // (re-uses the cached terrain texture), objective dots (colored by

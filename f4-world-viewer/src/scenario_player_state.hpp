@@ -81,6 +81,15 @@ struct ScenarioPlayerState {
     bool sim_initialized = false;
     bool paused = true;          // start paused so the aircraft sits at parking
     double time_scale = 1.0;
+    // QC-WORLD: when set, this scenario runs as an OVERLAY on the
+    // campaign canvas (the world map) instead of taking over the render
+    // path with its own sandbox view. run()'s dispatch branches on this:
+    // the canvas draws (plus the QC layer + QC panel), the in-frame tick
+    // loop still drives the sim, and selection/inspector/3D resolve
+    // through Impl::qc_handle. Recording stays on — the trace flushes at
+    // stop (stop_scenario_run) or at the run() epilogue, so Open replay
+    // works on world runs exactly as on sandbox runs.
+    bool world_overlay = false;
     // SHOWCASE-1: the --record CLI override (set_recording). Applied in
     // load_scenario() AFTER the JSON parse but BEFORE the Simulation build
     // — the CLI wins over the template's own record fields.

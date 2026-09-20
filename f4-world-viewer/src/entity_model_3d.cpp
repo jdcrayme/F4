@@ -187,8 +187,15 @@ void ViewerApp::draw_entity_model_3d() {
         return 0.0f;
     };
 
-    if (impl_->sel_kind == Impl::SelectionKind::LiveAircraft) {
-        auto h = impl_->session_handle(impl_->sel_entity);
+    if (impl_->sel_kind == Impl::SelectionKind::LiveAircraft ||
+        impl_->sel_kind == Impl::SelectionKind::QcAircraft) {
+        // QC-WORLD: a QcAircraft selection resolves in the SCENARIO
+        // sim's world (Impl::qc_handle); LiveAircraft in the session's.
+        // The component readout and the per-frame chase target below are
+        // identical for both — same components, same presentation.
+        auto h = impl_->sel_kind == Impl::SelectionKind::LiveAircraft
+                     ? impl_->session_handle(impl_->sel_entity)
+                     : impl_->qc_handle(impl_->sel_entity);
         auto* tf = h.get<f4::entities::TransformComponent>();
         auto* vmc = h.get<f4::simulation::VisualModelComponent>();
         if (!tf || !vmc || vmc->vis_type <= 0) {

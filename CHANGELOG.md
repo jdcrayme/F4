@@ -5,6 +5,47 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## QC-WORLD — Mission QC flights fly in the actual world, on the world map
+
+- **QC-WORLD** — the Mission QC window's **"Fly in world"** button (and
+  the `--qc-world <scenario>` CLI flag) runs a scenario template as an
+  OVERLAY on the campaign canvas instead of the sandbox scenario view:
+  the aircraft take off from their real runway (the template's
+  `airbase_source` anchoring — `derive_real_airbase` resolves the real
+  objective's PHD runway threshold/heading/taxi/parking at
+  initialize(); hand-authored templates fly their absolute-ENU route
+  as-is), their **trails draw on the world map** (a new canvas QC layer:
+  movement-gated per-aircraft polylines + the planned-route polyline +
+  the active runway centerline; scenario ENU feet ÷ 1024 = canvas grid,
+  no new transform), and they are **click-selectable** —
+  `SelectionKind::QcAircraft` (the third entity-id space: the scenario
+  Simulation's own EntityWorld, resolved through the new
+  `Impl::qc_handle`), a QC branch in the Inspector (position/phase/
+  velocity/route, same components as session aircraft), and the
+  Inspector 3D tab's per-frame chase view follows the QC aircraft over
+  the real theater terrain. The scenario player's own Simulation is
+  untouched — same engine, same determinism, same FlightRecorder trace
+  (forced to the `qc/<stem>/trace.json` convention, so **Open replay
+  works on world runs too**; the epilogue and `stop_scenario_run`
+  flush it, and both are throw-proof after an unwritable path was
+  found to wedge the process mid-teardown). The QC panel (pause/
+  resume/Speed/Follow-on-map/Center-on-flight/Stop; Space and G do
+  what they say) drives the run; `stop_scenario_run` tears it down
+  CPU-side (overlay runs never build the sandbox's GL resources).
+  Mode dispatch in run() branches on `ScenarioPlayerState::
+  world_overlay`: the canvas keeps its own input path while the
+  in-frame fixed-timestep tick drives the sim. Verified live
+  end-to-end: `digi_full_mission` flies its full ground cycle from the
+  real Kunsan runway on the map — takeoff, Enroute at 230 kts,
+  Approach at 115 kts, Landed/Complete — with the trail, selection,
+  inspector, and 3D chase all exercised by hand; headless smoke
+  `f4-world-viewer <world> <terrain> --qc-world <scenario> --speed 8
+  --screenshot` covers it scripted. Fix en passant: the Mission QC
+  trace conventions moved to shared `qc_build_root()/qc_trace_path()`
+  helpers (viewer_state.hpp), and the recorder-log handle is now
+  created inheritable with FILE_APPEND_DATA-only access (see
+  MISSION-QC-RECORD below for why both matter).
+
 ## MISSION-QC-RECORD — the Mission QC menu records and re-records its missions
 
 - **MISSION-QC-RECORD** — the Mission QC window's Record/Re-record button

@@ -215,15 +215,21 @@ void ViewerApp::run() {
         //   Esc = clear selection (normal mode only — replay ignores)
         //   / = focus search box (handled in Layers panel via ImGui)
         if (IsKeyPressed(KEY_F) && !ImGui::GetIO().WantCaptureKeyboard) {
-            if (!impl_->replay.active() && !impl_->scenario_player.active()) {
+            if (!impl_->replay.active() &&
+                (!impl_->scenario_player.active() ||
+                 impl_->scenario_player.world_overlay)) {
                 impl_->fit_to_world();
             }
             // In replay mode, F is handled by handle_replay_input()
-            // (fit_replay_to_trail). In scenario mode, F is handled by
-            // handle_scenario_input() (fit_to_aircraft). Don't double-dispatch.
+            // (fit_replay_to_trail). In sandbox scenario mode, F is
+            // handled by handle_scenario_input() (fit_to_aircraft).
+            // QC-WORLD overlay runs keep the canvas convention
+            // (fit to world). Don't double-dispatch.
         }
         if (IsKeyPressed(KEY_ESCAPE) && !ImGui::GetIO().WantCaptureKeyboard) {
-            if (!impl_->replay.active() && !impl_->scenario_player.active()) {
+            if (!impl_->replay.active() &&
+                (!impl_->scenario_player.active() ||
+                 impl_->scenario_player.world_overlay)) {
                 impl_->sel_kind = Impl::SelectionKind::None;
                 impl_->sel_entity = f4::entities::EntityId{};
             }
@@ -287,7 +293,13 @@ void ViewerApp::run() {
             // stepping, etc.); it never touches the session. Scenario
             // mode has its own input + its in-frame fixed-timestep tick
             // (scenario_advance) — it never touches the session either.
-            if (impl_->scenario_player.active()) {
+            // QC-WORLD: the overlay run is the third arrangement — the
+            // scenario sim still ticks (same accumulator, same clamp),
+            // the canvas keeps its own input path, and the overlay's
+            // per-frame upkeep (trail sampling + map follow) runs under
+            // this scope too (it reads the scenario world).
+            if (impl_->scenario_player.active() &&
+                !impl_->scenario_player.world_overlay) {
                 handle_scenario_input();
                 // dt for the fixed-timestep accumulator (clamped to the
                 // same 1/15 s ceiling the former player used).
@@ -301,23 +313,56 @@ void ViewerApp::run() {
                 impl_->scenario_player.last_frame_time = now_s;
                 impl_->scenario_player.first_frame = false;
                 scenario_advance(dt);
-            } else if (impl_->replay.active()) {
-                handle_replay_input();
             } else {
-                handle_input();
+                if (impl_->scenario_player.active()) {
+                    const double now_s = GetTime();
+                    double dt = 0.0;
+                    if (!impl_->scenario_player.first_frame) {
+                        dt = now_s - impl_->scenario_player.last_frame_time;
+                        if (dt > 1.0 / 15.0) dt = 1.0 / 15.0;
+                        if (dt < 0.0) dt = 0.0;
+                    }
+                    impl_->scenario_player.last_frame_time = now_s;
+                    impl_->scenario_player.first_frame = false;
+                    scenario_advance(dt);
+                    qc_world_frame_update();
+                }
+                if (impl_->replay.active()) {
+                    handle_replay_input();
+                } else {
+                    handle_input();
+                }
+            }
+
+            // QC-WORLD: G toggles the 2D map follow of the selected QC
+            // aircraft (the 3D chase view keys off the selection alone).
+            if (IsKeyPressed(KEY_G) && !ImGui::GetIO().WantCaptureKeyboard &&
+                impl_->scenario_player.active() &&
+                impl_->scenario_player.world_overlay &&
+                impl_->sel_kind == Impl::SelectionKind::QcAircraft) {
+                impl_->qc_follow_selected = !impl_->qc_follow_selected;
             }
 
             // V-CAMP: Space toggles the live campaign session's clock
             // (the Campaign window's own button mirrors it). The pause
             // contract lives in set_session_paused() — we hold the
             // frame lock here, which is exactly what it expects.
-            // (Scenario mode handles its own Space pause in
+            // (Sandbox scenario mode handles its own Space pause in
             // handle_scenario_input; it has no session_runner.)
+            // QC-WORLD: with an overlay run (and no session runner),
+            // Space pauses the QC run itself — the panel's button does
+            // the same.
             if (IsKeyPressed(KEY_SPACE) &&
-                !ImGui::GetIO().WantCaptureKeyboard &&
-                impl_->session_runner &&
-                !impl_->scenario_player.active()) {
-                set_session_paused(!impl_->session_runner->paused());
+                !ImGui::GetIO().WantCaptureKeyboard) {
+                if (impl_->scenario_player.active() &&
+                    impl_->scenario_player.world_overlay &&
+                    !impl_->session_runner) {
+                    impl_->scenario_player.paused =
+                        !impl_->scenario_player.paused;
+                } else if (impl_->session_runner &&
+                           !impl_->scenario_player.active()) {
+                    set_session_paused(!impl_->session_runner->paused());
+                }
             }
 
             // V-CAMP speed presets: 1-4 pick a preset, +/- step through
@@ -451,7 +496,8 @@ void ViewerApp::run() {
 
             BeginDrawing();
             ClearBackground(Color{20, 22, 28, 255});
-            if (impl_->scenario_player.active()) {
+            if (impl_->scenario_player.active() &&
+                !impl_->scenario_player.world_overlay) {
                 draw_scenario();
                 rlImGuiBegin();
                 draw_scenario_panel();
@@ -580,7 +626,18 @@ void ViewerApp::run() {
         }
         impl_->scenario_player.world.unload();
         if (impl_->scenario_player.sim) {
-            impl_->scenario_player.sim->write_recording();
+            // The trace is a QC artifact, never a reason to take the
+            // viewer down: an unwritable path (missing dir, locked
+            // file) reports and moves on. (A throw here once wedged the
+            // process — the unwind through the full world teardown.)
+            try {
+                impl_->scenario_player.sim->write_recording();
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "write_recording failed: %s\n",
+                             e.what());
+                impl_->status_msg =
+                    std::string("Trace write failed: ") + e.what();
+            }
         }
     }
 
