@@ -56,12 +56,28 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
   Strike-gap note: the campaign→sim target propagation the cookbook
   flagged (§5) already has its in-tree A-G tranche (loader
   mission_target → FlightPlanComponent::target → the plan builder's
-  delivery-waypoint fallback), but the empirical TestCamp matrix is
-  currently BLOCKED by a new finding — the **Release `campaign_qc`
-  crashes with 0xC0000409 (fail-fast) on any world load** (Debug
-  parses the same file fine but is ~50× too slow for the 15-min
-  horizon). Fix the Release crash, then re-run the cookbook matrix;
-  the strike gap may already be closed.
+  delivery-waypoint fallback), and the blocker on verifying it is
+  FIXED here: the **Release `campaign_qc` crashed with 0xC0000409
+  (fail-fast) on any world load** — root cause: the tool's default
+  class table pointed at the BINARY `FALCON4.ct` fixture, the runtime
+  `ClassTable::load_auto` (JSON-only by design) throws on it, and the
+  throw escaped a main with no catch → abort() → the UCRT fail-fast
+  that reads like a memory bug. Fixed two ways: the default is now
+  the runtime-canonical `Data/Classes/falcon4.ct.json` (binary
+  fixture demoted to fallback), and main routes every mode's
+  exceptions through one reporter (a load error now prints its real
+  message and exits 1). The Release matrix RUNS now — and the first
+  45-minute TestCamp INTSTRIKE run sharpens the strike gap's
+  definition: 4 flights spawn with routes, but `strike_flights_armed`
+  is 0 (the loadout arming layer doesn't fire for saved-flight
+  spawns), `target_description` stays empty all run (the delivery
+  waypoints' actions are plain nav points — the saved INTSTRIKE route
+  never carries an A-G delivery action for the plan builder to
+  attach the resolved target to), and the flights are still
+  taxiing/departing at the 15-min horizon the cookbook used. The
+  strike gap is therefore TWO named layers (mission-type-driven
+  arming + mission-type-driven delivery-waypoint synthesis), both
+  now reachable in seconds via the Release matrix.
 
 ## QC-WORLD — Mission QC flights fly in the actual world, on the world map
 

@@ -427,8 +427,19 @@ Args parse_args(int argc, char** argv) {
         a.world_json = argv[1];
     }
 #ifdef F4_SOURCE_DIR
+    // QC-ANCHOR follow-up: the runtime ClassTable loads JSON only
+    // (load_auto throws on a binary .ct), so the default must be the
+    // JSON export — NOT the binary fixture this path used to name,
+    // whose load threw an uncaught exception and fail-fasted the whole
+    // Release run (exit 0xC0000409, "0x7F" in bash). The binary
+    // fixture stays as the fallback for hosts that link
+    // f4-world-convert.
     a.class_table = std::filesystem::path(F4_SOURCE_DIR) /
-                    "f4-world-convert/tests/fixtures/FALCON4.ct";
+                    "Data/Classes/falcon4.ct.json";
+    if (!std::filesystem::exists(a.class_table)) {
+        a.class_table = std::filesystem::path(F4_SOURCE_DIR) /
+                        "f4-world-convert/tests/fixtures/FALCON4.ct";
+    }
 #endif
 #ifdef F4_BINARY_DIR
     a.config = std::filesystem::path(F4_BINARY_DIR) /
@@ -1778,7 +1789,26 @@ int run_scenario(const Args& args) {
 }
 
 // ===========================================================================
+int run_qc(int argc, char** argv);
+
 int main(int argc, char** argv) {
+    // QC-ANCHOR follow-up: an uncaught exception escaping main surfaced
+    // as exit 0xC0000409 — abort()'s UCRT fast-fail — which reads like
+    // a memory bug but is just a missing catch around the world load.
+    // Route every mode's exceptions through one reporter with the real
+    // message.
+    try {
+        return run_qc(argc, argv);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "campaign_qc: %s\n", e.what());
+        return 1;
+    } catch (...) {
+        std::fprintf(stderr, "campaign_qc: unknown non-std exception\n");
+        return 1;
+    }
+}
+
+int run_qc(int argc, char** argv) {
     const Args args = parse_args(argc, argv);
 
     // SHOWCASE-1: the scenario arm skips the campaign entirely — no
