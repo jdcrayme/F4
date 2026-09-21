@@ -1161,14 +1161,6 @@ struct ViewerApp::Impl {
     float entity_3d_terrain_center_east_ft = 0.0f;
     float entity_3d_terrain_center_north_ft = 0.0f;
 
-    // The QC overlay's derived-airbase ground layout for the entity 3D
-    // chase view (EMPL-2): built once per selection / QC run from the
-    // scenario's stashed layout lists, drawn via scene.airfield. The sim
-    // pointer discriminates a new QC run from a re-selection.
-    f4::renderer::AirfieldGeometry3D qc_airfield_3d;
-    bool qc_airfield_3d_valid = false;
-    const f4::simulation::Simulation* qc_airfield_3d_sim = nullptr;
-
     // -----------------------------------------------------------------------
     // Replay mode state (Path B2 — trace playback)
     // -----------------------------------------------------------------------

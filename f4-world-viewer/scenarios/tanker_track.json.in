@@ -15,7 +15,7 @@
       "callsign": "SHELL01",
       "aircraft_config_path": "@F4_SOURCE_DIR@/Data/Aircraft/kc10.json",
       "aircraft_name": "KC-10 Extender",
-      "vis_type_index": 1156,
+      "vis_type_index": 906,
       "parking_spot": { "x": 0.0, "y": 0.0, "z": 10000.0 },
       "heading_rad": 4.71238898,
       "initial_fuel_lbs": 356000.0,

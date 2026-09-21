@@ -228,8 +228,13 @@ void ViewerApp::draw_entity_model_3d() {
                          : 0.0f;
         pl.facing_deg = facing_deg_from_transform(atf);
         if (afm) {
-            pl.pitch_deg = static_cast<float>(afm->state().kin.theta.value());
-            pl.roll_deg = static_cast<float>(afm->state().kin.phi.value());
+            // Angle is radians-canonical (f4-flight angle.hpp) — convert,
+            // don't cast: a raw .value() read as degrees rendered a 17°
+            // bank as 0.3° (the invisible-attitude bug).
+            pl.pitch_deg = static_cast<float>(
+                f4::flight::to_degrees(afm->state().kin.theta));
+            pl.roll_deg = static_cast<float>(
+                f4::flight::to_degrees(afm->state().kin.phi));
         }
         return pl;
     };
@@ -518,10 +523,6 @@ void ViewerApp::draw_entity_model_3d() {
     };
     if (impl_->ground_layout_3d_cached_entity != impl_->sel_entity) {
         impl_->ground_layout_3d_cached_entity = impl_->sel_entity;
-        // The QC overlay's derived airbase (EMPL-2): rebuilt when the
-        // selection changes (and per QC run — the sim pointer
-        // discriminates a new run from a re-selected one).
-        impl_->qc_airfield_3d_valid = false;
         if (live_world_view) {
             chase_fit();
         } else {
@@ -717,40 +718,24 @@ void ViewerApp::draw_entity_model_3d() {
     scene.ground.grid_color = GRID_COLOR;
     scene.ground.plane_color = BG_COLOR;
 
-    // The QC overlay's derived airbase (EMPL-2): runway, taxiways,
-    // parking — the world the QC aircraft took off from, drawn through
-    // the same scene.airfield path the objective view uses. Built once
-    // per selection / QC run from the scenario's stashed ground layout.
-    const bool want_qc_airfield =
-        impl_->sel_kind == Impl::SelectionKind::QcAircraft &&
-        impl_->scenario_player.active() &&
-        impl_->scenario_player.sim != nullptr &&
-        !impl_->scenario_player.sim->scenario().layout_lists.empty();
-    if (want_qc_airfield &&
-        (!impl_->qc_airfield_3d_valid ||
-         impl_->qc_airfield_3d_sim != impl_->scenario_player.sim.get())) {
-        impl_->qc_airfield_3d = f4::renderer::build_airfield_geometry_3d(
-            impl_->scenario_player.sim->scenario().layout_lists, nullptr);
-        impl_->qc_airfield_3d_sim = impl_->scenario_player.sim.get();
-        impl_->qc_airfield_3d_valid = true;
-    }
-    if (want_qc_airfield && impl_->qc_airfield_3d_valid &&
-        !impl_->qc_airfield_3d.empty) {
-        scene.airfield_toggles = f4::renderer::AirfieldDrawToggles{};
-        scene.airfield_toggles.features = false;  // no feature models in
-        // the scenario's stashed layout — footprints would z-fight the
-        // terrain for nothing.
-        scene.airfield = &impl_->qc_airfield_3d;
-        const auto lc =
-            impl_->scenario_player.sim->scenario().layout_center;
-        scene.airfield_origin_enu[0] = static_cast<float>(lc.x);
-        scene.airfield_origin_enu[1] = static_cast<float>(lc.y);
-        scene.airfield_origin_enu[2] =
-            terrain_elev_ft(static_cast<float>(lc.x),
-                            static_cast<float>(lc.y));
-    }
+    // The WORLD around the aircraft (QC overlay + live session): the
+    // session objectives within ~50 NM render their ground layouts
+    // (runway, taxiways, parking) AND their KoreaObj feature models
+    // (buildings) — the same pass the objective 3D tab runs for its
+    // neighbors, so the QC view shows the same world the airfield view
+    // does (the airbase the aircraft departed + the city next to it).
+    // The QC overlay's ENU frame IS the session's (the overlay draws on
+    // the campaign canvas with no transform), so session positions
+    // anchor directly. The toggles mirror the objective view's View-menu
+    // checkboxes; feature footprints stay off where real models draw.
+    const bool want_world_scenery =
+        (impl_->sel_kind == Impl::SelectionKind::QcAircraft ||
+         impl_->sel_kind == Impl::SelectionKind::LiveAircraft) &&
+        impl_->terrain_loaded;
+    (void)want_world_scenery;   // consumed inside the overlay lambda
 
-    scene.overlay_3d = [this, &placements, &cx, &cy](const Camera3D&) {
+    scene.overlay_3d = [this, &placements, &cx, &cy, &terrain_elev_ft,
+                        want_world_scenery](const Camera3D&) {
         rlDisableBackfaceCulling();
         rlSetBlendMode(BLEND_ALPHA);
 
@@ -759,6 +744,57 @@ void ViewerApp::draw_entity_model_3d() {
                 impl_->render_res_3d,
                 &impl_->class_table_3d);
         res.show_ground_layout = false;
+
+        if (want_world_scenery) {
+            const auto nearby =
+                impl_->objectives_within_radius(cx, cy, 50000.0f);
+            for (const auto nid : nearby) {
+                auto nh = impl_->handle(nid);
+                auto* ntf = nh.get<f4::entities::TransformComponent>();
+                if (!ntf) continue;
+                const float nx = static_cast<float>(ntf->position.x);
+                const float ny = static_cast<float>(ntf->position.y);
+                const float nz = terrain_elev_ft(nx, ny);
+
+                auto* ngl = nh.get<f4::entities::GroundLayoutComponent>();
+                if (ngl && !ngl->layouts.empty()) {
+                    auto ng = f4::renderer::build_airfield_geometry_3d(
+                        ngl->layouts, nullptr);
+                    if (!ng.empty) {
+                        f4::renderer::AirfieldDrawToggles nt;
+                        nt.runway = impl_->ground_layout_3d_show_runway;
+                        nt.markers = impl_->ground_layout_3d_show_runway;
+                        nt.taxiways = impl_->ground_layout_3d_show_taxiways;
+                        nt.parking = impl_->ground_layout_3d_show_parking;
+                        nt.helipads = false;
+                        nt.features = false;  // the real models draw below
+                        f4::renderer::draw_airfield_geometry(ng, nt, nx, ny,
+                                                             nz);
+                    }
+                }
+
+                auto* nfs = nh.get<f4::entities::FeatureSetComponent>();
+                if (nfs && !nfs->features.empty()) {
+                    constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
+                    for (const auto& nf : nfs->features) {
+                        if (nf.index == 0 && nf.offset_x == 0.0f &&
+                            nf.offset_y == 0.0f) {
+                            continue;  // placeholder slot
+                        }
+                        const uint16_t entity_type = static_cast<uint16_t>(
+                            VU_LAST_ENTITY_TYPE +
+                            static_cast<uint16_t>(nf.index));
+                        f4::renderer::draw_feature_mesh(
+                            res, entity_type,
+                            nf.offset_x + nx, nf.offset_y + ny,
+                            nf.offset_z + nz,
+                            static_cast<float>(nf.facing),
+                            f4::renderer::vis_slot_for_damage(
+                                nf.damage_state));
+                    }
+                }
+            }
+        }
 
         for (const auto& pl : placements) {
             f4::renderer::draw_vis_type_mesh(
