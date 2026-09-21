@@ -24,7 +24,14 @@
 //     paths the objective view uses, following the aircraft as it
 //     moves). Without terrain data it falls back to a staged model on
 //     the ground plane; facing is velocity when moving, else the spawn
-//     quaternion — the same convention as the map's 3D pass.
+//     quaternion — the same convention as the map's 3D pass. The rest
+//     of the roster (within 3 NM, capped) renders at its real formation
+//     positions, and every airframe carries its flight-model attitude
+//     (pitch/roll — the chase view banks and pitches with the jet).
+//   - QcAircraft: the same in-world presentation resolved in the QC
+//     overlay's scenario Simulation — the rest of the QC roster around
+//     it, plus the overlay's derived airbase ground layout (runway,
+//     taxiways, parking) when the scenario carries one.
 //
 // Shares Impl::ground_layout_3d_target, Impl::gl3d_orbit_cam, and
 // Impl::render_res_3d with the objective view (only one 3D tab draws
@@ -35,10 +42,12 @@
 #include "viewer_state.hpp"
 
 #include <f4/entities/entity.hpp>
+#include <f4/flight/flight_model_component.hpp>
 #include <f4/simulation/campaign_origin.hpp>
 #include <f4/simulation/visual_model_component.hpp>
 #include <f4/renderer/entity_render.hpp>
 #include <f4/renderer/feature_mesh.hpp>
+#include <f4/renderer/ground_layout_models.hpp>
 #include <f4/renderer/scene_draw.hpp>
 
 
@@ -51,6 +60,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <vector>
 
 namespace f4::viewer {
@@ -70,6 +80,11 @@ struct ModelPlacement {
     // ANIM-DOCTOR: per-entity channel values (live aircraft only).
     // Null → the draw path stages the model with parked defaults.
     const f4::anim::AnimValues* anim = nullptr;
+    // Body-frame attitude (degrees; the flight model's theta/phi): pitch
+    // + = nose up, roll + = right wing down. Zero = the historical
+    // yaw-only pose (staged views, ground units).
+    float pitch_deg = 0.0f;
+    float roll_deg = 0.0f;
 };
 
 constexpr int RT_W = 800;   // must match ground_layout_3d.cpp (the
@@ -187,6 +202,38 @@ void ViewerApp::draw_entity_model_3d() {
         return 0.0f;
     };
 
+    // One aircraft placement relative to the view's anchor: real ENU
+    // offset, simulated altitude clamped to the terrain, velocity
+    // facing, and the flight model's ATTITUDE (pitch/roll — the chase
+    // view banks and pitches with the jet; the kin angles are degrees,
+    // the same source FlightModelComponent's radian accessors convert).
+    auto aircraft_placement = [&](const f4::entities::EntityHandle& ah,
+                                  float anchor_x, float anchor_y,
+                                  bool in_world)
+        -> std::optional<ModelPlacement> {
+        auto* atf = ah.get<f4::entities::TransformComponent>();
+        auto* avmc = ah.get<f4::simulation::VisualModelComponent>();
+        if (!atf || !avmc || avmc->vis_type <= 0) return std::nullopt;
+        auto* afm = ah.get<f4::flight::FlightModelComponent>();
+        ModelPlacement pl;
+        pl.vis_type = avmc->vis_type;
+        pl.dx = in_world ? static_cast<float>(atf->position.x) - anchor_x
+                         : 0.0f;
+        pl.dy = in_world ? static_cast<float>(atf->position.y) - anchor_y
+                         : 0.0f;
+        const float gnd = terrain_elev_ft(
+            static_cast<float>(atf->position.x),
+            static_cast<float>(atf->position.y));
+        pl.dz = in_world ? std::max(static_cast<float>(atf->position.z), gnd)
+                         : 0.0f;
+        pl.facing_deg = facing_deg_from_transform(atf);
+        if (afm) {
+            pl.pitch_deg = static_cast<float>(afm->state().kin.theta.value());
+            pl.roll_deg = static_cast<float>(afm->state().kin.phi.value());
+        }
+        return pl;
+    };
+
     if (impl_->sel_kind == Impl::SelectionKind::LiveAircraft ||
         impl_->sel_kind == Impl::SelectionKind::QcAircraft) {
         // QC-WORLD: a QcAircraft selection resolves in the SCENARIO
@@ -205,8 +252,6 @@ void ViewerApp::draw_entity_model_3d() {
             return;
         }
         live_world_view = impl_->terrain_loaded;
-        std::snprintf(title, sizeof(title),
-                      "Aircraft (vis type %d)", vmc->vis_type);
         if (live_world_view) {
             live_ax = static_cast<float>(tf->position.x);
             live_ay = static_cast<float>(tf->position.y);
@@ -217,14 +262,41 @@ void ViewerApp::draw_entity_model_3d() {
             // flight model's ground estimate disagree.
             live_draw_z = std::max(static_cast<float>(tf->position.z),
                                    live_ground_z);
-            placements.push_back({vmc->vis_type, 0.0f, 0.0f,
-                                  facing_deg_from_transform(tf),
-                                  live_draw_z, &vmc->anim_values});
+        }
+
+        // The selected airframe, then the rest of its roster at their
+        // real positions (QC: the tanker from the receiver and vice
+        // versa) — within 3 NM, capped, so a 40-aircraft campaign
+        // roster can't flood the draw.
+        auto sel_pl = aircraft_placement(h, live_ax, live_ay,
+                                         live_world_view);
+        if (sel_pl) {
+            placements.push_back(*sel_pl);
         } else {
             placements.push_back({vmc->vis_type, 0.0f, 0.0f,
                                   facing_deg_from_transform(tf),
-                                  0.0f, &vmc->anim_values});
+                                  live_draw_z, &vmc->anim_values});
         }
+        if (live_world_view) {
+            const bool qc =
+                impl_->sel_kind == Impl::SelectionKind::QcAircraft;
+            const auto roster = qc ? impl_->qc_aircraft()
+                                   : impl_->live_aircraft();
+            int siblings = 0;
+            for (const auto sid : roster) {
+                if (sid.value == impl_->sel_entity.value) continue;
+                if (siblings >= 6) break;
+                auto sh = qc ? impl_->qc_handle(sid)
+                             : impl_->session_handle(sid);
+                auto p = aircraft_placement(sh, live_ax, live_ay, true);
+                if (!p) continue;
+                placements.push_back(*p);
+                ++siblings;
+            }
+        }
+        std::snprintf(title, sizeof(title),
+                      "Aircraft (vis type %d, %zu in view)", vmc->vis_type,
+                      placements.size());
     } else if (impl_->sel_kind == Impl::SelectionKind::Unit) {
         auto h = impl_->unit_handle(impl_->sel_entity);
         auto* uc = h.get<f4::entities::UnitCoreComponent>();
@@ -446,6 +518,10 @@ void ViewerApp::draw_entity_model_3d() {
     };
     if (impl_->ground_layout_3d_cached_entity != impl_->sel_entity) {
         impl_->ground_layout_3d_cached_entity = impl_->sel_entity;
+        // The QC overlay's derived airbase (EMPL-2): rebuilt when the
+        // selection changes (and per QC run — the sim pointer
+        // discriminates a new run from a re-selected one).
+        impl_->qc_airfield_3d_valid = false;
         if (live_world_view) {
             chase_fit();
         } else {
@@ -641,6 +717,39 @@ void ViewerApp::draw_entity_model_3d() {
     scene.ground.grid_color = GRID_COLOR;
     scene.ground.plane_color = BG_COLOR;
 
+    // The QC overlay's derived airbase (EMPL-2): runway, taxiways,
+    // parking — the world the QC aircraft took off from, drawn through
+    // the same scene.airfield path the objective view uses. Built once
+    // per selection / QC run from the scenario's stashed ground layout.
+    const bool want_qc_airfield =
+        impl_->sel_kind == Impl::SelectionKind::QcAircraft &&
+        impl_->scenario_player.active() &&
+        impl_->scenario_player.sim != nullptr &&
+        !impl_->scenario_player.sim->scenario().layout_lists.empty();
+    if (want_qc_airfield &&
+        (!impl_->qc_airfield_3d_valid ||
+         impl_->qc_airfield_3d_sim != impl_->scenario_player.sim.get())) {
+        impl_->qc_airfield_3d = f4::renderer::build_airfield_geometry_3d(
+            impl_->scenario_player.sim->scenario().layout_lists, nullptr);
+        impl_->qc_airfield_3d_sim = impl_->scenario_player.sim.get();
+        impl_->qc_airfield_3d_valid = true;
+    }
+    if (want_qc_airfield && impl_->qc_airfield_3d_valid &&
+        !impl_->qc_airfield_3d.empty) {
+        scene.airfield_toggles = f4::renderer::AirfieldDrawToggles{};
+        scene.airfield_toggles.features = false;  // no feature models in
+        // the scenario's stashed layout — footprints would z-fight the
+        // terrain for nothing.
+        scene.airfield = &impl_->qc_airfield_3d;
+        const auto lc =
+            impl_->scenario_player.sim->scenario().layout_center;
+        scene.airfield_origin_enu[0] = static_cast<float>(lc.x);
+        scene.airfield_origin_enu[1] = static_cast<float>(lc.y);
+        scene.airfield_origin_enu[2] =
+            terrain_elev_ft(static_cast<float>(lc.x),
+                            static_cast<float>(lc.y));
+    }
+
     scene.overlay_3d = [this, &placements, &cx, &cy](const Camera3D&) {
         rlDisableBackfaceCulling();
         rlSetBlendMode(BLEND_ALPHA);
@@ -654,7 +763,7 @@ void ViewerApp::draw_entity_model_3d() {
         for (const auto& pl : placements) {
             f4::renderer::draw_vis_type_mesh(
                 res, pl.vis_type, cx + pl.dx, cy + pl.dy, pl.dz,
-                pl.facing_deg, pl.anim);
+                pl.facing_deg, pl.anim, pl.pitch_deg, pl.roll_deg);
         }
 
         rlEnableBackfaceCulling();

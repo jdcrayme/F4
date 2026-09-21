@@ -128,12 +128,20 @@ void build_feature_mesh(FeatureMeshResources& res, int vis_type);
 /// as draw_feature_mesh). Behavior: vis_type <= 0 → zeroed DrawStats;
 /// otherwise lazily build + DrawMesh each mesh entry at the ENU
 /// position rotated by facing_deg around the vertical axis.
+///
+/// pitch_deg / roll_deg (the Inspector 3D chase view): body-frame
+/// attitude applied AFTER the yaw — pitch rotates about the body
+/// lateral axis (+ = nose up), roll about the body longitudinal axis
+/// (+ = right wing down, the flight model's phi convention). The zero
+/// defaults draw exactly the historical yaw-only pose.
 DrawStats draw_vis_type_mesh(
     FeatureMeshResources& res,
     int vis_type,
     float enu_x, float enu_y, float enu_z,
     float facing_deg,
-    const f4::anim::AnimValues* anim = nullptr);
+    const f4::anim::AnimValues* anim = nullptr,
+    float pitch_deg = 0.0f,
+    float roll_deg = 0.0f);
 
 /// Resolve class_table_index (entity_type) → vis_type[0] → cached mesh,
 /// then DrawMesh each mesh entry at the given ENU position rotated by

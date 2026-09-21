@@ -69,7 +69,9 @@ DrawStats draw_vis_type_mesh(
     int vis_type,
     float enu_x, float enu_y, float enu_z,
     float facing_deg,
-    const f4::anim::AnimValues* anim)
+    const f4::anim::AnimValues* anim,
+    float pitch_deg,
+    float roll_deg)
 {
     DrawStats stats{};
     if (!res.model_cache || !res.texture_cache ||
@@ -114,7 +116,21 @@ DrawStats draw_vis_type_mesh(
     const auto pos_f = enu_to_raylib(enu_x, enu_y, enu_z);
     const Vector3 pos_rh = { pos_f.x, pos_f.y, pos_f.z };
     const float facing_rad = (-facing_deg) * static_cast<float>(f4::math::DEG_TO_RAD);
-    const Matrix rot = MatrixRotateY(facing_rad);
+    // Body-frame attitude after the yaw: the model's nose lies along
+    // raylib -Z at identity (that IS the yaw convention — facing 0 =
+    // north = -Z). Pitch rotates about the body lateral axis (+X):
+    // RotX(+pitch) lifts the -Z nose toward +Y. Roll rotates about the
+    // body longitudinal axis: RotZ(-roll) drops the +X right wing for
+    // +roll (the flight model's +right-wing-down phi convention).
+    Matrix rot = MatrixRotateY(facing_rad);
+    if (pitch_deg != 0.0f) {
+        rot = MatrixMultiply(
+            rot, MatrixRotateX(pitch_deg * static_cast<float>(f4::math::DEG_TO_RAD)));
+    }
+    if (roll_deg != 0.0f) {
+        rot = MatrixMultiply(
+            rot, MatrixRotateZ(-roll_deg * static_cast<float>(f4::math::DEG_TO_RAD)));
+    }
     const Matrix model_matrix = MatrixMultiply(rot,
         MatrixTranslate(pos_rh.x, pos_rh.y, pos_rh.z) );
 
