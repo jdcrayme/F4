@@ -265,11 +265,22 @@ TEST(SpawnFromFlightsB3, FilterTeamMissionAndCap) {
     // Mission filter: BARCAP (only flight 5002).
     {
         FlightSpawnFilter f;
-        f.mission = 1;
+        f.set_mission(1);
         auto spawned = spawn_aircraft_from_flights(
             ew, f4::world_types::ClassTable{},
             cfg, airfield, make_template(), f);
         ASSERT_EQ(spawned.size(), 1u);
+    }
+    // Mission MIX: both bytes in one filter (the EMPL-2 spawn-mix shape
+    // — tanker + receiver bytes field together). Bytes 1 (BARCAP) and
+    // 13 (INTSTRIKE) cover all three flights.
+    {
+        FlightSpawnFilter f;
+        f.missions = {1, 13};
+        auto spawned = spawn_aircraft_from_flights(
+            ew, f4::world_types::ClassTable{},
+            cfg, airfield, make_template(), f);
+        ASSERT_EQ(spawned.size(), 3u);
     }
     // Cap.
     {
@@ -668,7 +679,9 @@ TEST(ScenarioFilter, ParsesTeamMissionNameAndCap) {
     })");
     EXPECT_EQ(s.spawn_mode, SpawnMode::CampaignFlights);
     EXPECT_EQ(s.campaign_flight_filter.team, 2);
-    EXPECT_EQ(s.campaign_flight_filter.mission, 2);  // AMIS_BARCAP2 byte
+    EXPECT_TRUE(s.campaign_flight_filter.missions.size() == 1 &&
+                s.campaign_flight_filter.missions[0] == 2)  // AMIS_BARCAP2
+        << "single-name mission parses to a one-byte set";
     EXPECT_EQ(s.campaign_flight_filter.max_flights, 12);
 }
 
@@ -682,7 +695,8 @@ TEST(ScenarioFilter, ParsesMissionAsRawByteAndRejectsUnknownName) {
             "campaign_flight_filter": {"mission": 9},
             "aircraft": [{"callsign": "A1", "aircraft_config_path": "f16.json", "vis_type_index": 1052}]
         })");
-        EXPECT_EQ(s.campaign_flight_filter.mission, 9);
+        EXPECT_TRUE(s.campaign_flight_filter.missions.size() == 1 &&
+                    s.campaign_flight_filter.missions[0] == 9);
     }
     {
         // Unknown mission name fails loudly (the loud-failure discipline).
@@ -697,6 +711,26 @@ TEST(ScenarioFilter, ParsesMissionAsRawByteAndRejectsUnknownName) {
     }
 }
 
+TEST(ScenarioFilter, ParsesMissionByteArrayMix) {
+    // The live AAR demo's shape (EMPL-2 follow-up): a tanker byte AND
+    // receiver bytes in one filter — the array form, names and raw
+    // bytes freely mixed.
+    const auto s = load_scenario_from_string(R"({
+        "name": "mix_test",
+        "spawn_mode": "campaign_flights",
+        "world_json_path": "w.json",
+        "class_table_path": "ct",
+        "campaign_flight_filter": {"mission": ["AMIS_TANK", 13, "AMIS_BARCAP2"]},
+        "aircraft": [{"callsign": "A1", "aircraft_config_path": "f16.json", "vis_type_index": 1052}]
+    })");
+    const std::vector<int> expected{
+        static_cast<int>(*f4::campaign::mission_type_byte("AMIS_TANK")),
+        13,
+        static_cast<int>(*f4::campaign::mission_type_byte("AMIS_BARCAP2")),
+    };
+    EXPECT_EQ(s.campaign_flight_filter.missions, expected);
+}
+
 TEST(ScenarioFilter, DefaultsToNoFilter) {
     const auto s = load_scenario_from_string(R"({
         "name": "default_test",
@@ -706,7 +740,7 @@ TEST(ScenarioFilter, DefaultsToNoFilter) {
         "aircraft": [{"callsign": "A1", "aircraft_config_path": "f16.json", "vis_type_index": 1052}]
     })");
     EXPECT_EQ(s.campaign_flight_filter.team, -1);
-    EXPECT_EQ(s.campaign_flight_filter.mission, -1);
+    EXPECT_TRUE(s.campaign_flight_filter.missions.empty());
     EXPECT_EQ(s.campaign_flight_filter.max_flights, 0);
 }
 

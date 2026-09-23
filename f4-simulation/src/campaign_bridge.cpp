@@ -513,6 +513,14 @@ std::optional<f4::world::CountermeasureCounts> resolve_unit_countermeasures(
     return f4::world::resolve_countermeasures(*tables, ct, vehicle_type);
 }
 
+/// Default cruise CAS for derived route legs. The saved plan carries no
+/// per-leg speeds; 400 kts is a representative cruise value for the
+/// fighter-types that dominate a campaign's air tasking. Per-action
+/// speed profiles arrive with the M4.5 route tranche. (Defined here —
+/// before spawn_aircraft_for_flight — because the tanker hold's
+/// synthesized corners fly it too; EMPL-2b.)
+constexpr double kDefaultLegSpeedKts = 400.0;
+
 std::optional<f4::entities::EntityId>
 spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                           f4::entities::EntityId flight_entity,
@@ -723,31 +731,142 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                 break;
             }
         }
+        // EMPL-2b — the flown-segment normalization. The stock save's
+        // refuel-capable routes (tankers AND receivers — TestCamp's
+        // CS053-3 is the receiver-side catch) come in a STALE shape: a
+        // WP_LAND mid-route (the recovery of an already-flown tasking)
+        // with the refuel leg appended AFTER it. Flown as written the
+        // aircraft sequences into the mid-route LAND, attempts a
+        // recovery at its home plate, goes around — and never flies the
+        // leg the AAR pairing was promised. A flight recovers ONCE, at
+        // the END: interior WP_LANDs are dropped (the final
+        // approach-entry waypoint stays). Every flight whose route
+        // carries a WP_REFUEL leg gets the normalization (that is the
+        // refuel-capable set — the eligibility scan below keys on the
+        // same byte), plus every tanker (its station may ride the
+        // far waypoint of a route that also recovered mid-way).
+        bool has_refuel_leg = false;
+        for (const auto& wp : plan->route) {
+            if (wp.action == f4::campaign::kWpRefuel) {
+                has_refuel_leg = true;
+                break;
+            }
+        }
+        if ((has_refuel_leg ||
+             f4::campaign::mission_is_tanker(fp->mission)) &&
+            plan->route.size() >= 2) {
+            std::vector<f4::ai::modules::NavigationModule::Waypoint> flown;
+            flown.reserve(plan->route.size());
+            for (std::size_t i = 0; i < plan->route.size(); ++i) {
+                const bool is_land =
+                    plan->route[i].action == f4::campaign::kWpLand;
+                if (is_land && i + 1 < plan->route.size()) continue;
+                flown.push_back(std::move(plan->route[i]));
+            }
+            plan->route = std::move(flown);
+        }
         // EMPL-2 — the saved tanker's STATION HOLD. The wire's routes
         // carry no loiter fields (the reference's MissionData
         // loitertime lives in its profile tables, not the waypoint), so
         // a saved tanker flies THROUGH its station and recovers — and
         // the receivers' refuel legs point at a boom that is never
-        // there. Synthesize the P7 racetrack hold on the route's
-        // furthest-from-home waypoint (the station): the tanker orbits
-        // ON STATION for 30 minutes (the reference's FindSupportFlights
-        // window shape; the profile-table loitertime is the named
-        // follow-up) while the receivers join.
-        if (f4::campaign::mission_is_tanker(fp->mission) && plan->route.size() >= 2) {
-            std::size_t station = 0;
-            double best_d2 = -1.0;
-            const auto& home = plan->route.front().position;
-            for (std::size_t i = 0; i + 1 < plan->route.size(); ++i) {
-                const double dx = plan->route[i].position.x - home.x;
-                const double dy = plan->route[i].position.y - home.y;
-                const double d2 = dx * dx + dy * dy;
-                if (d2 > best_d2) {
-                    best_d2 = d2;
+        // there. Synthesize the hold so the tanker orbits ON STATION
+        // for 30 minutes (the reference's FindSupportFlights window
+        // shape; the profile-table loitertime is the named follow-up)
+        // while the receivers join.
+        if (f4::campaign::mission_is_tanker(fp->mission) &&
+            plan->route.size() >= 2) {
+            // The station pick: the route's OWN WP_REFUEL leg when it
+            // carries one (the planner's rendezvous mark — the same
+            // point the receivers' legs aim at, by construction);
+            // otherwise the furthest-from-home waypoint (the original
+            // heuristic).
+            std::size_t station = plan->route.size();
+            for (std::size_t i = 0; i + 2 <= plan->route.size(); ++i) {
+                if (plan->route[i].action == f4::campaign::kWpRefuel) {
                     station = i;
+                    break;
                 }
             }
-            if (best_d2 > 0.0 && station + 1 < plan->route.size()) {
-                plan->route[station].loop_waypoints = 2;
+            if (station == plan->route.size()) {
+                double best_d2 = -1.0;
+                const auto& home = plan->route.front().position;
+                for (std::size_t i = 0; i + 1 < plan->route.size(); ++i) {
+                    const double dx = plan->route[i].position.x - home.x;
+                    const double dy = plan->route[i].position.y - home.y;
+                    const double d2 = dx * dx + dy * dy;
+                    if (d2 > best_d2) {
+                        best_d2 = d2;
+                        station = i;
+                    }
+                }
+                if (best_d2 <= 0.0) station = plan->route.size();
+            }
+            if (station + 1 < plan->route.size()) {
+                // EMPL-2b — the hold must be COMPACT and LEVEL. Stamping
+                // loop_waypoints on the SAVED tail made the "racetrack" a
+                // ping-pong between the station and whatever waypoint
+                // followed it — for the stock save that is the HOME
+                // plate 15-25 NM back at pattern altitude, so the
+                // "holding" tanker yo-yoed the whole distance with
+                // 3,000-ft altitude swings while its receivers chased
+                // (the live-run catch: 23 armed, zero PreContact — the
+                // join can never settle on a departing/reversing boom).
+                // Synthesize the orbit the reference intends: a ~5 x
+                // 2.5 NM racetrack ANCHORED on the station, aligned
+                // with the entry course, all corners LEVEL, with the
+                // route's final waypoint (the recovery) re-appended for
+                // the post-hold egress.
+                //
+                // The ORBIT ALTITUDE: max(the station's own z, 20,000
+                // ft). The stock save's stale stations sit at 2,000 ft
+                // (the appended-tasking artifact) — below the nav's
+                // 3,000-ft terrain-clearance floor, so the "hold" flew
+                // as a floor-fight with ±700-ft turn oscillations, and
+                // a receiver chasing a ±150-ft pre-contact envelope
+                // could never level with the boom (the mini-repro
+                // catch: dist parked 13-17k ft, dz hunting +3,000).
+                // 20,000 ft is the e2e's own proven regime and an honest
+                // tanker-track altitude; the receivers' legs gate only
+                // the ARM (they climb to the tanker's picture).
+                const double orbit_z = std::max(plan->route[station].position.z,
+                                               20000.0);
+                plan->route[station].position.z = orbit_z;
+                const geo::WorldPosition anchor =
+                    plan->route[station].position;
+                double ux = 0.0, uy = 1.0;   // entry course (north failover)
+                if (station > 0) {
+                    const auto& prev = plan->route[station - 1].position;
+                    const double dx = anchor.x - prev.x;
+                    const double dy = anchor.y - prev.y;
+                    const double len = std::hypot(dx, dy);
+                    if (len > 100.0) {
+                        ux = dx / len;
+                        uy = dy / len;
+                    }
+                }
+                const double rx = uy, ry = -ux;   // right of course (ENU)
+                constexpr double kOrbitLegFt = 30000.0;    // ~5 NM long leg
+                constexpr double kOrbitWidthFt = 15000.0;  // ~2.5 NM width
+                auto hold_corner = [&](const char* name, double al,
+                                       double aw) {
+                    modules::NavigationModule::Waypoint w{
+                        name,
+                        geo::WorldPosition{anchor.x + ux * al + rx * aw,
+                                           anchor.y + uy * al + ry * aw,
+                                           anchor.z},
+                        kDefaultLegSpeedKts};
+                    w.action = f4::campaign::kWpNothing;
+                    return w;
+                };
+                auto last = std::move(plan->route.back());
+                plan->route.resize(station + 1);
+                plan->route.push_back(hold_corner("HOLD1", kOrbitLegFt, 0.0));
+                plan->route.push_back(hold_corner(
+                    "HOLD2", kOrbitLegFt, kOrbitWidthFt));
+                plan->route.push_back(hold_corner("HOLD3", 0.0, kOrbitWidthFt));
+                plan->route.push_back(std::move(last));
+                plan->route[station].loop_waypoints = 4;   // anchor + 3
                 plan->route[station].station_time_s = 30.0 * 60.0;
             }
         }
@@ -877,8 +996,7 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                 ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
             if (static_cast<int>(owner) != filter.team) continue;
         }
-        if (filter.mission >= 0 &&
-            static_cast<int>(fp->mission) != filter.mission) {
+        if (!filter.mission_allowed(static_cast<int>(fp->mission))) {
             continue;
         }
         if (filter.max_flights > 0 &&
@@ -1118,12 +1236,6 @@ const char* wp_action_text(std::uint8_t action) {
         default: return "ACTION";
     }
 }
-
-/// Default cruise CAS for derived route legs. The saved plan carries no
-/// per-leg speeds; 400 kts is a representative cruise value for the
-/// fighter-types that dominate a campaign's air tasking. Per-action
-/// speed profiles arrive with the M4.5 route tranche.
-constexpr double kDefaultLegSpeedKts = 400.0;
 
 /// Altitude floor for derived route legs. Ramp/taxi legs store z = 0;
 /// the NavigationModule would command a descent into terrain. 500 ft is

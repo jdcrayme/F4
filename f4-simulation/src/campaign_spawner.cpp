@@ -52,8 +52,7 @@ void CampaignSimSpawner::handle(const f4::campaign::MissionIntent& intent) {
         static_cast<int>(intent.team) != filter_.team) {
         return;
     }
-    if (filter_.mission >= 0 &&
-        static_cast<int>(intent.mission_byte) != filter_.mission) {
+    if (!filter_.mission_allowed(static_cast<int>(intent.mission_byte))) {
         return;
     }
     if (filter_.max_flights > 0 &&

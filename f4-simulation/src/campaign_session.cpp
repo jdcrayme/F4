@@ -162,7 +162,21 @@ std::string session_scenario_json(
     if (campaign_flights) {
         out << "  \"campaign_flight_filter\": {";
         out << "\"team\": " << filter.team;
-        out << ", \"mission\": " << filter.mission;
+        // The mission set: one byte stays a bare int (the long-standing
+        // shape every saved scenario carries), a MIX writes the array —
+        // the scenario parser takes both.
+        if (filter.missions.size() == 1) {
+            out << ", \"mission\": " << filter.missions.front();
+        } else if (filter.missions.size() > 1) {
+            out << ", \"mission\": [";
+            for (std::size_t i = 0; i < filter.missions.size(); ++i) {
+                if (i != 0) out << ", ";
+                out << filter.missions[i];
+            }
+            out << "]";
+        } else {
+            out << ", \"mission\": -1";
+        }
         out << ", \"max_flights\": " << filter.max_flights << "},\n";
         if (tiered) {
             // FID-1: the tiered session's deferred spawn — the world
@@ -369,7 +383,7 @@ CampaignSession::create(const CampaignSessionOptions& opts,
             : std::filesystem::absolute(opts.brain_data);
     f4::simulation::FlightSpawnFilter filter;
     filter.team = opts.team;
-    filter.mission = opts.mission;
+    filter.set_mission(opts.mission);
     filter.max_flights = opts.max_flights;
     const bool have_flights = count_flights(session->ws_) > 0;
     const auto scenario_path =

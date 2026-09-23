@@ -1198,6 +1198,10 @@ void Simulation::push_tanker_picture(double dt) {
         p.position = tf->position;
         p.altitude_msl_ft = tf->position.z;
         p.speed_kts = fm->state().vcas;
+        // EMPL-2b — the picture carries its tanker's entity id (the
+        // campaign pairing has no TowerATC to assign one; the brain's
+        // collision-avoid exemption needs the paired id).
+        p.tanker_id = id.value;
         // Heading: prefer the velocity-derived heading (the tanker's
         // nose IS its velocity vector at formation distances). When the
         // velocity is zero (the first tick — no position delta yet),
@@ -1271,12 +1275,21 @@ void Simulation::push_tanker_picture(double dt) {
     struct TankerPic {
         entities::EntityId id;
         f4::ai::modules::TankerPicture p;
+        bool on_station = false;   // EMPL-2b: the tanker's station hold is
+                                   // armed and running (see the pick below)
     };
     std::vector<TankerPic> pics;
     pics.reserve(tankers.size());
     for (const auto id : tankers) {
         auto p = build_picture(world_, id);
-        if (p) pics.push_back(TankerPic{id, *p});
+        if (!p) continue;
+        bool on_station = false;
+        entities::EntityHandle th(id, &world_);
+        if (const auto* tbrain = th.get<f4::ai::BrainComponent>();
+            tbrain != nullptr) {
+            on_station = tbrain->holding_station();
+        }
+        pics.push_back(TankerPic{id, *p, on_station});
     }
     if (pics.empty()) return;
 
@@ -1293,6 +1306,33 @@ void Simulation::push_tanker_picture(double dt) {
     }
 
     constexpr double kAarJoinRingFt = 52800.0;   // 10 NM — the orbit's scale
+
+    // EMPL-2b — ONE joiner per tanker at a time (the ATP-56 visual
+    // stack, and the shape FindNearestActiveTanker implies): receivers
+    // converging on one boom see EACH OTHER as collision threats — the
+    // join-scale proximity always screams — and the mutual breaks tore
+    // even a LATCHED boom apart (the live TestCamp catch: 5 cleared, 1
+    // latched, ContactLost on a break 6.7 s in, 3,906 CollisionAvoid
+    // samples per run while the receivers cycled). The host counts
+    // engaged joiners (armed or mid-protocol) per PAIRED tanker and
+    // arms nobody new on a busy boom; the waiters hold at their own
+    // waypoints and arm as the boom clears. (Tankers themselves are
+    // already excluded from every traffic picture — cooperative
+    // platforms, below.)
+    std::unordered_map<std::uint64_t, int> joiners;
+    for (const auto eid : aircraft_entities_) {
+        const auto pit = receiver_pairing_.find(eid.value);
+        if (pit == receiver_pairing_.end()) continue;
+        entities::EntityHandle rh(eid, &world_);
+        auto* rb = rh.get<f4::ai::BrainComponent>();
+        if (rb == nullptr || rb->is_tanker()) continue;
+        const auto rst = rb->refuel().state();
+        const bool engaged =
+            rb->refuel_armed() ||
+            (rst != f4::ai::modules::RefuelState::Rendezvous &&
+             rst != f4::ai::modules::RefuelState::NoTanker);
+        if (engaged) ++joiners[pit->second];
+    }
 
     for (const auto eid : aircraft_entities_) {
         entities::EntityHandle h(eid, &world_);
@@ -1343,15 +1383,29 @@ void Simulation::push_tanker_picture(double dt) {
                        self_tf != nullptr) {
                 pick_key = self_tf->position;
             }
+            // EMPL-2b — ON-STATION tankers first. The nearest airborne
+            // tanker to a busy waypoint is usually TRANSIENT (ferrying
+            // out, recovering home, in its own landing pattern): the
+            // live-run catch had receivers chase departing tankers to
+            // the 2×-ring release, re-pick another transient, and orbit
+            // the waypoint for 20 minutes without one PreContact. A
+            // tanker whose station hold is RUNNING is a rendezvous you
+            // can actually join; the airborne-nearest fallback stands
+            // for the quiet theater (one tanker, still ferrying out —
+            // the e2e shape: it WILL hold).
             double best_d2 = 0.0;
-            for (const auto& tp : pics) {
-                if (!tp.p.valid) continue;
-                const double dx = pick_key.x - tp.p.position.x;
-                const double dy = pick_key.y - tp.p.position.y;
-                const double d2 = dx * dx + dy * dy;
-                if (best == nullptr || d2 < best_d2) {
-                    best = &tp;
-                    best_d2 = d2;
+            for (int pass = 0; pass < 2 && best == nullptr; ++pass) {
+                const bool want_station = (pass == 0);
+                for (const auto& tp : pics) {
+                    if (!tp.p.valid) continue;
+                    if (tp.on_station != want_station) continue;
+                    const double dx = pick_key.x - tp.p.position.x;
+                    const double dy = pick_key.y - tp.p.position.y;
+                    const double d2 = dx * dx + dy * dy;
+                    if (best == nullptr || d2 < best_d2) {
+                        best = &tp;
+                        best_d2 = d2;
+                    }
                 }
             }
             if (best != nullptr) {
@@ -1389,7 +1443,8 @@ void Simulation::push_tanker_picture(double dt) {
                     // the rendezvous point) may find its replacement.
                     receiver_pairing_.erase(eid.value);
                 }
-            } else if (d2 <= kAarJoinRingFt * kAarJoinRingFt) {
+            } else if (d2 <= kAarJoinRingFt * kAarJoinRingFt &&
+                       joiners[best->id.value] == 0) {
                 brain->set_refuel_armed(true);
             }
         }
@@ -1892,7 +1947,7 @@ void Simulation::spawn_from_campaign_flights() {
 
     FlightSpawnFilter filter;
     filter.team = scenario_.campaign_flight_filter.team;
-    filter.mission = scenario_.campaign_flight_filter.mission;
+    filter.missions = scenario_.campaign_flight_filter.missions;
     filter.max_flights = scenario_.campaign_flight_filter.max_flights;
     aircraft_entities_ = spawn_aircraft_from_flights(
         world_, class_table_, aircraft_cfg_,

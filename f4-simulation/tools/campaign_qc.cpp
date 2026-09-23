@@ -97,7 +97,9 @@
 //     --config <f16.json>          (default: <bin>/generated_fixtures/f16.json)
 //     --models <KoreaObj.HDR>      (default: <src>/temp/KoreaObj.HDR; .LOD/.TEX inferred)
 //     --team <slot>                (filter: owning team, -1 = any)
-//     --mission <AMIS_*>|<byte>    (filter: mission name or byte)
+//     --mission <AMIS_*>|<byte>    (filter: mission name or byte; a
+//                                  COMMA list mixes — "AMIS_TANK,AMIS_AIRCAV"
+//                                  fields the tanker + receiver demo)
 //     --max-flights <n>            (filter: cap spawned aircraft; 0 = the
 //                                  UNCAPPED fleet — the SCALE-1 pass)
 //     --ticks <n>                  (sim frames; default 54000 = 15 min)
@@ -258,7 +260,11 @@ struct Args {
     std::filesystem::path class_table;
     std::filesystem::path config;
     int team = -1;
-    int mission = -1;            // byte; -1 = any
+    // The mission filter as a byte SET (empty = any): comma-separated
+    // names/bytes on the CLI. A set, not one byte, because the live AAR
+    // demo needs tanker flights AND their refuel-leg receivers in the
+    // same run — different bytes, one filter (the EMPL-2 follow-up).
+    std::vector<int> missions;
     int max_flights = 0;
     bool max_flights_set = false;  // --max-flights passed (0 = UNCAPPED)
     // SHOWCASE-1 — the scenario QC arm (--scenario <json>): run a
@@ -515,16 +521,34 @@ Args parse_args(int argc, char** argv) {
             a.ground_repair_sec = std::atoi(next());
         else if (k == "--replacement-stock") a.replacement_stock_flow = true;
         else if (k == "--mission") {
+            // A comma list of names/bytes (the two-byte spawn mix —
+            // EMPL-2's named follow-up: a tanker AND its receivers in
+            // one run). Empty segments skip (trailing-comma tolerance);
+            // a bad name still fails the run.
             const std::string v = next();
-            if (!v.empty() && v[0] >= '0' && v[0] <= '9') {
-                a.mission = std::atoi(v.c_str());
-            } else {
-                const auto byte = mission_type_byte(v);
-                if (!byte) {
-                    std::fprintf(stderr, "unknown mission '%s'\n", v.c_str());
-                    std::exit(1);
+            a.missions.clear();
+            std::size_t pos = 0;
+            while (pos <= v.size()) {
+                const auto comma = v.find(',', pos);
+                const std::string tok = v.substr(
+                    pos, comma == std::string::npos
+                             ? std::string::npos : comma - pos);
+                if (!tok.empty()) {
+                    if (tok[0] >= '0' && tok[0] <= '9') {
+                        a.missions.push_back(std::atoi(tok.c_str()));
+                    } else {
+                        const auto byte = mission_type_byte(tok);
+                        if (!byte) {
+                            std::fprintf(stderr, "unknown mission '%s'\n",
+                                         tok.c_str());
+                            std::exit(1);
+                        }
+                        a.missions.push_back(
+                            static_cast<int>(*byte));
+                    }
                 }
-                a.mission = static_cast<int>(*byte);
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
             }
         } else {
             std::fprintf(stderr, "unknown option '%s'\n", k.c_str());
@@ -651,7 +675,18 @@ int run_war(const Args& args) {
     hopts.session.mission_profiles =
         std::filesystem::absolute(args.profiles_json);
     hopts.session.team = args.team;
-    hopts.session.mission = args.mission;
+    // The war harness runs the SESSION path (single-byte filter face).
+    // A mission MIX is the B.3/sim-run demo's shape — refuse it here
+    // rather than silently dropping all but one byte.
+    if (args.missions.size() > 1) {
+        std::fprintf(stderr,
+                     "campaign_qc: --war takes ONE --mission byte (the "
+                     "session filter face); the comma mix is the B.3 "
+                     "run's spawn vocabulary\n");
+        return 1;
+    }
+    hopts.session.mission =
+        args.missions.empty() ? -1 : args.missions.front();
     // The war's saved-flight cap: the session's own 48 default (the
     // interactivity budget — 449 FMs at 60 Hz is a replay-mode budget;
     // the WAR's story is the generated packages, and the ledger's pool
@@ -1959,7 +1994,7 @@ int run_qc(int argc, char** argv) {
 
     FlightSpawnFilter filter;
     filter.team = args.team;
-    filter.mission = args.mission;
+    filter.missions = args.missions;
     filter.max_flights = args.max_flights;
 
     CampaignSimSpawner spawner(b3_world, populated.unit_id_map, ct, cfg,
@@ -2258,7 +2293,20 @@ int run_qc(int argc, char** argv) {
              << "\",\n";
         out << "  \"campaign_flight_filter\": {";
         out << "\"team\": " << args.team;
-        out << ", \"mission\": " << args.mission;
+        // The mission set: one byte stays a bare int (the long-standing
+        // artifact shape), a MIX writes the array the parser takes.
+        if (args.missions.size() == 1) {
+            out << ", \"mission\": " << args.missions.front();
+        } else if (args.missions.size() > 1) {
+            out << ", \"mission\": [";
+            for (std::size_t i = 0; i < args.missions.size(); ++i) {
+                if (i != 0) out << ", ";
+                out << args.missions[i];
+            }
+            out << "]";
+        } else {
+            out << ", \"mission\": -1";
+        }
         out << ", \"max_flights\": " << args.max_flights << "},\n";
         // A-G slice: combat ON drives the weapon sweeps (bomb sim clock,
         // sweep, the intent execution). The A/A ladder stays dark for

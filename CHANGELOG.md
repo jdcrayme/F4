@@ -5,6 +5,46 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## EMPL-2b — the fleet-scale on-save AAR demo passes: 3 complete USAF protocols live on TestCamp
+
+- **EMPL-2b** — the EMPL-2 named follow-up closes: `campaign_qc
+  testcamp.world.json --mission AMIS_TANK,AMIS_BARCAP2 --minutes 60
+  --expect-aar` **PASSES (exit 0)** — 22 refuel requests/assignments,
+  64 PreContact/ClearedContact entries, 51 boom latches, 5 disconnects
+  with fuel transferred, **3 complete protocols** (RefuelComplete fired)
+  on the live save. The spawn mix is the tranche's opening move (the
+  flight filter is a byte SET end to end: `FlightSpawnFilter::missions`,
+  scenario JSON `"mission": [...]` arrays, harness comma lists — the
+  `--war` arm refuses mixes, the session path keeps the single-byte
+  face). The live runs then exposed four engine defects the e2e's
+  pre-placed geometry never hits, each fixed from the trace autopsy:
+  (1) the rendezvous closure cap was a STEP in dz (150 kts inside
+  ±300 ft, 90 below, zero above — with the +3-kt bias floor overriding
+  the zero): the join-scale servo's flicker at the band edge turned it
+  into a ratchet that parked the join +300 ft high for 116,000 ticks
+  and bounced it +6,282 ft off a 1.1-NM join; the cap is now LINEAR
+  through those same three points (gentle below → full ceiling on the
+  boom line → mirrored descend bias above) and the 6,000-ft standoff
+  hand-off is a blend, so no crossing injects a step into the speed
+  loop; (2) the collision-avoid rung stood receivers DOWN mid-join —
+  4,159 Breaking samples per run, one 6.7 s after a LATCH — because
+  planned proximity is what a boom is; the rung now stands down while
+  the refuel state is Rendezvous..BackingOut (GroundAvoid still runs);
+  (3) the Hold contact box (±15 ft along/lat) was tighter than the FCS
+  trim transient — the live latch died at hold_t=6.6 s on along=57/
+  lat=-16 with the VS damper one fpm from the skip gate; the box is
+  ±60 ft (the boom telescopes); (4) the tanker picture now carries the
+  PAIRED tanker's entity id (the campaign pairing has no TowerATC to
+  assign one — the stub's answer carried 0), the receiver's refuel
+  module tracks it, and the host arms ONE joiner per tanker at a time
+  (the ATP-56 visual stack — mutual CPA between stacked receivers was
+  the break storm's engine). Residual (the next tranche): 46 lost per
+  51 latches — most receivers cycle hold/lose/re-join before the 20-s
+  hold completes; 3 of 22 complete. The receiver join STACK (waiters
+  hold at the rendezvous point instead of flying on) is the named
+  follow-up. `F4_AAR_DEBUG=1` prints the latch/loss autopsy
+  (boom-frame errors at loss) to stderr.
+
 ## EMPL-2 — the campaign-path AAR chain closes; the receiver joins, latches, and refuels
 
 - **EMPL-2** — a campaign-spawned tanker/receiver pair flies the full USAF

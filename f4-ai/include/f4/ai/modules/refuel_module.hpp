@@ -87,6 +87,14 @@ struct TankerPicture {
     double heading_rad{0.0};         // compass, CW from north
     double speed_kts{0.0};           // the tanker's VCAS
     double altitude_msl_ft{0.0};      // the tanker's MSL altitude
+    // EMPL-2b — the picture's tanker's entity id. The campaign pairing
+    // (the host's FindNearestActiveTanker) has no TowerATC behind it:
+    // the stub's TankerAssigned answer carries its configured tanker
+    // (0 on the campaign path), so the picture is the only channel the
+    // PAIRED tanker's id reaches the module through. The brain's
+    // collision-avoid exemption reads it (the boom IS planned
+    // proximity); 0 = unknown (exempts nothing).
+    std::uint64_t tanker_id{0};
 };
 
 // ============================================================================
@@ -141,8 +149,13 @@ public:
         // Reverted; the anchored-AAR latch sensitivity is a documented
         // follow-up.)
         double contact_offset_long_ft{10.0};        // aft of the boom nozzle
-        double contact_long_ft{15.0};               // ± ft along (widened from 6)
-        double contact_lat_ft{15.0};                 // ± ft lateral (widened from 6)
+        // EMPL-2b — ±60 ft along/lat (the boom telescopes; the pre-fix
+        // ±15 boxes were tighter than the join-scale FCS trim transient:
+        // the live TestCamp latch died at hold_t=6.6 s on along=57/
+        // lat=-16 with the VS damper still converging — vs=-199, one
+        // fpm under the skip gate). Vert was already ±60.
+        double contact_long_ft{60.0};               // ± ft along
+        double contact_lat_ft{60.0};                // ± ft lateral
         // ATP-56 physical boom envelope is ±6 ft; widened to ±40 for the
         // F-16 FM's phugoid residual at 10000 ft (the VS damper reduces
         // the oscillation to ~25 ft, but the initial VS from the closure
@@ -366,6 +379,10 @@ public:
     // --- Tanker picture push (host calls each tick before update) ---
     void set_tanker_picture(const TankerPicture& p) noexcept {
         tanker_picture_ = p;
+        // EMPL-2b — the paired tanker's id rides the picture (the
+        // campaign path has no TowerATC to assign it). Nonzero-only:
+        // an id-less picture never clears a known assignment.
+        if (p.tanker_id != 0) tanker_id_ = p.tanker_id;
     }
     [[nodiscard]] const TankerPicture& tanker_picture() const noexcept {
         return tanker_picture_;
@@ -373,6 +390,13 @@ public:
 
     // --- Accessors ---
     [[nodiscard]] RefuelState state() const noexcept { return sm_.current(); }
+    /// EMPL-2b — the assigned tanker's entity id (0 = none). The brain's
+    /// collision-avoid rung reads it to exempt the paired tanker while a
+    /// join/protocol is live: the boom IS planned proximity, and the CPA
+    /// math against the tanker always screams.
+    [[nodiscard]] std::uint64_t tanker_id() const noexcept {
+        return tanker_id_;
+    }
     [[nodiscard]] bool is_complete() const noexcept {
         return sm_.current() == RefuelState::Done;
     }

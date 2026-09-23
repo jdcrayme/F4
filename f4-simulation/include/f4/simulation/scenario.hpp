@@ -367,7 +367,8 @@ struct Scenario {
 
     /// B.3: restrict which of the world's flights materialize (large saves
     /// carry 449). JSON block "campaign_flight_filter" with fields
-    /// "team" (int slot), "mission" ("AMIS_BARCAP" name or int byte),
+    /// "team" (int slot), "mission" ("AMIS_BARCAP" name, int byte, or an
+    /// ARRAY of either — the live AAR demo mixes tanker + receiver bytes),
     /// "max_flights" (int cap). Default = no filter.
     ///
     /// NOTE: this mirrors campaign_bridge.hpp's FlightSpawnFilter rather
@@ -377,7 +378,7 @@ struct Scenario {
     /// converts between the two; the field vocabulary is identical.
     struct CampaignFlightFilter {
         int team{-1};        ///< -1 = any team
-        int mission{-1};     ///< -1 = any mission byte
+        std::vector<int> missions;  ///< empty = any mission byte
         int max_flights{0};  ///< 0 = unlimited
     };
     CampaignFlightFilter campaign_flight_filter;

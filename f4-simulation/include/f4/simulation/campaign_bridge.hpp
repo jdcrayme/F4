@@ -121,16 +121,35 @@ derive_airfield_from_objective(const f4::world::ObjectiveState& obj,
 struct FlightSpawnFilter {
     /// Restrict to one owning team slot (-1 = any).
     int team{-1};
-    /// Restrict to one mission byte (-1 = any). Mission names
+    /// Restrict to a SET of mission bytes (empty = any). Mission names
     /// ("AMIS_BARCAP") resolve through f4-campaign's mission_type_byte.
-    int mission{-1};
+    /// A set, not one byte, because the live AAR demo needs a MIX —
+    /// tanker flights and their refuel-leg receivers are different
+    /// bytes, and the single-byte filter could never field both (the
+    /// EMPL-2 named follow-up).
+    std::vector<int> missions;
     /// Hard cap on spawned aircraft (0 = unlimited). Large saves
     /// (TestCamp: 449 flights) need this to keep QC runs bounded.
     int max_flights{0};
 
+    /// Single-byte convenience (byte < 0 clears — the "any" state).
+    void set_mission(int byte) {
+        missions.clear();
+        if (byte >= 0) missions.push_back(byte);
+    }
+    /// True when the byte passes the mission gate (always when no byte
+    /// is set — the filter's "any" state).
+    [[nodiscard]] bool mission_allowed(int byte) const noexcept {
+        if (missions.empty()) return true;
+        for (const int m : missions) {
+            if (m == byte) return true;
+        }
+        return false;
+    }
+
     /// True when nothing is filtered (every flight passes).
     [[nodiscard]] bool is_noop() const noexcept {
-        return team < 0 && mission < 0 && max_flights <= 0;
+        return team < 0 && missions.empty() && max_flights <= 0;
     }
 };
 

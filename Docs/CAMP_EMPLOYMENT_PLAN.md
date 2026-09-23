@@ -3,7 +3,9 @@
 > A-G employment chain closes end to end). EMPL-1a LANDED (impact precision —
 > the stick destroys features). EMPL-1b LANDED (recorder intended-path fields).
 > EMPL-2 LANDED (campaign-path AAR — the receiver joins, latches, and
-> refuels from campaign-spawned flights). EMPL-3 LANDED via the QC-ANCHOR
+> refuels from campaign-spawned flights). EMPL-2b LANDED (the fleet-scale
+> on-save AAR demo — a live TestCamp run flies 3 complete USAF protocols,
+> exit 0 on --expect-aar; see CHANGELOG). EMPL-3 LANDED via the QC-ANCHOR
 > tranche (landing_only passes; see CHANGELOG).
 > The open item is the stick aim-point element (§2.6).
 > **Source of Truth**: [FreeFalcon/freefalcon-central](https://github.com/FreeFalcon/freefalcon-central) (develop branch)
@@ -230,17 +232,31 @@ with fuel transferred and `RefuelComplete` fired; `test_aar_e2e` (the
 scenario sibling over `tanker_track.json`) stays green — now ANCHORED
 (see below), 4 contacts, `complete=1`.
 
-**Named follow-up (the fleet-scale on-save demo):** the campaign e2e
+**Named follow-up (the fleet-scale on-save demo):** ~~the campaign e2e
 proves the engine chain on the save's own shape, but a LIVE TestCamp
-run still shows zero AAR traffic for a structural reason: the
-single-byte `--mission` filter cannot spawn a tanker AND a refuel-leg
-receiver together (TANK-only runs are all tankers; the 158 WP_REFUEL
-carriers are other bytes), and the synthetic ladder spawns don't yet
-carry their stamped refuel legs to the bridge
-(`campaign_has_refuel_receivers_` stayed false with 33 stamps filed —
-the b3 loop's synthetic route path drops the stamp). The demo needs
-either a two-byte spawn mix or the b3-loop stamp carry-through — the
-next engine tranche, not a servo problem.
+run still shows zero AAR traffic~~ **LANDED (EMPL-2b).** The two-byte
+spawn mix (`--mission AMIS_TANK,AMIS_BARCAP2` — the flight filter is a
+byte SET end to end: scenario JSON array, harness comma list) fields
+the tankers and their refuel-leg receivers in one run, and the live
+join now completes: `--expect-aar` PASSES (exit 0) with 22
+requests/assignments, 51 boom latches, 5 disconnects with fuel
+transferred, 3 complete USAF protocols in a 60-sim-minute run. What
+the live runs exposed and fixed (each caught by the trace autopsy):
+the rendezvous closure cap was a step function in dz whose edge the
+join-scale servo flickered across — a ratchet that parked the join
++300 ft high for 116,000 ticks (now linear gentle-below → full-ceiling
+on-line → descend-bias-above, and the standoff hand-off is a blend);
+the collision-avoid rung stood the receiver DOWN mid-join (planned
+proximity — the rung now skips while the refuel state is
+Rendezvous..BackingOut); and the Hold contact box (±15 ft) was
+tighter than the FCS trim transient (±60 ft along/lat — the boom
+telescopes). Receivers arm one joiner per tanker at a time (the ATP-56
+visual stack); the tanker picture carries the paired tanker's entity
+id (the campaign path has no TowerATC to assign one). Residual: 46
+ContactLost per 51 latches — the hold/degrade cycle re-latches but
+most receivers cycle before their 20-s hold completes; 3/22 complete.
+The receiver join STACK (waiters hold at the rendezvous point instead
+of flying on) is the next tranche.
 
 ## 4. EMPL-3 — approach capture (LANDED via QC-ANCHOR)
 

@@ -231,20 +231,42 @@ Scenario parse_scenario(f4::json::Reader& r) {
                     s.campaign_flight_filter.team =
                         static_cast<int>(r.read_int());
                 } else if (k == "mission") {
-                    if (r.peek('"')) {
-                        const auto name = r.read_string();
-                        const auto byte =
-                            f4::campaign::mission_type_byte(name);
-                        if (!byte) {
-                            throw std::runtime_error(
-                                "scenario: campaign_flight_filter mission '"
-                                + name + "' is not a mission type");
+                    // One byte (int or "AMIS_*" name) or an ARRAY of
+                    // either — the live AAR demo's tanker + receiver
+                    // mix parses the same block (EMPL-2 follow-up).
+                    auto read_one = [&r]() -> int {
+                        if (r.peek('"')) {
+                            const auto name = r.read_string();
+                            const auto byte =
+                                f4::campaign::mission_type_byte(name);
+                            if (!byte) {
+                                throw std::runtime_error(
+                                    "scenario: campaign_flight_filter "
+                                    "mission '" + name +
+                                    "' is not a mission type");
+                            }
+                            return static_cast<int>(*byte);
                         }
-                        s.campaign_flight_filter.mission =
-                            static_cast<int>(*byte);
+                        return static_cast<int>(r.read_int());
+                    };
+                    s.campaign_flight_filter.missions.clear();
+                    // -1 (the long-standing "any" sentinel, still written
+                    // by hosts for the no-filter state) and every other
+                    // negative byte SKIP — the set stays empty = any.
+                    auto push_byte =
+                        [&f = s.campaign_flight_filter.missions](int byte) {
+                            if (byte >= 0) f.push_back(byte);
+                        };
+                    if (r.peek('[')) {
+                        r.expect('[');
+                        bool arr_first = true;
+                        while (!r.consume(']')) {
+                            if (!arr_first) r.expect(',');
+                            arr_first = false;
+                            push_byte(read_one());
+                        }
                     } else {
-                        s.campaign_flight_filter.mission =
-                            static_cast<int>(r.read_int());
+                        push_byte(read_one());
                     }
                 } else if (k == "max_flights") {
                     s.campaign_flight_filter.max_flights =

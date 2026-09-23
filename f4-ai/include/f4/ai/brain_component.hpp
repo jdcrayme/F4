@@ -410,11 +410,30 @@ public:
                 // ladder below — one tick stale; the band develops over
                 // seconds, a tick is noise). See collision_avoid_module
                 // .hpp for the doctrine + the documented midair trade.
-                collision_avoid_.set_exempt_id(gun_pass_exempt_id_);
-                const auto ca_out = collision_avoid_.update(dt, state);
-                if (collision_avoid_.is_avoiding()) {
-                    safety_mode_ = SafetyMode::CollisionAvoid;
-                    ai_out = ca_out;
+                // EMPL-2b — the refuel join/protocol STANDS DOWN the
+                // collision rung entirely: the boom IS planned
+                // proximity (the contact point sits ~100 ft aft of the
+                // nozzle and the whole picture inside CPA ranges is the
+                // cooperative formation), so CPA always screams and the
+                // break-yank tore latched booms and mid-joins apart all
+                // run (the live TestCamp catch: 4,159 CollisionAvoid
+                // samples while joining). GroundAvoid above still runs.
+                const auto refuel_st = refuel_.state();
+                const bool joining =
+                    refuel_st == modules::RefuelState::Rendezvous ||
+                    refuel_st == modules::RefuelState::PreContact ||
+                    refuel_st == modules::RefuelState::ClearedContact ||
+                    refuel_st == modules::RefuelState::Hold ||
+                    refuel_st == modules::RefuelState::BackingOut;
+                if (joining) {
+                    // Skip the CA update — no avoid state this tick.
+                } else {
+                    collision_avoid_.set_exempt_id(gun_pass_exempt_id_);
+                    const auto ca_out = collision_avoid_.update(dt, state);
+                    if (collision_avoid_.is_avoiding()) {
+                        safety_mode_ = SafetyMode::CollisionAvoid;
+                        ai_out = ca_out;
+                    }
                 }
             }
         }
@@ -1246,6 +1265,15 @@ public:
     void set_contact_stabilized(bool on) { nav_.set_contact_stabilized(on); }
     [[nodiscard]] bool contact_stabilized() const noexcept {
         return nav_.contact_stabilized();
+    }
+
+    /// EMPL-2b — station-hold observability. The tanker push reads this
+    /// to prefer ON-STATION tankers when pairing receivers (a tanker
+    /// flying its recovery or still ferrying is airborne but useless as
+    /// a rendezvous — the live-run catch: receivers chased departing
+    /// tankers across the theater).
+    [[nodiscard]] bool holding_station() const noexcept {
+        return nav_.holding_station();
     }
 
     /// Legacy alias for the Phase A API (tests + hosts configure the

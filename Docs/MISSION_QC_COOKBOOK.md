@@ -362,11 +362,16 @@ strike-target gap.
   `test_campaign_aar` flies the full USAF protocol (Rendezvous → … →
   Done, fuel transferred, `RefuelComplete` fired) through the real
   campaign spawn path, and the anchored `tanker_track` scenario flies
-  it end to end at Kunsan (exit 0, 4 contacts, `complete=1`). Named
-  follow-up: a LIVE TestCamp run still shows zero AAR traffic — the
-  single-byte `--mission` filter can't spawn a tanker and a refuel-leg
-  receiver together, and the ladder's synthetic spawns don't yet carry
-  their stamped refuel legs to the bridge (CAMP_EMPLOYMENT_PLAN §3).
+  it end to end at Kunsan (exit 0, 4 contacts, `complete=1`).
+  ~~Named follow-up: a LIVE TestCamp run still shows zero AAR traffic~~
+  RESOLVED (EMPL-2b): `--mission AMIS_TANK,AMIS_BARCAP2` (the filter
+  takes a comma list — a byte SET) fields the tankers and their
+  refuel-leg receivers in one run and `--expect-aar` PASSES (exit 0):
+  22 requests/assignments, 51 latches, 5 disconnects with fuel, and
+  3 complete protocols in 60 sim-minutes. Residual: most receivers
+  cycle hold/lose/re-join before the 20-s hold completes (46 lost per
+  51 latches) — the receiver join STACK is the named follow-up
+  (CAMP_EMPLOYMENT_PLAN §3).
 * ~~`landing_only`'s InterceptFinal goes around every time~~
   RESOLVED (QC-ANCHOR): full InterceptFinal → OnFinal → Flare →
   Rollout → TaxiIn with touchdown, exit 0.

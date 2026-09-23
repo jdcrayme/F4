@@ -161,6 +161,12 @@ RefuelModule::build_sm()
         .on_enter(RefuelState::Hold, [this](const RefuelEvent&) {
             hold_time_s_ = 0.0;
             air_steering.reset_integrators();
+            // EMPL-2b — F4_AAR_DEBUG: the latch marker.
+            if (std::getenv("F4_AAR_DEBUG") != nullptr) {
+                std::fprintf(stderr, "AARDBG latch ship=%llu tank=%llu\n",
+                             (unsigned long long)ownship_id_,
+                             (unsigned long long)tanker_id_);
+            }
         })
         .on_enter(RefuelState::BackingOut, [this](const RefuelEvent&) {
             published_precontact_report_ = false;
@@ -462,6 +468,17 @@ void RefuelModule::check_contact_lost()
     if (hold_time_s_ < 1.0) return;
     if (std::abs(current_vs_fpm_) > 200.0) return;
     if (!in_contact_envelope()) {
+        // EMPL-2b — F4_AAR_DEBUG: the loss autopsy (which boom-frame
+        // axis broke, how far, at what hold age).
+        if (std::getenv("F4_AAR_DEBUG") != nullptr) {
+            std::fprintf(stderr,
+                         "AARDBG lost ship=%llu tank=%llu hold_t=%.1f "
+                         "along=%.0f lat=%.0f vert=%.0f vs=%.0f\n",
+                         (unsigned long long)ownship_id_,
+                         (unsigned long long)tanker_id_,
+                         hold_time_s_, along_err_ft(), lat_err_ft(),
+                         vert_err_ft(), current_vs_fpm_);
+        }
         if (bus_ && tanker_id_ != 0) {
             atc::ContactLost lost;
             lost.receiver_id = ownship_id_;
@@ -569,10 +586,20 @@ AIControlOutput RefuelModule::controls_for_rendezvous() const
     // standoff and the receiver closes horizontally while still 5k ft
     // below the boom (the e2e catch: a 190-fpm climb that never
     // reconciled).
+    // EMPL-2b — the hand-off is a BLEND, not a flip. The binary window
+    // test jumped the aim ~6,000 ft the moment |dz| crossed the band
+    // edge: the braking law saw err leap 0 → ~6,000 ft, demanded
+    // ~120 kts of closure, the throttle pinned at 1.0, and the surge
+    // climbed the receiver right back out of the window (the live
+    // TestCamp catch: dz ballooned +6,282 ft off a 1.1-NM join). The
+    // shift fades over one band of vertical error — no crossing
+    // injects a step into the speed loop.
+    const double outside_blend = std::clamp(
+        (std::abs(dz) - config.precontact_vert_ft) /
+            config.precontact_vert_ft,
+        0.0, 1.0);
     const double along_shift_ft =
-        (std::abs(dz) > config.precontact_vert_ft)
-            ? -standoff_ft
-            : lead_ft;
+        outside_blend * -standoff_ft + (1.0 - outside_blend) * lead_ft;
     const double aim_x = cp.x + fwd_x * along_shift_ft;
     const double aim_y = cp.y + fwd_y * along_shift_ft;
     const geo::WorldPosition aim_pos{aim_x, aim_y, cp.z};
@@ -650,17 +677,36 @@ AIControlOutput RefuelModule::controls_for_rendezvous() const
         // commanded −700 fpm, actual +500 fpm — the receiver rode its
         // throttle up and away from the boom). Match speed, descend,
         // then close.
-        double closure_cap_kts;
-        if (std::abs(dz) <= config.precontact_vert_ft) {
-            closure_cap_kts = config.rendezvous_max_closure_kts;
-        } else if (dz < 0.0) {
-            closure_cap_kts = config.rendezvous_level_closure_kts;
-        } else {
-            closure_cap_kts = 0.0;
-        }
+        // EMPL-2b — the cap is SMOOTH in dz. The EMPL-2 branch structure
+        // (150 kts inside ±300 ft of the line, 90 below, ZERO above,
+        // floored at +3 by the bias composition) put a discontinuity at
+        // the window edge exactly where the join-scale servo's flicker
+        // lives: every dip inside the band opened the full ceiling, the
+        // surge climbed the receiver back out, the cap slammed shut —
+        // a limit cycle parked at the edge (three live TestCamp runs:
+        // dz +290..+380 for 116,000 ticks, bounces to +6,282 ft, and
+        // the +3-kt bias floor overriding the above-boom zero in the
+        // first fix attempt). The cap now interpolates linearly through
+        // the same three points — gentle 90+bias a band BELOW the line,
+        // full ceiling ON the line, mirrored descend bias a band ABOVE
+        // — so no dz crossing steps the speed target, and the receiver
+        // joins the way the procedure reads: closing gently from below,
+        // full overtake only level with the boom, descend-first if it
+        // rides high.
+        const double depth = std::clamp(dz / config.precontact_vert_ft,
+                                        -1.0, 1.0);
+        const double below_closure_kts =
+            config.rendezvous_level_closure_kts + config.closure_bias_kts;
+        const double line_closure_kts = config.rendezvous_max_closure_kts;
+        const double above_closure_kts = -config.closure_bias_kts;
+        const double closure_kts =
+            depth <= 0.0
+                ? below_closure_kts +
+                      (line_closure_kts - below_closure_kts) * (1.0 + depth)
+                : line_closure_kts +
+                      (above_closure_kts - line_closure_kts) * depth;
         target_speed_vcas +=
-            std::max(std::min(demand_fps / kFpsPerKt, closure_cap_kts),
-                     config.closure_bias_kts);
+            std::min(demand_fps / kFpsPerKt, closure_kts);
     } else {
         // Overshot (ahead): fall back below the tanker's speed, under
         // the same braking curve mirrored.
