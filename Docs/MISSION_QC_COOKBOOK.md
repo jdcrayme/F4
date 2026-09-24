@@ -235,14 +235,36 @@ mission type**, checked in as fixtures, where the expectation table of
 * the matrix runner points at a showcase world and the row's verdict
   is the mission's unit test at campaign scale;
 * two build paths, in order of increasing fidelity:
-  1. **Surgical edit of a real save** (available today):
-     `cam2json --preserve-subfiles` → flip the flight's `mission` /
-     `mission_target` / owner in the JSON → `json2cam --reencode-all
-     --baseline` → verify with `cam2json` byte-identity on the
-     untouched records (the SAVE_WRITE_PLAN round-trip contract);
-  2. **A generator** (`campaign init` grows a `--showcase <type>`
-     mode): synthesizes the world from the class table + profiles —
-     the campinit CLI is the natural home.
+  1. **Surgical edit of a real save** — **the first slice LANDED
+     (EMPL-2d companion)**: `showcase.world.json` + `showcase.cam` at
+     the repo root, built by `scripts/showcase_flip.pl` from
+     `TestCamp.cam` (`cam2json --preserve-subfiles` → flip the
+     mission/old_mission bytes on FOUR flights → `json2cam
+     --reencode-all --baseline` → `cam2json` re-decode is
+     payload-identical modulo the archive header sizes, per the
+     SAVE_WRITE_PLAN contract). The flips: the 1st-3rd BARCAP2 flights
+     → TARCAP (4) / SAR (32) / ASHIP (35), the 1st INTSTRIKE flight →
+     SEADSTRIKE (17) — the four bytes the stock war never files. The
+     four rows run green through the matrix:
+
+     ```bash
+     python3 scripts/qc_missions.py showcase.world.json \
+         --missions AMIS_TARCAP,AMIS_SEADSTRIKE,AMIS_SAR,AMIS_ASHIP \
+         --minutes 15 --max-flights 4 --jobs 4 \
+         --tool Build/f4-simulation/Release/campaign_qc.exe
+     #   TARCAP/SAR/ASHIP: spawned 1, airborne 1/1, no ordnance, exit 0
+     #   SEADSTRIKE: spawned 1, released 4, impacts 4, 3 features
+     #   destroyed (its WP_STRIKE waypoint targets VU 611 aim-point 6
+     #   — the full A-G chain incl. the EMPL-2d aim-point rule), exit 0
+     ```
+
+     Known quirk: the SEADSTRIKE row renders "unarmed (loadout
+     concern)" because the summary's `strike_flights_armed` counter
+     reads 0 while releases happened — the counter's arm-detection
+     predates in-run arming; the releases in the ledger are the
+     truth. A generator (`campaign init --showcase <type>`)
+     synthesizing per-type worlds from the class table + profiles
+     remains the follow-on (the campinit CLI's natural home).
 
 Until the tranche lands, `--missions <family>` over the stock save
 plus the §4 table is the honest substitute, and the absent-byte list
