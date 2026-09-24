@@ -368,10 +368,13 @@ strike-target gap.
   takes a comma list — a byte SET) fields the tankers and their
   refuel-leg receivers in one run and `--expect-aar` PASSES (exit 0):
   22 requests/assignments, 51 latches, 5 disconnects with fuel, and
-  3 complete protocols in 60 sim-minutes. Residual: most receivers
-  cycle hold/lose/re-join before the 20-s hold completes (46 lost per
-  51 latches) — the receiver join STACK is the named follow-up
-  (CAMP_EMPLOYMENT_PLAN §3).
+  3 complete protocols in 60 sim-minutes.
+  ~~Residual: most receivers cycle hold/lose/re-join before the 20-s
+  hold completes~~ SUPERSEDED (EMPL-2c, the receiver join stack): the
+  bridge orbits waiters at their rendezvous point (STK racetrack), the
+  boom is exclusive per tanker (stand-down into the stack), and the
+  latch requires settled lateral rate. 60 sim-min completes **5**, 90
+  sim-min completes **8 of 24** — throughput is the join-cycle time.
 * ~~`landing_only`'s InterceptFinal goes around every time~~
   RESOLVED (QC-ANCHOR): full InterceptFinal → OnFinal → Flare →
   Rollout → TaxiIn with touchdown, exit 0.

@@ -870,6 +870,87 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                 plan->route[station].station_time_s = 30.0 * 60.0;
             }
         }
+        // EMPL-2c — the receiver's JOIN STACK. The save's refuel-leg
+        // receivers fly THROUGH their rendezvous waypoint and recover:
+        // when the boom is busy (the one-joiner-per-tanker stack) or no
+        // tanker is on station yet, the receiver just goes home — the
+        // live TestCamp catch: 22 receivers paired but most flew their
+        // window off before their turn (3 of 22 completed). Synthesize
+        // the WAITING orbit the procedure reads — a compact racetrack
+        // ANCHORED on the refuel waypoint (the receiver stacks at the
+        // point its own planner declared the rendezvous), corners
+        // carrying the REFUEL action so the leg flag stays live while
+        // the nav cycles them (the pairing picks the nearest tanker to
+        // the CURRENT waypoint), LEVEL above the nav's terrain floor,
+        // with the post-hold tail re-appended for the egress. The push
+        // arms one joiner at a time; a disarmed waiter's nav resumes
+        // the orbit (the station clock keeps the queue bounded — 45
+        // min, then the receiver egresses and the war moves on).
+        if (has_refuel_leg &&
+            !f4::campaign::mission_is_tanker(fp->mission)) {
+            std::size_t rend = plan->route.size();
+            for (std::size_t i = 0; i < plan->route.size(); ++i) {
+                if (plan->route[i].action == f4::campaign::kWpRefuel) {
+                    rend = i;
+                    break;
+                }
+            }
+            if (rend < plan->route.size()) {
+                // LEVEL above the 3,000-ft terrain floor (the stale leg
+                // altitudes sit at 2,000); no tanker-track floor here —
+                // the waiters are not being joined YET, and the arm
+                // ring is 3D (a 3,000-ft waiter under a 20,000-ft boom
+                // 5 NM out is 5.7 NM of the 10-NM ring).
+                const auto& rp = plan->route[rend].position;
+                const geo::WorldPosition anchor{rp.x, rp.y,
+                                                std::max(rp.z, 3000.0)};
+                plan->route[rend].position.z = anchor.z;
+                double ux = 0.0, uy = 1.0;   // entry course (north failover)
+                if (rend > 0) {
+                    const auto& prev = plan->route[rend - 1].position;
+                    const double dx = anchor.x - prev.x;
+                    const double dy = anchor.y - prev.y;
+                    const double len = std::hypot(dx, dy);
+                    if (len > 100.0) {
+                        ux = dx / len;
+                        uy = dy / len;
+                    }
+                }
+                const double rx = uy, ry = -ux;   // right of course (ENU)
+                constexpr double kStackLegFt = 12000.0;   // ~2 NM long leg
+                constexpr double kStackWidthFt = 6000.0;  // ~1 NM width
+                auto stack_corner = [&](const char* name, double al,
+                                        double aw) {
+                    modules::NavigationModule::Waypoint w{
+                        name,
+                        geo::WorldPosition{anchor.x + ux * al + rx * aw,
+                                           anchor.y + uy * al + ry * aw,
+                                           anchor.z},
+                        kDefaultLegSpeedKts};
+                    // The corners carry the REFUEL action: while the nav
+                    // cycles the loop the CURRENT waypoint must keep
+                    // answering "this is the refuel leg" — the leg flag
+                    // is what keeps the pairing (and the arm) alive
+                    // through the orbit.
+                    w.action = f4::campaign::kWpRefuel;
+                    return w;
+                };
+                // The post-hold tail (the recovery) — the refuel
+                // waypoint may BE the last waypoint (an orbit-to-end
+                // tasking): no tail, the flight ends in the stack.
+                modules::NavigationModule::Waypoint tail;
+                const bool have_tail = rend + 1 < plan->route.size();
+                if (have_tail) tail = std::move(plan->route.back());
+                plan->route.resize(rend + 1);
+                plan->route.push_back(stack_corner("STK1", kStackLegFt, 0.0));
+                plan->route.push_back(stack_corner(
+                    "STK2", kStackLegFt, kStackWidthFt));
+                plan->route.push_back(stack_corner("STK3", 0.0, kStackWidthFt));
+                if (have_tail) plan->route.push_back(std::move(tail));
+                plan->route[rend].loop_waypoints = 4;   // anchor + 3
+                plan->route[rend].station_time_s = 45.0 * 60.0;
+            }
+        }
         brain.set_mission_plan(std::move(*plan));
     }
     // EMPL-2 — the campaign AAR wiring (tanker role). Tanker-hood is

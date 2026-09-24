@@ -5,6 +5,36 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## EMPL-2c — the receiver join stack: 8 complete protocols, served one boom at a time
+
+- **EMPL-2c** — the EMPL-2b residual closes: receivers now WAIT at their
+  rendezvous point instead of flying their window off. The bridge
+  synthesizes a compact WAITING orbit (the STK racetrack, anchored on
+  the saved refuel waypoint, corners carrying the REFUEL action so the
+  leg flag — and therefore the pairing and the arm — stays live while
+  the nav cycles the loop, level above the nav's terrain floor, 45-min
+  station, the post-hold recovery re-appended) for every non-tanker
+  flight with a refuel leg. The push's protocol is now EXCLUSIVE per
+  tanker with SPLIT counts: `protocol_count` (PreContact..Departing)
+  is the boom's occupancy, `armed_count` the pursuit crowd; arming
+  requires both empty and is counted the same tick it happens (the
+  pre-fix map was built before the receiver loop — the whole in-ring
+  stack armed in one tick and dogpiled the boom), and an armed
+  receiver whose boom becomes occupied STANDS DOWN into its stack
+  orbit (disarmed, pairing kept — still queued). Done releases the
+  tanker. The latch gained the lateral twin of its vertical
+  stability gate: ContactRequest requires the boom-frame lateral rate
+  settled (`contact_latch_lat_rate_fps`, 20 ft/s) — the F4_AAR_TRACE
+  CSV (filled in this tranche; the hook was an empty placeholder)
+  caught a receiver tripping the contact envelope at −72 ft/s of
+  cross-track rate and carrying its momentum straight back out
+  (11 latches, 11 losses, hold ages 1.0-6.9 s). Numbers: 60 sim-min
+  `--expect-aar` PASSES with 8 disconnects approved and **5 complete
+  protocols** (was 3); 90 sim-min completes **8 of 24** receivers —
+  the throughput is the join-cycle time, and the horizon now buys
+  completions linearly. `F4_AAR_DEBUG=1` also prints the push path,
+  each arm, and the latch/loss autopsy.
+
 ## EMPL-2b — the fleet-scale on-save AAR demo passes: 3 complete USAF protocols live on TestCamp
 
 - **EMPL-2b** — the EMPL-2 named follow-up closes: `campaign_qc

@@ -1174,8 +1174,26 @@ void Simulation::push_tanker_picture(double dt) {
 
     // EMPL-2 — no refuel actors anywhere (no scenario refuel waypoint,
     // no campaign receiver registered): pay nothing.
+    if (std::getenv("F4_AAR_DEBUG") != nullptr) {
+        static bool once = false;
+        if (!once) {
+            once = true;
+            std::fprintf(stderr, "AARDBG push called\n");
+        }
+    }
     if (!scenario_has_refuel_waypoint_ && !campaign_has_refuel_receivers_) {
         return;
+    }
+    // EMPL-2c — F4_AAR_DEBUG: which push path actually drives the run.
+    if (std::getenv("F4_AAR_DEBUG") != nullptr) {
+        static bool once2 = false;
+        if (!once2) {
+            once2 = true;
+            std::fprintf(stderr,
+                         "AARDBG push scenario_wp=%d campaign_rx=%d\n",
+                         scenario_has_refuel_waypoint_ ? 1 : 0,
+                         campaign_has_refuel_receivers_ ? 1 : 0);
+        }
     }
 
     // The tanker roster — rescanned each tick the push runs (a scan is
@@ -1307,19 +1325,33 @@ void Simulation::push_tanker_picture(double dt) {
 
     constexpr double kAarJoinRingFt = 52800.0;   // 10 NM — the orbit's scale
 
-    // EMPL-2b — ONE joiner per tanker at a time (the ATP-56 visual
-    // stack, and the shape FindNearestActiveTanker implies): receivers
-    // converging on one boom see EACH OTHER as collision threats — the
-    // join-scale proximity always screams — and the mutual breaks tore
-    // even a LATCHED boom apart (the live TestCamp catch: 5 cleared, 1
-    // latched, ContactLost on a break 6.7 s in, 3,906 CollisionAvoid
-    // samples per run while the receivers cycled). The host counts
-    // engaged joiners (armed or mid-protocol) per PAIRED tanker and
-    // arms nobody new on a busy boom; the waiters hold at their own
-    // waypoints and arm as the boom clears. (Tankers themselves are
-    // already excluded from every traffic picture — cooperative
-    // platforms, below.)
-    std::unordered_map<std::uint64_t, int> joiners;
+    // EMPL-2b/2c — ONE serviced receiver per tanker at a time (the
+    // ATP-56 visual stack, and the shape FindNearestActiveTanker
+    // implies): receivers converging on one boom see EACH OTHER as
+    // collision threats — the join-scale proximity always screams — and
+    // the mutual breaks tore even a LATCHED boom apart (the live
+    // TestCamp catch: 5 cleared, 1 latched, ContactLost on a break
+    // 6.7 s in). The counts are SPLIT because they gate different
+    // things: protocol_count is the boom's OCCUPANCY (PreContact
+    // .. Departing — a latched or joining receiver owns the boom);
+    // armed_count is the pursuit crowd (armed receivers still in
+    // Rendezvous). Arming requires BOTH empty, the count is taken
+    // immediately (the map was built before this loop — arming without
+    // counting dogpiles the whole in-ring stack in one tick), and an
+    // armed receiver whose tanker's boom becomes occupied STANDS DOWN
+    // into its stack orbit (disarmed, pairing kept — still queued).
+    // Done is neither: a serviced receiver releases its tanker
+    // entirely. (Tankers themselves are already excluded from every
+    // traffic picture — cooperative platforms.)
+    std::unordered_map<std::uint64_t, int> protocol_count;
+    std::unordered_map<std::uint64_t, int> armed_count;
+    auto in_service = [](f4::ai::modules::RefuelState s) noexcept {
+        return s == f4::ai::modules::RefuelState::PreContact ||
+               s == f4::ai::modules::RefuelState::ClearedContact ||
+               s == f4::ai::modules::RefuelState::Hold ||
+               s == f4::ai::modules::RefuelState::BackingOut ||
+               s == f4::ai::modules::RefuelState::Departing;
+    };
     for (const auto eid : aircraft_entities_) {
         const auto pit = receiver_pairing_.find(eid.value);
         if (pit == receiver_pairing_.end()) continue;
@@ -1327,11 +1359,12 @@ void Simulation::push_tanker_picture(double dt) {
         auto* rb = rh.get<f4::ai::BrainComponent>();
         if (rb == nullptr || rb->is_tanker()) continue;
         const auto rst = rb->refuel().state();
-        const bool engaged =
-            rb->refuel_armed() ||
-            (rst != f4::ai::modules::RefuelState::Rendezvous &&
-             rst != f4::ai::modules::RefuelState::NoTanker);
-        if (engaged) ++joiners[pit->second];
+        if (in_service(rst)) {
+            ++protocol_count[pit->second];
+        } else if (rst != f4::ai::modules::RefuelState::Done &&
+                   rb->refuel_armed()) {
+            ++armed_count[pit->second];
+        }
     }
 
     for (const auto eid : aircraft_entities_) {
@@ -1434,18 +1467,45 @@ void Simulation::push_tanker_picture(double dt) {
             const double dy = own_tf->position.y - best->p.position.y;
             const double dz = own_tf->position.z - best->p.position.z;
             const double d2 = dx * dx + dy * dy + dz * dz;
+            // EMPL-2c — the protocol is EXCLUSIVE per tanker. An armed
+            // receiver still in Rendezvous whose tanker's boom became
+            // occupied (another receiver joined the protocol) STANDS
+            // DOWN into its stack orbit: disarmed (the rung hands back
+            // to nav — the STK hold flies), pairing KEPT (still
+            // queued). Without this, every receiver armed while the
+            // boom was free stays armed through its own re-join cycles
+            // and four of them latch the same envelope at once (the
+            // live TestCamp catch: a four-latch burst on tanker ...823,
+            // all four lost within seconds — lat 60-200 ft, the
+            // bodies in one boom frame). Done releases the tanker
+            // here too: a serviced receiver is nobody's occupant.
+            const bool serving = in_service(rst);
             if (brain->refuel_armed()) {
-                if (d2 > (2.0 * kAarJoinRingFt) * (2.0 * kAarJoinRingFt) &&
-                    !mid_protocol) {
+                if (serving) {
+                    // Protocol owns the geometry; nothing gates it.
+                } else if (d2 > (2.0 * kAarJoinRingFt) *
+                                   (2.0 * kAarJoinRingFt)) {
                     brain->set_refuel_armed(false);
                     // Release the pairing too — the tanker left and the
                     // receiver re-airs: the next re-pick (nearest to
                     // the rendezvous point) may find its replacement.
                     receiver_pairing_.erase(eid.value);
+                } else if (protocol_count[best->id.value] > 0 ||
+                           rst == f4::ai::modules::RefuelState::Done) {
+                    brain->set_refuel_armed(false);
                 }
             } else if (d2 <= kAarJoinRingFt * kAarJoinRingFt &&
-                       joiners[best->id.value] == 0) {
+                       protocol_count[best->id.value] == 0 &&
+                       armed_count[best->id.value] == 0) {
                 brain->set_refuel_armed(true);
+                ++armed_count[best->id.value];
+                if (std::getenv("F4_AAR_DEBUG") != nullptr) {
+                    std::fprintf(stderr,
+                                 "AARDBG arm ship=%llu tank=%llu tick=%llu\n",
+                                 (unsigned long long)eid.value,
+                                 (unsigned long long)best->id.value,
+                                 (unsigned long long)tick_);
+                }
             }
         }
         brain->update_tanker_picture(best->p);

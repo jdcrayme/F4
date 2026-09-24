@@ -156,6 +156,14 @@ public:
         // fpm under the skip gate). Vert was already ±60.
         double contact_long_ft{60.0};               // ± ft along
         double contact_lat_ft{60.0};                // ± ft lateral
+        // EMPL-2c — the latch's lateral-rate gate (see
+        // check_in_contact_envelope): contact is a station-keep, not a
+        // fly-through. 20 ft/s ≈ a 1,200-fpm-equivalent cross-track
+        // budget — above it the receiver is still slewing onto the
+        // boom line and its momentum would carry it straight back out
+        // of the box (the live TestCamp catch: latch at −72 ft/s,
+        // lost in 1.0 s).
+        double contact_latch_lat_rate_fps{20.0};
         // ATP-56 physical boom envelope is ±6 ft; widened to ±40 for the
         // F-16 FM's phugoid residual at 10000 ft (the VS damper reduces
         // the oscillation to ~25 ft, but the initial VS from the closure

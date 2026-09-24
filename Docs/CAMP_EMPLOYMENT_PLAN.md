@@ -5,7 +5,10 @@
 > EMPL-2 LANDED (campaign-path AAR — the receiver joins, latches, and
 > refuels from campaign-spawned flights). EMPL-2b LANDED (the fleet-scale
 > on-save AAR demo — a live TestCamp run flies 3 complete USAF protocols,
-> exit 0 on --expect-aar; see CHANGELOG). EMPL-3 LANDED via the QC-ANCHOR
+> exit 0 on --expect-aar; see CHANGELOG). EMPL-2c LANDED (the receiver
+> join stack — waiters orbit their rendezvous point, the boom is
+> exclusive per tanker; 8 complete protocols in a 90-sim-minute live
+> run). EMPL-3 LANDED via the QC-ANCHOR
 > tranche (landing_only passes; see CHANGELOG).
 > The open item is the stick aim-point element (§2.6).
 > **Source of Truth**: [FreeFalcon/freefalcon-central](https://github.com/FreeFalcon/freefalcon-central) (develop branch)
@@ -252,11 +255,23 @@ Rendezvous..BackingOut); and the Hold contact box (±15 ft) was
 tighter than the FCS trim transient (±60 ft along/lat — the boom
 telescopes). Receivers arm one joiner per tanker at a time (the ATP-56
 visual stack); the tanker picture carries the paired tanker's entity
-id (the campaign path has no TowerATC to assign one). Residual: 46
-ContactLost per 51 latches — the hold/degrade cycle re-latches but
-most receivers cycle before their 20-s hold completes; 3/22 complete.
-The receiver join STACK (waiters hold at the rendezvous point instead
-of flying on) is the next tranche.
+id (the campaign path has no TowerATC to assign one).
+**EMPL-2c LANDED — the receiver join stack:** the bridge synthesizes
+the WAITING orbit (the STK racetrack anchored on the refuel waypoint,
+REFUEL-action corners keeping the leg flag live through the loop,
+45-min station, recovery re-appended) for every non-tanker refuel-leg
+flight; the push's protocol is exclusive per tanker (split
+protocol/armed counts, same-tick counting, stand-down into the stack,
+Done releases the tanker); the latch gained the lateral-rate twin of
+its vertical stability gate (the F4_AAR_TRACE CSV — filled in this
+tranche, the hook was an empty placeholder — caught a latch at
+−72 ft/s of cross-track rate whose momentum carried it straight back
+out; 11 latches, 11 losses, hold ages 1.0-6.9 s). Numbers: 60
+sim-min completes **5** (was 3), 90 sim-min completes **8 of 24** —
+throughput is the join-cycle time, and the horizon buys completions
+linearly. Remaining polish: the latch/loss cycle still churns (33
+lost per 41 latches) before the 20-s hold strings together — latency,
+not a gate.
 
 ## 4. EMPL-3 — approach capture (LANDED via QC-ANCHOR)
 

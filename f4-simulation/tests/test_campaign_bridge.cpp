@@ -304,6 +304,85 @@ TEST(CampaignBridge, SpawnFromFlightsEmptyWorldReturnsEmpty) {
     EXPECT_TRUE(spawned.empty());
 }
 
+TEST(CampaignBridge, SpawnFromFlightsReceiverRefuelLegGetsJoinStack) {
+    // EMPL-2c — the receiver's JOIN STACK: a non-tanker flight whose
+    // route carries a WP_REFUEL leg spawns with a WAITING orbit
+    // anchored on the refuel waypoint — loop fields on the anchor,
+    // corners carrying the REFUEL action (the leg flag must stay live
+    // while the nav cycles the loop — the pairing keys the CURRENT
+    // waypoint), and the post-hold recovery re-appended.
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 aircraft config fixture not available";
+
+    EntityWorld world;
+
+    auto airbase_h = world.create();
+    auto& airbase_tf = airbase_h.add<TransformComponent>();
+    airbase_tf.position = f4::geo::WorldPosition(0.0, 0.0, 50.0);
+
+    auto sq_h = world.create();
+    auto& sq = sq_h.add<SquadronComponent>();
+    sq.airbase = airbase_h.id();
+    auto& sq_uc = sq_h.add<UnitCoreComponent>();
+    sq_uc.class_table_index = 273;
+
+    auto f_h = world.create();
+    auto& fp = f_h.add<FlightPlanComponent>();
+    fp.squadron = sq_h.id();
+    fp.callsign_id = 1;
+    fp.callsign_num = 1;
+    fp.mission = 2;   // AMIS_BARCAP2 — a receiver, not a tanker
+
+    auto& wpc = f_h.add<WaypointPlanComponent>();
+    auto wp = [&](int16_t x, int16_t y, int16_t z, uint8_t action) {
+        WaypointState w;
+        w.x = x; w.y = y; w.z = z; w.action = action;
+        return w;
+    };
+    wpc.waypoints.push_back(wp(100, 100, 0, f4::campaign::kWpTakeoff));
+    wpc.waypoints.push_back(wp(110, 110, 20, f4::campaign::kWpNothing));
+    wpc.waypoints.push_back(wp(120, 120, 20, f4::campaign::kWpRefuel));
+    wpc.waypoints.push_back(wp(130, 130, 10, f4::campaign::kWpLand));
+
+    ClassTable ct;
+
+    ScenarioAirfield airfield;
+    airfield.runway_heading_rad = 0.0;
+    airfield.threshold_position = f4::geo::WorldPosition(0.0, 5000.0, 50.0);
+    airfield.departure_altitude_ft = 2550.0;
+
+    ScenarioAircraft tpl;
+    tpl.vis_type_index = 1052;
+    tpl.callsign = "EAGLE";
+    tpl.aircraft_config_path = "f16.json";
+
+    auto spawned = spawn_aircraft_from_flights(world, ct, cfg, airfield, tpl);
+    ASSERT_EQ(spawned.size(), 1u);
+
+    EntityHandle h(spawned[0], &world);
+    const auto* brain = h.get<f4::ai::BrainComponent>();
+    ASSERT_NE(brain, nullptr);
+    const auto& route = brain->mission_plan().route;
+    // The plan drops the leading takeoff waypoint: [enroute, refuel,
+    // land] + 3 stack corners = 6.
+    ASSERT_EQ(route.size(), 6u);
+    // The refuel waypoint (index 1) anchors the orbit.
+    EXPECT_EQ(route[1].action, f4::campaign::kWpRefuel);
+    EXPECT_EQ(route[1].loop_waypoints, 4);
+    EXPECT_DOUBLE_EQ(route[1].station_time_s, 45.0 * 60.0);
+    // LEVEL above the nav's terrain floor (the grid z=20 ft leg).
+    EXPECT_GE(route[1].position.z, 3000.0);
+    // The corners carry the REFUEL action — the leg flag stays live.
+    for (int i = 2; i <= 4; ++i) {
+        EXPECT_EQ(route[static_cast<std::size_t>(i)].action,
+                  f4::campaign::kWpRefuel);
+        EXPECT_EQ(route[static_cast<std::size_t>(i)].position.z,
+                  route[1].position.z);
+    }
+    // The recovery rides behind the stack.
+    EXPECT_EQ(route[5].action, f4::campaign::kWpLand);
+}
+
 TEST(CampaignBridge, SpawnFromFlightsCreatesOneEntityPerFlight) {
     f4::data::AircraftConfig cfg;
     if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 aircraft config fixture not available";

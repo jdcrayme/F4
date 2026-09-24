@@ -307,7 +307,17 @@ AIControlOutput RefuelModule::update(double dt, const flight::IAircraftState* st
 
     // The Hold lateral drift rate (read by controls_for_hold — that
     // state is const). Same boom-frame cross-track the hold steers on.
-    if (sm_.current() == RefuelState::Hold && tanker_picture_.valid) {
+    // EMPL-2c — computed in ClearedContact TOO: the ContactRequest
+    // latch reads the rate. The live TestCamp trace showed the catch:
+    // a receiver crossing the boom frame transversely trips the
+    // contact envelope at −72 ft/s of lateral rate, latches "boom
+    // connected", and its momentum carries it straight back out of the
+    // ±60-ft box inside a second (11 latches, 11 losses, hold ages
+    // 1.0-6.9 s). The vertical rate has a stability gate (the
+    // PreContact 2-s |VS|<200 rule); the lateral rate now has its own.
+    if ((sm_.current() == RefuelState::Hold ||
+         sm_.current() == RefuelState::ClearedContact) &&
+        tanker_picture_.valid) {
         const auto cp = contact_point();
         const double hh = tanker_picture_.heading_rad;
         const double hx = current_position_.x - cp.x;
@@ -447,7 +457,18 @@ void RefuelModule::check_in_contact_envelope()
     // enough VS that the damper holds the ±15 ft envelope. (A QC-WORLD
     // experiment relaxing this to 300 fpm — with the envelope widened —
     // latch-churned 16/15 with zero fuel transferred; reverted.)
-    if (in_contact_envelope() && !published_contact_request_ && bus_ && tanker_id_ != 0) {
+    // EMPL-2c — the LATERAL twin of that gate: only request contact
+    // when the boom-frame lateral RATE has settled too (≤
+    // contact_latch_lat_rate_fps). The live TestCamp trace caught a
+    // receiver tripping the envelope at −72 ft/s of cross-track rate —
+    // "boom connected" for one second, then its momentum carried it
+    // back out (11 latches, 11 losses, hold ages 1.0-6.9 s). Contact
+    // is a STATION-KEEP, not a fly-through: the rate gate makes the
+    // latch wait for the formate, exactly like the real boom's
+    // "stabilized... contact" call.
+    if (in_contact_envelope() && !published_contact_request_ && bus_ &&
+        tanker_id_ != 0 &&
+        std::abs(hold_lat_rate_fps_) <= config.contact_latch_lat_rate_fps) {
             atc::ContactRequest req;
             req.receiver_id = ownship_id_;
             req.tanker_id = tanker_id_;

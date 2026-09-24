@@ -805,7 +805,32 @@ public:
                 }();
 
             if (_aar_trace_fp) {
-                // ... (rest of your fprintf and fflush logic stays the same)
+                // EMPL-2c — the hold-tuning CSV, filled in: one row per
+                // tick while the refuel rung owns the jet. The boom-frame
+                // errors + the picture the servo is chasing + the
+                // receiver's motion + the commands (the STAB-E pattern:
+                // instrument before you touch).
+                const auto& tp = refuel_.tanker_picture();
+                std::fprintf(_aar_trace_fp,
+                             "%llu,%s,%.1f,%.1f,%.1f,%.1f,%.4f,"
+                             "%.0f,%.0f,%.0f,%.1f,%.0f,%.3f,%.0f,"
+                             "%.3f,%.3f,%.3f\n",
+                             (unsigned long long)aar_trace_row_,
+                             refuel_.state_name(),
+                             refuel_.along_err_ft(), refuel_.lat_err_ft(),
+                             refuel_.vert_err_ft(), tp.speed_kts,
+                             tp.heading_rad, tp.position.x, tp.position.y,
+                             tp.position.z,
+                             state != nullptr ? state->vcas_kts() : 0.0,
+                             state != nullptr ? state->altitude_msl_ft()
+                                              : 0.0,
+                             state != nullptr ? state->heading_rad() : 0.0,
+                             state != nullptr ? state->vertical_speed_fpm()
+                                              : 0.0,
+                             ai_out.pitch_cmd, ai_out.roll_cmd,
+                             ai_out.throttle_cmd);
+                ++aar_trace_row_;
+                if ((aar_trace_row_ & 0x3FF) == 0) std::fflush(_aar_trace_fp);
             }
         }
 
@@ -1414,6 +1439,9 @@ private:
     modules::RefuelModule refuel_{};
     bool refuel_armed_{false};
     bool refuel_initialized_{false};
+    /// EMPL-2c — the F4_AAR_TRACE CSV row counter (per brain; rows
+    /// interleave across aircraft in the shared file).
+    std::uint64_t aar_trace_row_{0};
     /// EMPL-2 — the campaign-side receiver eligibility (see the setter).
     bool refuel_eligible_{false};
 
