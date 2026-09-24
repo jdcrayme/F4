@@ -383,6 +383,75 @@ TEST(CampaignBridge, SpawnFromFlightsReceiverRefuelLegGetsJoinStack) {
     EXPECT_EQ(route[5].action, f4::campaign::kWpLand);
 }
 
+TEST(CampaignBridge, SpawnFromFlightsCarriesAimpointFeature) {
+    // EMPL-2d — the save's per-mission AIM-POINT ELEMENT rides the
+    // route: the strike waypoint's `target_building` byte (the feature
+    // index on the target objective) lands on the plan waypoint's
+    // aimpoint_feature verbatim; non-delivery legs carry the wire's
+    // "none" (255).
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 aircraft config fixture not available";
+
+    EntityWorld world;
+
+    auto airbase_h = world.create();
+    auto& airbase_tf = airbase_h.add<TransformComponent>();
+    airbase_tf.position = f4::geo::WorldPosition(0.0, 0.0, 50.0);
+
+    auto sq_h = world.create();
+    auto& sq = sq_h.add<SquadronComponent>();
+    sq.airbase = airbase_h.id();
+    auto& sq_uc = sq_h.add<UnitCoreComponent>();
+    sq_uc.class_table_index = 273;
+
+    auto f_h = world.create();
+    auto& fp = f_h.add<FlightPlanComponent>();
+    fp.squadron = sq_h.id();
+    fp.callsign_id = 1;
+    fp.callsign_num = 1;
+    fp.mission = 13;   // AMIS_INTSTRIKE
+
+    auto& wpc = f_h.add<WaypointPlanComponent>();
+    auto wp = [&](int16_t x, int16_t y, int16_t z, uint8_t action,
+                  uint8_t building) {
+        WaypointState w;
+        w.x = x; w.y = y; w.z = z; w.action = action;
+        w.target_building = building;
+        return w;
+    };
+    wpc.waypoints.push_back(wp(100, 100, 0, f4::campaign::kWpTakeoff, 255));
+    wpc.waypoints.push_back(wp(110, 110, 20, f4::campaign::kWpNothing, 255));
+    // The stick's aim point: feature 7 on the target objective.
+    wpc.waypoints.push_back(wp(120, 120, 20, 17 /*WP_STRIKE*/, 7));
+    wpc.waypoints.push_back(wp(130, 130, 10, f4::campaign::kWpLand, 255));
+
+    ClassTable ct;
+
+    ScenarioAirfield airfield;
+    airfield.runway_heading_rad = 0.0;
+    airfield.threshold_position = f4::geo::WorldPosition(0.0, 5000.0, 50.0);
+    airfield.departure_altitude_ft = 2550.0;
+
+    ScenarioAircraft tpl;
+    tpl.vis_type_index = 1052;
+    tpl.callsign = "EAGLE";
+    tpl.aircraft_config_path = "f16.json";
+
+    auto spawned = spawn_aircraft_from_flights(world, ct, cfg, airfield, tpl);
+    ASSERT_EQ(spawned.size(), 1u);
+
+    EntityHandle h(spawned[0], &world);
+    const auto* brain = h.get<f4::ai::BrainComponent>();
+    ASSERT_NE(brain, nullptr);
+    const auto& route = brain->mission_plan().route;
+    ASSERT_EQ(route.size(), 3u);   // the leading takeoff waypoint drops
+    EXPECT_EQ(route[1].action, 17);
+    EXPECT_EQ(route[1].aimpoint_feature, 7);
+    // Enroute legs carry the wire's "none" sentinel.
+    EXPECT_EQ(route[0].aimpoint_feature, 255);
+    EXPECT_EQ(route[2].aimpoint_feature, 255);
+}
+
 TEST(CampaignBridge, SpawnFromFlightsCreatesOneEntityPerFlight) {
     f4::data::AircraftConfig cfg;
     if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 aircraft config fixture not available";

@@ -5,6 +5,23 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## EMPL-2d — the stick aim-point element: the save's own feature index drives the aim
+
+- **EMPL-2d** — the employment plan's last named open item closes. The
+  wire waypoint's `target_building` byte — the feature index on the
+  target objective the planner meant the stick to destroy — rides the
+  route verbatim (`Waypoint::aimpoint_feature`, 255 = the wire's
+  "none" sentinel; TestCamp carries real indices 0-12), and the
+  brain's aim rule is `resolve_feature_aim`: the indexed feature when
+  in range and alive, else the EMPL-1a first-alive walk (a spent
+  element continues against the objective; no alive feature returns
+  the objective center and the delivery gate aborts). Pure function,
+  unit-tested (`test_strike_aimpoint`, 6 tests) — the pre-2d rule
+  needed a brain/world harness. The live INTSTRIKE run (exit 0) moves
+  the destruction off the first-alive prefix: 9 features under the
+  nominal rule → 6, in the indexed set. `StrikeModule::last_aim()`
+  exposes the resolved aim for the next diagnostic.
+
 ## EMPL-2c — the receiver join stack: 8 complete protocols, served one boom at a time
 
 - **EMPL-2c** — the EMPL-2b residual closes: receivers now WAIT at their

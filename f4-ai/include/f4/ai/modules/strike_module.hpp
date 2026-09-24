@@ -196,6 +196,16 @@ public:
     [[nodiscard]] bool delivered() const noexcept { return delivered_; }
     /// Pulses emitted so far this stick (QC diagnostics).
     [[nodiscard]] int salvo_fired() const noexcept { return salvo_fired_; }
+    /// EMPL-2d — the last aim position update() was driven with (the
+    /// brain's resolved aim point — the objective center, the indexed
+    /// feature, or the first-alive fallback). QC diagnostics + the
+    /// aim-point tests.
+    [[nodiscard]] const geo::WorldPosition& last_aim() const noexcept {
+        return last_aim_;
+    }
+    [[nodiscard]] bool last_aim_valid() const noexcept {
+        return last_aim_valid_;
+    }
     /// True while the trigger is armed (target set, stick incomplete).
     [[nodiscard]] bool armed() const noexcept { return armed_; }
     /// EMPL-1 diagnostics: true once a ground track was differenced.
@@ -224,6 +234,8 @@ private:
     bool   pulse_ = false;
     bool   delivered_ = false;
     int    salvo_fired_ = 0;
+    geo::WorldPosition last_aim_{};
+    bool   last_aim_valid_ = false;
     double since_release_s = -1.0;   // <0 = not in a stick
     double computed_range_ft_ = 0.0;
     double predicted_miss_ft_ = 0.0;

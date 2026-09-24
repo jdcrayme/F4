@@ -102,6 +102,15 @@ public:
         /// action with a resolvable target (the campaign bridge fills this
         /// from the saved waypoint's target VU_ID); 0 otherwise.
         std::uint64_t target_id{0};
+        /// EMPL-2d — the save's own per-mission AIM-POINT ELEMENT: the
+        /// feature index on the target objective the planner meant the
+        /// stick to destroy (the wire waypoint's `target_building`
+        /// byte, carried verbatim). 255 = the wire's "none" sentinel —
+        /// no explicit aim point, the brain falls back to its nominal
+        /// first-alive-feature rule. On the objective's
+        /// FeatureSetComponent, `features[aimpoint_feature]` (in
+        /// range, alive) is THE aim.
+        std::uint8_t aimpoint_feature{255};
 
         /// P7 — the station-hold contract (the racetrack anchor's side):
         /// hold station for this long once captured, looping the next

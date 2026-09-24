@@ -11,6 +11,8 @@ namespace f4::ai::modules {
 void StrikeModule::update(double dt, const flight::IAircraftState* state,
                           const geo::WorldPosition& aim, bool aim_valid) {
     pulse_ = false;
+    last_aim_ = aim;
+    last_aim_valid_ = aim_valid;
 
     if (target_id_ == 0 || state == nullptr) return;
 

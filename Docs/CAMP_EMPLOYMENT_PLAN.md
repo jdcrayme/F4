@@ -8,9 +8,10 @@
 > exit 0 on --expect-aar; see CHANGELOG). EMPL-2c LANDED (the receiver
 > join stack — waiters orbit their rendezvous point, the boom is
 > exclusive per tanker; 8 complete protocols in a 90-sim-minute live
-> run). EMPL-3 LANDED via the QC-ANCHOR
+> run). EMPL-2d LANDED (the stick aim-point element — the save's own
+> feature index drives the aim; §2.6 is fully LANDED, no open items).
+> EMPL-3 LANDED via the QC-ANCHOR
 > tranche (landing_only passes; see CHANGELOG).
-> The open item is the stick aim-point element (§2.6).
 > **Source of Truth**: [FreeFalcon/freefalcon-central](https://github.com/FreeFalcon/freefalcon-central) (develop branch)
 > **Companions**: [MISSION_QC_COOKBOOK.md](MISSION_QC_COOKBOOK.md) (§5's strike gap is
 > this plan's EMPL-1; §9's campaign AAR is EMPL-2), [CAMPAIGN_LOOP_PLAN.md](CAMPAIGN_LOOP_PLAN.md),
@@ -173,9 +174,17 @@ scenario's own directory, so the documented
    carries a strike target) on every aircraft sample. Acceptance met:
    the campaign traces carry the current waypoint on ~110k samples of
    the ladder run; §5-style autopsies stop reading dead fields.
-2. **Stick aim-point element.** The brain's "first alive feature" is the
-   nominal rule; the save's own per-mission aim-point index (the mission
-   element's feature target) replaces it with the mission-element tranche.
+2. ~~**Stick aim-point element.**~~ **LANDED (EMPL-2d).** The brain's
+   aim-point rule is `resolve_feature_aim` (brain_component.hpp): the
+   wire waypoint's `target_building` byte — the feature index on the
+   target objective the planner meant the stick to destroy — rides the
+   route verbatim (`Waypoint::aimpoint_feature`, 255 = the wire's
+   "none"), and the stick aims THERE when the indexed feature is in
+   range and alive; the EMPL-1a first-alive walk remains as the
+   fallback (a spent element continues against the objective). The
+   live INTSTRIKE run moves the destruction off the first-alive
+   prefix (9 features under the nominal rule → 6, in the indexed
+   set), exit 0.
 
 ## 3. EMPL-2 — campaign-path AAR (LANDED)
 

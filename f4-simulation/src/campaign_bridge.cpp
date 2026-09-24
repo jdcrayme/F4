@@ -1427,6 +1427,12 @@ build_mission_plan_from_flight(
                                             kDefaultLegSpeedKts};
         route_wp.action = w.action;
         route_wp.target_id = target_id;
+        // EMPL-2d — the per-mission AIM-POINT ELEMENT rides verbatim
+        // (the wire's `target_building` byte: the feature index on the
+        // target objective the planner meant the stick to destroy; 255
+        // = the wire's "none"). Only delivery waypoints carry real
+        // indices — the brain consults it there.
+        route_wp.aimpoint_feature = w.target_building;
         plan.route.push_back(std::move(route_wp));
     }
 

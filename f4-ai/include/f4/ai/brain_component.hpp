@@ -81,6 +81,39 @@
 namespace f4::ai {
 
 // ============================================================================
+// EMPL-2d — the AIM-POINT RULE (the stick's feature selection). The save's
+// own per-mission aim-point element (the wire waypoint's target_building
+// byte, carried on the route as Waypoint::aimpoint_feature; 255 = the
+// wire's "none") names the feature on the target objective the planner
+// meant the stick to destroy. Selection: the indexed feature when in
+// range and alive (VIS 3 = destroyed — rubble takes no further damage);
+// else the FIRST ALIVE feature — the EMPL-1a nominal rule — a dead aim
+// point means the planner's element is spent and the employment continues
+// against the objective. Pure function so the aim-point contract is unit
+// testable without a brain/world harness.
+// ============================================================================
+[[nodiscard]] inline geo::WorldPosition resolve_feature_aim(
+    const entities::FeatureSetComponent& fs, std::uint8_t aimpoint_feature,
+    geo::WorldPosition base) noexcept {
+    if (aimpoint_feature != 255 && aimpoint_feature < fs.features.size() &&
+        fs.features[aimpoint_feature].damage_state != 3) {
+        base.x += fs.features[aimpoint_feature].offset_x;
+        base.y += fs.features[aimpoint_feature].offset_y;
+        base.z += fs.features[aimpoint_feature].offset_z;
+        return base;
+    }
+    for (const auto& f : fs.features) {
+        if (f.damage_state != 3) {
+            base.x += f.offset_x;
+            base.y += f.offset_y;
+            base.z += f.offset_z;
+            return base;
+        }
+    }
+    return base;
+}
+
+// ============================================================================
 // MissionPlan — what the host (Simulation) injects into the brain at spawn.
 // ============================================================================
 struct MissionPlan {
@@ -698,22 +731,15 @@ public:
                         // grid (no FED data in the fixture world) places
                         // features 156+ ft off the center while the
                         // Mk-82's single-hit envelope is ~144 ft, so a
-                        // center aim can never kill anything. First
-                        // ALIVE feature (VIS 3 = destroyed — rubble
-                        // takes no further damage); deterministic and
-                        // monotone with damage. The save's own
-                        // per-mission aim-point element wiring arrives
-                        // with the mission-element tranche.
+                        // center aim can never kill anything.
+                        // EMPL-2d — the save's own per-mission
+                        // AIM-POINT ELEMENT is the rule now (see
+                        // resolve_feature_aim).
                         if (const auto* fs =
                                 tgt.get<entities::FeatureSetComponent>()) {
-                            for (const auto& f : fs->features) {
-                                if (f.damage_state != 3) {
-                                    aim.x += f.offset_x;
-                                    aim.y += f.offset_y;
-                                    aim.z += f.offset_z;
-                                    break;
-                                }
-                            }
+                            aim = resolve_feature_aim(
+                                *fs, plan_.route[wp_index].aimpoint_feature,
+                                aim);
                         }
                     }
                 }
