@@ -98,6 +98,12 @@ TEST(BrainComponent, TypeIdMatchesBrainComponent) {
 // on_attached — back-ref captured
 // ============================================================================
 TEST(BrainComponent, OnAttachedCapturesOwner) {
+    // The bus is declared BEFORE the world on purpose: it must OUTLIVE
+    // the world, because the world's teardown destroys the brain whose
+    // modules unsubscribe from this bus in their destructors (a bus
+    // declared after the world is destroyed first — a dangling-pointer
+    // unsubscribe, the latent AV behind this suite's SEH failures).
+    MessageBus bus;
     EntityWorld w;
     auto h = w.create();
     [[maybe_unused]] auto& bc = h.add<BrainComponent>();
@@ -109,7 +115,6 @@ TEST(BrainComponent, OnAttachedCapturesOwner) {
     auto& fmc = h.add<FlightModelComponent>();
     (void)fmc;
 
-    MessageBus bus;
     // update() will call module_.initialize() on first tick. Without
     // a StubATC, the brain stays in RequestTaxi and produces idle controls
     // (brakes on, throttle 0). That should write to pending_input.
@@ -126,8 +131,13 @@ TEST(BrainComponent, OnAttachedIsCalledByAdd) {
     // and produces wheel_brakes=true. We check that wheel_brakes is true
     // after update_all — that proves the brain ran, which proves
     // on_attached captured the owner.
-    EntityWorld w;
+    // The bus is declared BEFORE the world on purpose: it must OUTLIVE
+    // the world, because the world's teardown destroys the brain whose
+    // modules unsubscribe from this bus in their destructors (a bus
+    // declared after the world is destroyed first — a dangling-pointer
+    // unsubscribe, the latent AV behind this suite's SEH failures).
     MessageBus bus;
+    EntityWorld w;
     auto h = w.create();
     auto& fmc = h.add<FlightModelComponent>();
     auto& bc  = h.add<BrainComponent>();
@@ -153,8 +163,13 @@ TEST(BrainComponent, OnAttachedIsCalledByAdd) {
 TEST(BrainComponent, UpdateWithNoFlightModelIsNoOp) {
     // A brain on an entity with no FlightModelComponent. update() should
     // early-return without crashing.
-    EntityWorld w;
+    // The bus is declared BEFORE the world on purpose: it must OUTLIVE
+    // the world, because the world's teardown destroys the brain whose
+    // modules unsubscribe from this bus in their destructors (a bus
+    // declared after the world is destroyed first — a dangling-pointer
+    // unsubscribe, the latent AV behind this suite's SEH failures).
     MessageBus bus;
+    EntityWorld w;
     auto h = w.create();
     h.add<BrainComponent>();  // no FM on this entity
 
@@ -167,8 +182,13 @@ TEST(BrainComponent, BrainAddedBeforeFMStillWorks) {
     f4::data::AircraftConfig cfg;
     if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
 
-    EntityWorld w;
+    // The bus is declared BEFORE the world on purpose: it must OUTLIVE
+    // the world, because the world's teardown destroys the brain whose
+    // modules unsubscribe from this bus in their destructors (a bus
+    // declared after the world is destroyed first — a dangling-pointer
+    // unsubscribe, the latent AV behind this suite's SEH failures).
     MessageBus bus;
+    EntityWorld w;
     auto h = w.create();
 
     [[maybe_unused]] auto& bc = h.add<BrainComponent>();   // brain first
@@ -184,8 +204,13 @@ TEST(BrainComponent, BrainAddedAfterFMStillWorks) {
     f4::data::AircraftConfig cfg;
     if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
 
-    EntityWorld w;
+    // The bus is declared BEFORE the world on purpose: it must OUTLIVE
+    // the world, because the world's teardown destroys the brain whose
+    // modules unsubscribe from this bus in their destructors (a bus
+    // declared after the world is destroyed first — a dangling-pointer
+    // unsubscribe, the latent AV behind this suite's SEH failures).
     MessageBus bus;
+    EntityWorld w;
     auto h = w.create();
 
     auto& fmc = h.add<FlightModelComponent>();  // FM first
@@ -211,8 +236,13 @@ TEST(BrainComponent, BrainWritesBeforeFMReads) {
     f4::data::AircraftConfig cfg;
     if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
 
-    EntityWorld w;
+    // The bus is declared BEFORE the world on purpose: it must OUTLIVE
+    // the world, because the world's teardown destroys the brain whose
+    // modules unsubscribe from this bus in their destructors (a bus
+    // declared after the world is destroyed first — a dangling-pointer
+    // unsubscribe, the latent AV behind this suite's SEH failures).
     MessageBus bus;
+    EntityWorld w;
     auto h = w.create();
     auto& fmc = h.add<FlightModelComponent>();
     fmc.init(cfg, 0.0, 0.0, 0.0, false);  // on ground, zero speed
@@ -262,8 +292,13 @@ TEST(BrainComponent, FullTakeoffFlowViaUpdateAll) {
     f4::data::AircraftConfig cfg;
     if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
 
-    EntityWorld w;
+    // The bus is declared BEFORE the world on purpose: it must OUTLIVE
+    // the world, because the world's teardown destroys the brain whose
+    // modules unsubscribe from this bus in their destructors (a bus
+    // declared after the world is destroyed first — a dangling-pointer
+    // unsubscribe, the latent AV behind this suite's SEH failures).
     MessageBus bus;
+    EntityWorld w;
 
     // StubATC must be subscribed BEFORE the brain publishes TaxiRequest.
     StubATC atc(bus);
@@ -304,8 +339,13 @@ TEST(BrainComponent, HostCanConfigureModuleBeforeFirstTick) {
     // The host might want to set rotate_speed_kts, gear_up_alt_ft, etc.
     // before the first update(). The module accessor returns a mutable
     // reference, so this should work.
-    EntityWorld w;
+    // The bus is declared BEFORE the world on purpose: it must OUTLIVE
+    // the world, because the world's teardown destroys the brain whose
+    // modules unsubscribe from this bus in their destructors (a bus
+    // declared after the world is destroyed first — a dangling-pointer
+    // unsubscribe, the latent AV behind this suite's SEH failures).
     MessageBus bus;
+    EntityWorld w;
     auto h = w.create();
     auto& bc = h.add<BrainComponent>();
 
@@ -351,8 +391,13 @@ TEST(BrainComponent, TaxiLineupTakeoffFliesWithRealFlightModel) {
     f4::data::AircraftConfig cfg;
     if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
 
-    EntityWorld w;
+    // The bus is declared BEFORE the world on purpose: it must OUTLIVE
+    // the world, because the world's teardown destroys the brain whose
+    // modules unsubscribe from this bus in their destructors (a bus
+    // declared after the world is destroyed first — a dangling-pointer
+    // unsubscribe, the latent AV behind this suite's SEH failures).
     MessageBus bus;
+    EntityWorld w;
 
     // Airfield: runway 36 north along x=0, threshold at (0, 5000).
     // Taxi route exercises a right turn then a left turn:
