@@ -104,7 +104,7 @@ find_tool() {
     local subdirs=("")
     case "$tool" in
         cam2json|ct2json|wcd2json)     subdirs=("f4-world-convert" "f4-world-convert/cli") ;;
-        terrain2json)                  subdirs=("f4-terrain-convert" "f4-terrain-convert/cli") ;;
+        terrain2json)                  subdirs=("f4-terrain" "f4-terrain/tools") ;;
         f4import)                      subdirs=("f4-import" "f4-import/cli") ;;
         *)                             subdirs=("f4-convert/cli" "f4-convert") ;;
     esac

@@ -41,3 +41,10 @@ add_executable(dump-terrain-textures tools/dump_terrain_textures.cpp)
 target_link_libraries(dump-terrain-textures PRIVATE f4-terrain f4_warnings)
 
 # Paint the 2D map art (L5 posts -> far tiles) + the MEA color map to a
+
+
+# CLI tool: terrain2json <terrain_dir> [out.json] [--name korea] [--data-dir D]
+# (folded in from f4-terrain-convert; the export script and the world
+# viewer's import pipeline spawn it by name).
+add_executable(terrain2json tools/terrain2json.cpp)
+target_link_libraries(terrain2json PRIVATE f4-terrain f4-assets)

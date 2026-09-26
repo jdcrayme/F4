@@ -1,4 +1,4 @@
-// f4-terrain-convert/cli/terrain2json.cpp
+// f4-terrain/tools/terrain2json.cpp
 //
 // CLI: convert FreeFalcon THEATER.* binary files to an open terrain JSON.
 //
@@ -11,7 +11,7 @@
 //     - Writes to   ./Data/Theater/<id>/terrain.json
 //     - Updates     ./Data/manifest.json with a theater:<id> entry
 
-#include <f4/terrain_convert/terrain_converter.hpp>
+#include <f4/terrain/terrain_convert.hpp>
 #include <f4/assets/manifest_writer.hpp>
 #include <f4/assets/manifest.hpp>
 
@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
     try {
         std::error_code mk_ec;
         fs::create_directories(out.parent_path(), mk_ec);
-        const std::size_t bytes = f4::terrain_convert::convert_terrain_dir(terrain_dir, out, theater_name);
+        const std::size_t bytes = f4::terrain::convert_terrain_dir(terrain_dir, out, theater_name);
         std::cout << "wrote " << out << " (" << bytes << " bytes) from " << terrain_dir << "\n";
 
         if (asset_mode) {

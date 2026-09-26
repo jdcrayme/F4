@@ -56,7 +56,6 @@ add_subdirectory(f4-install)      # locates Falcon 4.0 install layout (FALCON4.c
 add_subdirectory(f4-world-convert) # .cam campaign archive -> JSON (keystone)
 add_subdirectory(f4-world)         # typed WorldState -> populates f4-entities
 add_subdirectory(f4-terrain)       # theater terrain (elevation/palette/overlay)
-add_subdirectory(f4-terrain-convert) # THEATER.* -> korea.terrain.json (CLI)
 add_subdirectory(f4-lzss)           # LZSS decompression (TEX blobs, CAM archives)
 add_subdirectory(f4-world-types)   # Tranche 0d: runtime-safe enums + JSON class table (extracted from f4-world-convert)
 add_subdirectory(f4-models)        # KoreaObj.HDR/LOD 3D model database parser
