@@ -83,11 +83,6 @@
 
 namespace f4::simulation {
 
-class Simulation;   // forward — the .cpp includes simulation.hpp; the
-                    // header keeps the include surface minimal (only
-                    // <filesystem> + std). The harness holds a bare
-                    // pointer to the pass's live Simulation.
-
 /// Harness tuning. The scenario carries the fight's SHAPE (aircraft,
 /// teams, spawn positions, combat config, radar_rng_seed, hit_points,
 /// ROE flags, sim_dt, record path); these carry the RUN (how long, how
@@ -251,79 +246,19 @@ public:
     /// to call once; returns the report (also report()).
     const InterceptReport& execute(ProgressFn on_sample = nullptr);
 
-    [[nodiscard]] const InterceptReport& report() const noexcept {
-        return report_;
-    }
+    [[nodiscard]] const InterceptReport& report() const noexcept;
 
 private:
+    friend struct Engine;
+
     BvrInterceptHarness() = default;
 
-    /// One full pass (run index 0..runs-1). Fills report_ fields the
-    /// pass owns: run 0 the diary + checks + recorder json; every run
-    /// its recorder MD5.
-    void run_pass_(int run, const ProgressFn& on_sample);
-
-    /// The sample walk inside run_pass_: collect, check, diary, notify.
-    void sample_(int run);
-
-    /// The two per-sample gates (run 0 only): roster_bounded,
-    /// fight_alive. engagement_completed + deterministic evaluate at
-    /// run end (finalize_).
-    void check_sample_(const InterceptSample& s);
-
-    /// Final verdict derivation (after the last pass): scan run 0's
-    /// combat events for the engagement window + the
-    /// engagement_completed verdict; compare the two recorder MD5s
-    /// for the deterministic verdict.
-    void finalize_();
-
+    /// The src-private engine (chain_engine.hpp): the run skeleton, the
+    /// per-pass state, and the certificate machinery. One execute() per
+    /// harness; a second call re-runs the whole fight from scratch.
+    struct Engine;
+    std::unique_ptr<Engine> engine_;
     InterceptHarnessOptions opts_;
-    InterceptReport report_;
-
-    // --- per-pass state (run_pass_ / sample_ only) ----------------------
-    // The pass's live Simulation. Owned in run_pass_ via unique_ptr;
-    // bare pointer here for sample_/check_sample_ access. Null outside
-    // a pass.
-    Simulation* sim_ = nullptr;
-    double pass_t0_ = 0.0;                 ///< sim time at pass start
-    int pass_initial_entities_ = 0;        ///< EntityWorld::size() at pass start
-    int pass_spawned_ = 0;                 ///< cumulative entities created mid-pass
-    int pass_retired_ = 0;                 ///< cumulative entities destroyed mid-pass
-    int pass_samples_ = 0;                 ///< samples collected this pass
-    double pass_next_sample_t_ = 0.0;      ///< next sample's sim time
-    std::chrono::steady_clock::time_point pass_sample_wall_{};
-
-    // Cumulative combat-event counters observed THIS pass (the recorder
-    // is the source of truth; these mirror it for sample-time checks).
-    int pass_tracks_acquired_ = 0;
-    int pass_tracks_dropped_ = 0;
-    int pass_rwr_locks_ = 0;
-    int pass_rwr_launches_ = 0;
-    int pass_missiles_launched_ = 0;
-    int pass_missiles_detonated_ = 0;
-    int pass_damage_events_ = 0;
-    int pass_kills_ = 0;
-
-    // The previous sample's cumulative counters (for sample_*_delta).
-    InterceptSample pass_prev_{};
-    bool pass_first_sample_ = true;
-
-    // Run 0's combat events (copied from the recorder at finalize_).
-    // Used to derive the engagement window + the engagement_completed
-    // verdict. Stored as raw event fields (the harness does NOT link
-    // f4-recorder's CombatEvent type at the header level — the
-    // forward declaration keeps the include surface minimal).
-    struct EventRow {
-        std::uint64_t tick;
-        double sim_time_s;
-        int kind;             // CombatEventKind as int (0..10)
-        std::uint64_t subject_id;
-        std::uint64_t object_id;
-        std::uint64_t missile_id;
-        std::string end_cause;
-        std::string weapon_name;
-    };
-    std::vector<EventRow> run0_events_;
 };
 
 } // namespace f4::simulation

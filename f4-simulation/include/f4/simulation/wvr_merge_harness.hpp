@@ -97,9 +97,6 @@
 
 namespace f4::simulation {
 
-class Simulation;   // forward — the .cpp includes simulation.hpp (the
-                    // M4 header's include-surface discipline)
-
 /// Harness tuning. The scenario carries the fight's SHAPE (aircraft,
 /// teams, spawn geometry, combat config, radar_rng_seed, ROE flags,
 /// sim_dt); these carry the RUN. Mirrors InterceptHarnessOptions.
@@ -256,68 +253,16 @@ public:
     /// Run the fight (opts.runs passes) and derive the verdicts.
     const WvrMergeReport& execute(ProgressFn on_sample = nullptr);
 
-    [[nodiscard]] const WvrMergeReport& report() const noexcept {
-        return report_;
-    }
+        [[nodiscard]] const WvrMergeReport& report() const noexcept;
 
 private:
     WvrMergeHarness() = default;
 
-    /// One full pass (run index 0..runs-1).
-    void run_pass_(int run, const ProgressFn& on_sample);
-
-    /// The sample walk inside run_pass_.
-    void sample_(int run);
-
-    /// The per-sample gates (run 0 only): roster_bounded, the pre-engage
-    /// side of fight_alive.
-    void check_sample_(const WvrMergeSample& s);
-
-    /// Final verdict derivation (after the last pass).
-    void finalize_();
-
+    /// The src-private engine (chain_engine.hpp): the run skeleton, the
+    /// per-pass state, and the certificate machinery.
+    struct Engine;
+    std::unique_ptr<Engine> engine_;
     WvrMergeHarnessOptions opts_;
-    WvrMergeReport report_;
-
-    // --- per-pass state ---------------------------------------------------
-    Simulation* sim_ = nullptr;
-    double pass_t0_ = 0.0;
-    int pass_initial_entities_ = 0;
-    int pass_spawned_ = 0;
-    int pass_retired_ = 0;
-    int pass_samples_ = 0;
-    double pass_next_sample_t_ = 0.0;
-    std::chrono::steady_clock::time_point pass_sample_wall_{};
-
-    // Cumulative combat-event counters observed THIS pass.
-    int pass_tracks_acquired_ = 0;
-    int pass_tracks_dropped_ = 0;
-    int pass_rwr_locks_ = 0;
-    int pass_rwr_launches_ = 0;
-    int pass_missiles_launched_ = 0;
-    int pass_missiles_detonated_ = 0;
-    int pass_damage_events_ = 0;
-    int pass_kills_ = 0;
-    int pass_gun_bursts_ = 0;
-    int pass_wvr_engagements_ = 0;
-
-    // The previous sample's cumulative counters (for sample_*_delta).
-    WvrMergeSample pass_prev_{};
-    bool pass_first_sample_ = true;
-
-    // Run 0's combat events (copied from the recorder at run end — the
-    // EventRow shape keeps f4-recorder out of the header).
-    struct EventRow {
-        std::uint64_t tick;
-        double sim_time_s;
-        int kind;             // CombatEventKind as int (0..12)
-        std::uint64_t subject_id;
-        std::uint64_t object_id;
-        std::uint64_t missile_id;
-        std::string end_cause;
-        std::string weapon_name;
-    };
-    std::vector<EventRow> run0_events_;
 };
 
 } // namespace f4::simulation
