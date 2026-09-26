@@ -1,4 +1,4 @@
-// f4-xml/include/f4/xml/f4_xml.hpp
+// third_party/pugixml/f4/xml/f4_xml.hpp
 //
 // PUBLIC HEADER — umbrella for f4-xml, the project's shared XML parser.
 //
