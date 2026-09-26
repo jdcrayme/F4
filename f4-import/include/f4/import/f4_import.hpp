@@ -6,5 +6,5 @@
 #pragma once
 
 #include <f4/import/doctor.hpp>
-#include <f4/import/manifest_writer.hpp>
+#include <f4/assets/manifest_writer.hpp>
 #include <f4/import/gltf_emitter.hpp>

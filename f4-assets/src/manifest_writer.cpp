@@ -1,6 +1,6 @@
 // f4-import/src/manifest_writer.cpp
 
-#include <f4/import/manifest_writer.hpp>
+#include <f4/assets/manifest_writer.hpp>
 #include <f4/assets/manifest.hpp>
 #include <f4/assets/hash.hpp>
 
@@ -9,7 +9,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace f4::import {
+namespace f4::assets {
 
 std::string to_lower_ascii(std::string_view s) {
     std::string out(s);
@@ -111,4 +111,4 @@ f4::assets::AssetId theater_id_from_name(const std::string& name) {
                                 to_lower_ascii(name)};
 }
 
-} // namespace f4::import
+} // namespace f4::assets

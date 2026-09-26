@@ -25,7 +25,7 @@
 #include <f4/world_convert/world_json.hpp>
 #include <f4/world_convert/class_table.hpp>
 #include <f4/world_convert/theater_data.hpp>
-#include <f4/import/manifest_writer.hpp>
+#include <f4/assets/manifest_writer.hpp>
 #include <f4/io/read_file.hpp>
 
 #include <cstdio>
@@ -114,13 +114,13 @@ int main(int argc, char** argv) {
     }
 
     if (asset_mode) {
-        const auto campaign_id = f4::import::campaign_id_from_cam_path(in);
+        const auto campaign_id = f4::assets::campaign_id_from_cam_path(in);
         if (!campaign_id.valid()) {
             std::cerr << "cam2json: --data-dir: cannot derive campaign id from "
                       << in << "\n";
             return 2;
         }
-        const auto theater_id = f4::import::theater_id_from_name(opts.theater);
+        const auto theater_id = f4::assets::theater_id_from_name(opts.theater);
         out = data_dir / "World" / (campaign_id.local_id + ".world.json");
         if (opts.terrain_file == "korea.terrain.json") {
             opts.terrain_file = "@asset:" + theater_id.to_string();
@@ -214,8 +214,8 @@ int main(int argc, char** argv) {
         }
 
         if (asset_mode) {
-            const auto campaign_id = f4::import::campaign_id_from_cam_path(in);
-            const auto theater_id = f4::import::theater_id_from_name(opts.theater);
+            const auto campaign_id = f4::assets::campaign_id_from_cam_path(in);
+            const auto theater_id = f4::assets::theater_id_from_name(opts.theater);
             std::vector<f4::assets::AssetSource> campaign_sources;
             campaign_sources.push_back({
                 /*path=*/in.string(), /*role=*/"campaign", /*sha256=*/""});
@@ -226,7 +226,7 @@ int main(int argc, char** argv) {
             campaign_caps.push_back({"pilot_files", f4::assets::CapabilityStatus::unknown, {}});
 
             const std::string rel_path = "World/" + campaign_id.local_id + ".world.json";
-            (void)f4::import::update_manifest_for_asset(
+            (void)f4::assets::update_manifest_for_asset(
                 data_dir,
                 campaign_id,
                 rel_path,
@@ -234,9 +234,9 @@ int main(int argc, char** argv) {
                 std::move(campaign_caps),
                 std::move(campaign_sources),
                 /*generator=*/"cam2json (f4import 0.4.0)");
-            f4::assets::Manifest m = f4::import::load_or_create_manifest(data_dir);
+            f4::assets::Manifest m = f4::assets::load_or_create_manifest(data_dir);
             if (!m.find(theater_id)) {
-                f4::import::upsert_asset(
+                f4::assets::upsert_asset(
                     m, theater_id,
                     "Theater/" + theater_id.local_id + "/theater.json",
                     /*format_version=*/1,

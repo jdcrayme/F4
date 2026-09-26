@@ -6,7 +6,7 @@
 // the geometry + node-tag metadata.
 
 #include <f4/import/gltf_emitter.hpp>
-#include <f4/import/manifest_writer.hpp>
+#include <f4/assets/manifest_writer.hpp>
 #include <f4/import/doctor.hpp>
 #include <f4/assets/manifest.hpp>
 #include <f4/gltf/f4_gltf.hpp>

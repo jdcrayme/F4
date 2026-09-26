@@ -1,4 +1,4 @@
-// f4-import/include/f4/import/manifest_writer.hpp
+// f4-import/include/f4/assets/manifest_writer.hpp
 //
 // Helpers used by the importers (cam2json, terrain2json, future f4import
 // subcommands) to write manifest entries as a side effect of a successful
@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace f4::import {
+namespace f4::assets {
 
 [[nodiscard]] f4::assets::Manifest load_or_create_manifest(
     const std::filesystem::path& data_dir);
@@ -40,4 +40,4 @@ void upsert_asset(f4::assets::Manifest& m,
 
 [[nodiscard]] std::string to_lower_ascii(std::string_view s);
 
-} // namespace f4::import
+} // namespace f4::assets

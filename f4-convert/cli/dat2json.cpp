@@ -13,7 +13,7 @@
 
 #include <f4/assets/asset_id.hpp>
 #include <f4/assets/manifest.hpp>
-#include <f4/import/manifest_writer.hpp>
+#include <f4/assets/manifest_writer.hpp>
 #include "f4/convert/dat_parser.hpp"
 #include "f4/convert/json_io.hpp"
 
@@ -74,11 +74,11 @@ int main(int argc, char** argv) {
             try {
                 std::vector<f4::assets::AssetSource> sources;
                 sources.push_back({inputPath, "ACDATA", ""});
-                (void)f4::import::update_manifest_for_asset(
+                (void)f4::assets::update_manifest_for_asset(
                     data_dir,
                     f4::assets::AssetId{
                         f4::assets::AssetFamily::aircraft,
-                        f4::import::to_lower_ascii(output.stem().string())},
+                        f4::assets::to_lower_ascii(output.stem().string())},
                     "Aircraft/" + output.filename().string(),
                     /*format_version=*/1,
                     /*capabilities=*/{},

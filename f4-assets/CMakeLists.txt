@@ -21,6 +21,7 @@ add_library(f4-assets STATIC
     src/hash.cpp
     src/manifest.cpp
     src/asset_root.cpp
+    src/manifest_writer.cpp
 )
 target_link_libraries(f4-assets PUBLIC f4_warnings f4-json)
 

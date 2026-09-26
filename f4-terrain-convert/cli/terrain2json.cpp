@@ -12,7 +12,7 @@
 //     - Updates     ./Data/manifest.json with a theater:<id> entry
 
 #include <f4/terrain_convert/terrain_converter.hpp>
-#include <f4/import/manifest_writer.hpp>
+#include <f4/assets/manifest_writer.hpp>
 #include <f4/assets/manifest.hpp>
 
 #include <cstdio>
@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
     }
 
     if (asset_mode) {
-        const auto theater_id = f4::import::theater_id_from_name(theater_name);
+        const auto theater_id = f4::assets::theater_id_from_name(theater_name);
         if (!theater_id.valid()) {
             std::cerr << "terrain2json: --data-dir: invalid theater name '"
                       << theater_name << "'\n";
@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
         std::cout << "wrote " << out << " (" << bytes << " bytes) from " << terrain_dir << "\n";
 
         if (asset_mode) {
-            const auto theater_id = f4::import::theater_id_from_name(theater_name);
+            const auto theater_id = f4::assets::theater_id_from_name(theater_name);
             const std::string rel_path = "Theater/" + theater_id.local_id + "/terrain.json";
             std::vector<f4::assets::Capability> caps;
             caps.push_back({"map",        f4::assets::CapabilityStatus::present, {}});
@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
                                        /*sha256=*/""});
                 }
             }
-            (void)f4::import::update_manifest_for_asset(
+            (void)f4::assets::update_manifest_for_asset(
                 data_dir, theater_id, rel_path,
                 /*format_version=*/1,
                 std::move(caps), std::move(sources),

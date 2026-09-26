@@ -49,7 +49,7 @@ target_link_libraries(f4-world-convert PRIVATE f4-lzss f4-install f4-io f4-json)
 
 # CLI tool
 add_executable(cam2json cli/cam2json.cpp)
-target_link_libraries(cam2json PRIVATE f4-world-convert f4-import f4-io)
+target_link_libraries(cam2json PRIVATE f4-world-convert f4-assets f4-io)
 
 # CLI tool: json2cam — reassemble a .cam from a world JSON produced by
 # `cam2json --preserve-subfiles` (the save-write round-trip). The JSON

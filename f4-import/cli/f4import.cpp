@@ -19,7 +19,7 @@
 #include <f4/assets/manifest.hpp>
 #include <f4/import/doctor.hpp>
 #include <f4/import/gltf_emitter.hpp>
-#include <f4/import/manifest_writer.hpp>
+#include <f4/assets/manifest_writer.hpp>
 #include <f4/import/texture_png.hpp>
 #include <f4/import/vocab.hpp>
 #include <f4/models/model_database.hpp>
@@ -364,7 +364,7 @@ int run_models(int argc, char** argv) {
 
                 std::string rel_path = "Models/koreaobj/" +
                     std::string(id_buf + 9) + ".gltf";  // "00002.gltf"
-                (void)f4::import::update_manifest_for_asset(
+                (void)f4::assets::update_manifest_for_asset(
                     data_dir,
                     f4::assets::AssetId{f4::assets::AssetFamily::koreaobj,
                                          std::string(id_buf + 9)},
@@ -487,7 +487,7 @@ int run_textures(int argc, char** argv) {
                 sources.push_back({hdr_path.string(), "art", ""});
 
                 std::string rel_path = "Models/koreaobj/textures/" + std::string(id_buf);
-                (void)f4::import::update_manifest_for_asset(
+                (void)f4::assets::update_manifest_for_asset(
                     data_dir,
                     f4::assets::AssetId{f4::assets::AssetFamily::koreaobj,
                                          std::string(id_buf)},

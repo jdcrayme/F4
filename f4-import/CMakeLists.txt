@@ -22,7 +22,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(f4-import STATIC
     src/vocab.cpp
     src/doctor.cpp
-    src/manifest_writer.cpp
     src/gltf_emitter.cpp
     src/texture_png.cpp
     # The single TU instantiating the vendored stb_image_write (PNG encode).
