@@ -1215,6 +1215,27 @@ void CampaignSession::evaluate_tiers_() {
 // ---------------------------------------------------------------------------
 // CAMP-HOST-2 — the event pump (see the header's block comment)
 // ---------------------------------------------------------------------------
+// The event pump's tail discipline, in one place: publish one event per
+// record of a ledger log's un-consumed tail (arrival order), then move
+// the cursor to the log's end. The per-record payload mapping is the
+// caller's lambda. Cursor members stay session state — they survive
+// across ticks; only the walk is shared.
+// ---------------------------------------------------------------------------
+namespace {
+
+template <class Log, class Fill>
+void publish_log_tail(f4::messaging::MessageBus& bus, std::size_t& cursor,
+                      const Log& log, Fill&& fill) {
+    for (auto i = cursor; i < log.size(); ++i) {
+        f4::campaign::api::CampaignEvent e;
+        fill(log[i], e);
+        bus.publish(e);
+    }
+    cursor = log.size();
+}
+
+} // namespace
+
 
 void CampaignSession::emit_mission_filed_(
     const f4::campaign::MissionIntent& intent) {
@@ -1281,16 +1302,14 @@ void CampaignSession::emit_cadence_events_() {
 void CampaignSession::emit_capture_events_() {
     namespace api = f4::campaign::api;
     const auto& clog = ledger_->objective_captures();
-    for (auto i = last_capture_record_; i < clog.size(); ++i) {
-        api::CampaignEvent e;
-        e.kind = api::CampaignEvent::Kind::ObjectiveCaptured;
-        e.objective_captured.t =
-            static_cast<std::int64_t>(std::llround(clog[i].t_s));
-        e.objective_captured.objective_id = clog[i].objective;
-        e.objective_captured.new_owner = clog[i].to_team;
-        sim_->bus().publish(e);
-    }
-    last_capture_record_ = clog.size();
+    publish_log_tail(sim_->bus(), last_capture_record_, clog,
+                     [](const auto& r, api::CampaignEvent& e) {
+                         e.kind = api::CampaignEvent::Kind::ObjectiveCaptured;
+                         e.objective_captured.t =
+                             static_cast<std::int64_t>(std::llround(r.t_s));
+                         e.objective_captured.objective_id = r.objective;
+                         e.objective_captured.new_owner = r.to_team;
+                     });
 }
 
 void CampaignSession::emit_repair_events_() {
@@ -1373,22 +1392,20 @@ void CampaignSession::emit_action_filed_events_() {
     // for this whole-second block, so the stream's order stays the
     // engine's: the cycle fired, THEN its filings name themselves.
     const auto& alog = ledger_->action_filing_log();
-    for (auto i = last_action_record_; i < alog.size(); ++i) {
-        api::CampaignEvent e;
-        e.kind = api::CampaignEvent::Kind::ActionFiled;
-        e.action_filed.t =
-            static_cast<std::int64_t>(std::llround(alog[i].t_s));
-        e.action_filed.team = alog[i].team;
-        e.action_filed.mission_byte = alog[i].mission;
-        e.action_filed.mission_name =
-            std::string(f4::campaign::mission_type_name(alog[i].mission));
-        e.action_filed.action_type = alog[i].action_type;
-        e.action_filed.context = alog[i].context;
-        e.action_filed.objective_id = alog[i].objective;
-        e.action_filed.damage_pct = alog[i].damage_pct;
-        sim_->bus().publish(e);
-    }
-    last_action_record_ = alog.size();
+    publish_log_tail(sim_->bus(), last_action_record_, alog,
+                     [](const auto& r, api::CampaignEvent& e) {
+                         e.kind = api::CampaignEvent::Kind::ActionFiled;
+                         e.action_filed.t =
+                             static_cast<std::int64_t>(std::llround(r.t_s));
+                         e.action_filed.team = r.team;
+                         e.action_filed.mission_byte = r.mission;
+                         e.action_filed.mission_name = std::string(
+                             f4::campaign::mission_type_name(r.mission));
+                         e.action_filed.action_type = r.action_type;
+                         e.action_filed.context = r.context;
+                         e.action_filed.objective_id = r.objective;
+                         e.action_filed.damage_pct = r.damage_pct;
+                     });
 }
 
 void CampaignSession::emit_pilot_events_() {
@@ -1400,47 +1417,41 @@ void CampaignSession::emit_pilot_events_() {
     // the mission-recovery pass (a crewed flight came home). The event
     // IS the books' face — no session-side state beyond the cursors.
     const auto& asign = ledger_->pilot_assignment_log();
-    for (auto i = last_pilot_assignment_record_; i < asign.size(); ++i) {
-        api::CampaignEvent e;
-        e.kind = api::CampaignEvent::Kind::PilotAssigned;
-        e.pilot_assigned.t =
-            static_cast<std::int64_t>(std::llround(asign[i].t_s));
-        e.pilot_assigned.team = asign[i].team;
-        e.pilot_assigned.squadron = asign[i].squadron;
-        e.pilot_assigned.flight = asign[i].flight;
-        e.pilot_assigned.pilots = asign[i].crew;
-        sim_->bus().publish(e);
-    }
-    last_pilot_assignment_record_ = asign.size();
+    publish_log_tail(sim_->bus(), last_pilot_assignment_record_, asign,
+                     [](const auto& r, api::CampaignEvent& e) {
+                         e.kind = api::CampaignEvent::Kind::PilotAssigned;
+                         e.pilot_assigned.t =
+                             static_cast<std::int64_t>(std::llround(r.t_s));
+                         e.pilot_assigned.team = r.team;
+                         e.pilot_assigned.squadron = r.squadron;
+                         e.pilot_assigned.flight = r.flight;
+                         e.pilot_assigned.pilots = r.crew;
+                     });
 
     const auto& lost = ledger_->pilot_loss_log();
-    for (auto i = last_pilot_loss_record_; i < lost.size(); ++i) {
-        api::CampaignEvent e;
-        e.kind = api::CampaignEvent::Kind::PilotLost;
-        e.pilot_lost.t =
-            static_cast<std::int64_t>(std::llround(lost[i].t_s));
-        e.pilot_lost.team = lost[i].team;
-        e.pilot_lost.squadron = lost[i].squadron;
-        e.pilot_lost.flight = lost[i].flight;
-        e.pilot_lost.pilot = lost[i].slot;
-        sim_->bus().publish(e);
-    }
-    last_pilot_loss_record_ = lost.size();
+    publish_log_tail(sim_->bus(), last_pilot_loss_record_, lost,
+                     [](const auto& r, api::CampaignEvent& e) {
+                         e.kind = api::CampaignEvent::Kind::PilotLost;
+                         e.pilot_lost.t =
+                             static_cast<std::int64_t>(std::llround(r.t_s));
+                         e.pilot_lost.team = r.team;
+                         e.pilot_lost.squadron = r.squadron;
+                         e.pilot_lost.flight = r.flight;
+                         e.pilot_lost.pilot = r.slot;
+                     });
 
     const auto& rec = ledger_->pilot_recovery_log();
-    for (auto i = last_pilot_recovery_record_; i < rec.size(); ++i) {
-        api::CampaignEvent e;
-        e.kind = api::CampaignEvent::Kind::PilotRecovered;
-        e.pilot_recovered.t =
-            static_cast<std::int64_t>(std::llround(rec[i].t_s));
-        e.pilot_recovered.team = rec[i].team;
-        e.pilot_recovered.squadron = rec[i].squadron;
-        e.pilot_recovered.flight = rec[i].flight;
-        e.pilot_recovered.pilot = rec[i].slot;
-        e.pilot_recovered.missions_run = rec[i].missions_run;
-        sim_->bus().publish(e);
-    }
-    last_pilot_recovery_record_ = rec.size();
+    publish_log_tail(sim_->bus(), last_pilot_recovery_record_, rec,
+                     [](const auto& r, api::CampaignEvent& e) {
+                         e.kind = api::CampaignEvent::Kind::PilotRecovered;
+                         e.pilot_recovered.t =
+                             static_cast<std::int64_t>(std::llround(r.t_s));
+                         e.pilot_recovered.team = r.team;
+                         e.pilot_recovered.squadron = r.squadron;
+                         e.pilot_recovered.flight = r.flight;
+                         e.pilot_recovered.pilot = r.slot;
+                         e.pilot_recovered.missions_run = r.missions_run;
+                     });
 }
 
 void CampaignSession::emit_slot_denied_events_() {
@@ -1450,17 +1461,15 @@ void CampaignSession::emit_slot_denied_events_() {
     // scheduling arm is on (the Campaign's drain gates the booking),
     // so a disarmed session's stream stays the pre-DOM-4 shape.
     const auto& dlog = ledger_->slot_denial_log();
-    for (auto i = last_slot_denial_record_; i < dlog.size(); ++i) {
-        api::CampaignEvent e;
-        e.kind = api::CampaignEvent::Kind::SlotDenied;
-        e.slot_denied.t =
-            static_cast<std::int64_t>(std::llround(dlog[i].t_s));
-        e.slot_denied.team = dlog[i].team;
-        e.slot_denied.airbase = dlog[i].airbase;
-        e.slot_denied.reason = dlog[i].reason;
-        sim_->bus().publish(e);
-    }
-    last_slot_denial_record_ = dlog.size();
+    publish_log_tail(sim_->bus(), last_slot_denial_record_, dlog,
+                     [](const auto& r, api::CampaignEvent& e) {
+                         e.kind = api::CampaignEvent::Kind::SlotDenied;
+                         e.slot_denied.t =
+                             static_cast<std::int64_t>(std::llround(r.t_s));
+                         e.slot_denied.team = r.team;
+                         e.slot_denied.airbase = r.airbase;
+                         e.slot_denied.reason = r.reason;
+                     });
 }
 
 void CampaignSession::emit_damage_events_() {
