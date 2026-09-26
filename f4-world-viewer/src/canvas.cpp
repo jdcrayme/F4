@@ -15,6 +15,8 @@
 #include <f4/ai/brain_component.hpp>      // V-CAMP: MissionPlan routes
 #include <f4/flight/flight_model_component.hpp>  // V-CAMP: airborne state
 #include <f4/campaign/api/session.hpp>     // CAMP-HOST-3: the contract plane
+#include <f4/campaign/route_builder.hpp>   // the WP_* wire actions (the
+                                           // route-tail split below)
 
 #include <imgui.h>
 
@@ -594,7 +596,35 @@ void ViewerApp::draw_canvas() {
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
                 255};
-            f4::renderer::RenderEntityIcon(h, p.x, p.y, base_size, c, outline);
+            // The affiliation/troop distinction (2026-09 review): the
+            // save's owner bytes are TERRITORIAL claims — supply,
+            // capture history, victory — and stock saves carry claims
+            // no troop ever earned (TestCamp: 361 DPRK-owned
+            // objectives south of the ROK army). A SOLID owner fill
+            // means the owner keeps a garrisoned battalion beside it
+            // (the same troop-gate stamp the FLOT draws); an
+            // un-garrisoned objective renders HOLLOW and dimmed —
+            // ownership without a position.
+            bool defended = true;
+            if (impl_->session) {
+                if (const auto* gw =
+                        impl_->session->engine().ground_war()) {
+                    defended = gw->objective_defended(
+                        static_cast<std::uint32_t>(
+                            impl_->pb_int(pb, "vu_id_num", 0)));
+                }
+            }
+            if (defended) {
+                f4::renderer::RenderEntityIcon(h, p.x, p.y, base_size, c,
+                                               outline);
+            } else {
+                const RlColor dim{static_cast<unsigned char>(c.r * 0.5f),
+                                  static_cast<unsigned char>(c.g * 0.5f),
+                                  static_cast<unsigned char>(c.b * 0.5f),
+                                  70};
+                f4::renderer::RenderEntityIcon(h, p.x, p.y, base_size, dim,
+                                               outline, /*filled=*/false);
+            }
             if (pri && pri->priority >= 40) {
                 const float ring_r = base_size * 0.5f + 3.0f;
                 const Color ring = (pri->priority >= 70)
@@ -821,17 +851,44 @@ void ViewerApp::draw_canvas() {
 
             // Waypoint polyline — selected unit, the selected squadron's
             // flights, or every unit when "all flight plans" is on.
+            //
+            // The saved route rides past its mission: after the first
+            // WP_LAND (the recovery at home plate) the wire often
+            // carries the REFUEL hook and the DIVERT leg to the
+            // alternate field. Drawing that tail like mission legs is
+            // what made "all flight plans" read as spaghetti — every
+            // flight appeared to fly objective → home → somewhere else.
+            // The mission legs draw for everyone; the post-recovery
+            // tail draws ONLY for the selected flight, muted, with the
+            // divert endpoint marked.
             if (unit_selected || squadron_selected ||
                 impl_->show_all_routes) {
                 auto* wp = h.get<f4::entities::WaypointPlanComponent>();
                 if (wp && !wp->waypoints.empty()) {
                     Vector2 prev = p;
+                    bool have_land = false;
                     for (const auto& w : wp->waypoints) {
                         const Vector2 q = impl_->world_to_screen(
                             static_cast<float>(w.x), static_cast<float>(w.y));
-                        DrawLineEx(prev, q, unit_selected ? 2.0f : 1.0f,
-                                   Color{c.r, c.g, c.b, 200});
-                        DrawCircleV(q, 2.0f, Color{c.r, c.g, c.b, 220});
+                        if (have_land) {
+                            // The post-recovery tail: selected flight
+                            // only, muted, no waypoint dots except the
+                            // divert endpoint.
+                            if (unit_selected) {
+                                DrawLineEx(prev, q, 1.0f,
+                                           Color{c.r, c.g, c.b, 80});
+                                DrawCircleV(
+                                    q, 2.0f,
+                                    Color{c.r, c.g, c.b, 110});
+                            }
+                        } else {
+                            DrawLineEx(prev, q, unit_selected ? 2.0f : 1.0f,
+                                       Color{c.r, c.g, c.b, 200});
+                            DrawCircleV(q, 2.0f, Color{c.r, c.g, c.b, 220});
+                        }
+                        if (w.action == f4::campaign::kWpLand && !have_land) {
+                            have_land = true;   // the recovery at home
+                        }
                         prev = q;
                     }
                 }

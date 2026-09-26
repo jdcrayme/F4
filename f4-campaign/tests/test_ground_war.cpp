@@ -259,34 +259,43 @@ TEST(GroundWar, SecondWarPairStandsDownWhileTheFirstFights) {
 
 TEST(GroundWar, FrontLineResolvesBetweenTheSides) {
     auto rig = Rig::make(fast_cfg(), [&](WorldState& w) {
-        // A battalion on each side so orders fire over a live army (the
-        // front rebuilds on the orders cadence).
+        // A stationary battalion on each side per objective column —
+        // the two lines 6-10 rows apart, INSIDE the contact range (the
+        // front is the line between the closest opposing battalions;
+        // the contact gate keeps dispositions off it). Immobile (the
+        // AD stype): the front test pins exact geometry, so nobody
+        // marches. The front rebuilds at construction.
         w.units = {
-            battalion(1101, 2, kStMechanized, 60, 90, kRoster12, 360),
-            battalion(1102, 6, kStArmor, 60, 110, kRoster12, 360),
+            battalion(1101, 2, kStAirDefense, 60, 100, kRoster12),
+            battalion(1102, 6, kStAirDefense, 60, 110, kRoster12),
+            battalion(1103, 2, kStAirDefense, 50, 100, kRoster12),
+            battalion(1104, 6, kStAirDefense, 50, 110, kRoster12),
+            battalion(1105, 2, kStAirDefense, 70, 102, kRoster12),
+            battalion(1106, 6, kStAirDefense, 70, 108, kRoster12),
         };
     });
     rig->war->tick(10);
 
-    // The rig's geography: ROK holds y 90, DPRK y 110, objectives at
-    // columns 50/60/70, plus a NEUTRAL objective at x 200 (the extent
-    // widener — flank columns are uncontested). The front spans the
-    // whole objective x extent (151 columns); the contested run is the
-    // three ±3 bands (50-53, 57-63, 67-73 = 18 columns), and the front
-    // row there is the midpoint: (90 + 110) / 2 = 100.
-    ASSERT_EQ(rig->war->front_line().size(), std::size_t{151});
-    EXPECT_EQ(rig->war->stats().front_columns, 18);
-    const auto& col50 = rig->war->front_line()[0];
-    EXPECT_EQ(col50.x, 50);
-    EXPECT_TRUE(col50.contested);
-    EXPECT_EQ(col50.y, 100);
-    EXPECT_EQ(col50.south_owner, 2);   // centroid-y rule: ROK south
-    EXPECT_EQ(col50.north_owner, 6);
-    // The neutral flank (x 200): contested is false, the owners still
-    // carry the pair identity (the viewer's labels).
-    const auto& flank = rig->war->front_line().back();
-    EXPECT_EQ(flank.x, 200);
-    EXPECT_FALSE(flank.contested);
+    // The battalions span columns 50..70 (21 columns). The ±3 bands
+    // of the three massed columns carry a within-contact pair — bands
+    // 47-53, 57-63, 67-73 clipped to the span: contested columns are
+    // 50-53, 57-63, 67-70 (15), all at the midpoint of a 6-10 row
+    // pair → (100+110)/2 = 105 and (102+108)/2 = 105. The gap columns
+    // (54-56, 64-66) have no pair in band: not a front.
+    ASSERT_EQ(rig->war->front_line().size(), std::size_t{21});
+    EXPECT_EQ(rig->war->stats().front_columns, 15);
+    for (const auto& col : rig->war->front_line()) {
+        if ((col.x >= 50 && col.x <= 53) ||
+            (col.x >= 57 && col.x <= 63) ||
+            (col.x >= 67 && col.x <= 70)) {
+            EXPECT_TRUE(col.contested) << "column " << col.x;
+            EXPECT_EQ(col.y, 105) << "column " << col.x;
+        } else {
+            EXPECT_FALSE(col.contested) << "column " << col.x;
+        }
+    }
+    EXPECT_EQ(rig->war->front_line()[0].south_owner, 2);  // ROK south
+    EXPECT_EQ(rig->war->front_line()[0].north_owner, 6);
 }
 
 // ── 2. Movement ────────────────────────────────────────────────────────────
@@ -426,13 +435,21 @@ TEST(GroundWar, UndefendedObjectiveFlipsToTheAttacker) {
     ASSERT_NE(obj, rig->war->objectives().end());
     EXPECT_EQ(obj->owner, 2) << "the objective flipped to ROK";
 
-    // The capture book.
-    ASSERT_EQ(rig->ledger->objective_captures().size(), 1u);
-    const auto& c = rig->ledger->objective_captures().front();
-    EXPECT_EQ(c.objective, 202u);
-    EXPECT_EQ(c.from_team, 6);
-    EXPECT_EQ(c.to_team, 2);
-    EXPECT_EQ(c.by_battalion, 3001u);
+    // The capture book: 202 CAPTURED by the battalion; the rig's other
+    // two DPRK objectives (201/203 — un-defended, no DPRK battalion in
+    // the world) CONSOLIDATE to ROK the same update (the deep-pocket
+    // rule). Three records total; the capture's own fields pinned.
+    ASSERT_EQ(rig->ledger->objective_captures().size(), 3u);
+    const auto cap202 = std::find_if(
+        rig->ledger->objective_captures().begin(),
+        rig->ledger->objective_captures().end(),
+        [](const ObjectiveCaptureRecord& r) { return r.objective == 202; });
+    ASSERT_NE(cap202, rig->ledger->objective_captures().end());
+    EXPECT_EQ(cap202->from_team, 6);
+    EXPECT_EQ(cap202->to_team, 2);
+    EXPECT_EQ(cap202->by_battalion, 3001u);
+    EXPECT_EQ(rig->war->stats().captures, 1);
+    EXPECT_EQ(rig->war->stats().consolidations, 2);
 
     // The capturer garrisons its prize (it keeps the target).
     EXPECT_EQ(rig->war->units()[0].target, 202u);
@@ -454,7 +471,95 @@ TEST(GroundWar, DefendedObjectiveDoesNotFlip) {
         [](const GroundObjectiveState& o) { return o.vu == 202; });
     ASSERT_NE(obj, rig->war->objectives().end());
     EXPECT_EQ(obj->owner, 6) << "the defender held";
-    EXPECT_TRUE(rig->ledger->objective_captures().empty());
+    // The capture ladder stayed out of it; consolidation never books a
+    // record against a garrisoned holding (any records present are the
+    // deep-pocket flips elsewhere in the rig — none touch 202).
+    for (const auto& c : rig->ledger->objective_captures()) {
+        EXPECT_NE(c.objective, 202u) << "the held objective flipped";
+    }
+}
+
+// ── 4b. Consolidation — deep pockets flip to the nearer army ───────────────
+
+TEST(GroundWar, ConsolidationFlipsDeepPocketsToTheNearerArmy) {
+    auto rig = Rig::make(fast_cfg(), [&](WorldState& w) {
+        // One un-defended DPRK objective deep inside ROK ground: the
+        // nearest ROK battalion is 6 rows away (OUTSIDE the capture
+        // range — the capture ladder can't reach it), and no DPRK
+        // battalion exists. The pocket is ROK ground in every sense
+        // but the byte.
+        w.objectives = {objective(400, 100, 10, 6)};
+        w.units = {battalion(2001, 2, kStAirDefense, 100, 16, kRoster12)};
+    });
+    rig->war->tick(10);
+
+    EXPECT_EQ(rig->war->objectives()[0].owner, 2);
+    EXPECT_EQ(rig->war->stats().consolidations, 1);
+    EXPECT_EQ(rig->war->stats().captures, 0);
+    // The ledger books it like a capture (from DPRK to ROK, the
+    // nearest battalion as the taker).
+    ASSERT_EQ(rig->ledger->objective_captures().size(), 1u);
+    EXPECT_EQ(rig->ledger->objective_captures().front().objective, 400u);
+    EXPECT_EQ(rig->ledger->objective_captures().front().from_team, 6);
+    EXPECT_EQ(rig->ledger->objective_captures().front().to_team, 2);
+    EXPECT_EQ(rig->ledger->objective_captures().front().by_battalion,
+              2001u);
+}
+
+TEST(GroundWar, ConsolidationNeverFlipsGarrisonedHoldings) {
+    auto rig = Rig::make(fast_cfg(), [&](WorldState& w) {
+        // The objective holds its OWN garrison (d=0 — inside the
+        // troop-gate radius); an ROK battalion sits 20 rows out.
+        // Garrisoned holdings fight the capture ladder — consolidation
+        // does not touch them.
+        w.objectives = {objective(400, 100, 10, 6)};
+        w.units = {
+            battalion(2001, 6, kStAirDefense, 100, 10, kRoster12),
+            battalion(2002, 2, kStAirDefense, 100, 30, kRoster12),
+        };
+    });
+    for (int i = 0; i < 3; ++i) rig->war->tick(10);
+
+    EXPECT_EQ(rig->war->objectives()[0].owner, 6);
+    EXPECT_EQ(rig->war->stats().consolidations, 0);
+}
+
+TEST(GroundWar, ConsolidationEquidistantPocketStays) {
+    auto rig = Rig::make(fast_cfg(), [&](WorldState& w) {
+        // The pocket sits exactly between the two armies (10 rows
+        // each, un-defended — beyond the garrison radius): contested
+        // ground, not a forfeit. STRICTLY nearer flips.
+        w.objectives = {objective(400, 100, 100, 6)};
+        w.units = {
+            battalion(2001, 6, kStAirDefense, 100, 110, kRoster12),
+            battalion(2002, 2, kStAirDefense, 100, 90, kRoster12),
+        };
+    });
+    for (int i = 0; i < 3; ++i) rig->war->tick(10);
+
+    EXPECT_EQ(rig->war->objectives()[0].owner, 6);
+    EXPECT_EQ(rig->war->stats().consolidations, 0);
+}
+
+TEST(GroundWar, ConsolidationPacesAtThePerUpdateCap) {
+    auto rig = Rig::make(fast_cfg(), [&](WorldState& w) {
+        // Five deep pockets, one ROK battalion among them: four flip
+        // the first update (the wire-order head), the fifth the next.
+        w.objectives = {
+            objective(400, 100, 10, 6), objective(401, 101, 10, 6),
+            objective(402, 102, 10, 6), objective(403, 103, 10, 6),
+            objective(404, 104, 10, 6),
+        };
+        w.units = {battalion(2001, 2, kStAirDefense, 102, 16, kRoster12)};
+    });
+    rig->war->tick(5);   // exactly ONE update tick (clock 0)
+    EXPECT_EQ(rig->war->stats().consolidations, 4);
+    EXPECT_EQ(rig->war->stats().captures, 0);
+    rig->war->tick(10);  // the next update flips the wire-order tail
+    EXPECT_EQ(rig->war->stats().consolidations, 5);
+    for (const auto& o : rig->war->objectives()) {
+        EXPECT_EQ(o.owner, 2) << "objective " << o.vu;
+    }
 }
 
 // ── 5. Resupply ────────────────────────────────────────────────────────────
@@ -580,7 +685,10 @@ TEST(GroundWar, WriteBackLandsGroundState) {
     EXPECT_EQ(flipped->owner, 2);
     EXPECT_EQ(flipped->first_owner, 6)
         << "first_owner keeps the wire's save-start semantics";
-    EXPECT_EQ(cres.objectives_flipped, 1);
+    // 202 captured + the rig's two un-defended DPRK objectives (201/203)
+    // consolidated the same update — the write-back lands all three
+    // owner flips.
+    EXPECT_EQ(cres.objectives_flipped, 3);
 
     // The untouched identity: the AD battalion never moved, never lost,
     // never synced — the write-back left the world byte-identical there.
@@ -687,11 +795,13 @@ TEST(GroundWar, SourcedResupplyRegeneratesFromTeamStockAndDraws) {
     rig->war->tick(10);
     EXPECT_EQ(rig->war->stats().resupply_fires, 1);
     // REGEN first: EVERY ROK-held objective takes 10 from the team
-    // pool (101: 40 → 50; 102/103: 0 → 10 each — 30 total; the DPRK
-    // pool is empty in this rig, so 201..203 stay dry). Fuel mirrors
-    // on the fuel pool (101: 0 → 10).
+    // pool. Consolidation flips the un-defended 201..203 into ROK's
+    // held set THIS update (the deep-pocket rule), so the regen set is
+    // all six: 101 40 → 50; 102/103 and 201..203 0 → 10 each — 60
+    // total. Fuel mirrors on the fuel pool (101: 0 → 10).
     const auto& o = rig->war->objectives()[0];
-    EXPECT_EQ(rig->war->stats().supply_regen_total, 30);
+    EXPECT_EQ(rig->war->stats().supply_regen_total, 60);
+    EXPECT_EQ(rig->war->stats().consolidations, 3);
     EXPECT_EQ(o.fuel, 10);
     EXPECT_TRUE(o.logistics_dirty);
     // Then the DRAW: the battalion tops up min(25, stock 50, room 90)
@@ -869,12 +979,13 @@ TEST(GroundWar, RepairsAndStocksRideTheWriteBack) {
     rig->war->tick(10);
 
     // The ground write-back lands the logistics face for the DIRTY
-    // objectives only: 101 (regen + draw + repair), plus 102/103 (the
-    // regen fed them from the ROK pool — three ROK rows, the neutral
-    // 301 untouched); the C1 write-back lands the repaired fstatus.
+    // objectives: 101 (regen + draw + repair) plus the five regen-fed
+    // rows (102/103, and 201..203 — consolidated into ROK's held set
+    // this update): six ROK rows; the neutral 301 untouched. The three
+    // consolidation flips ride the owner face.
     const auto g = apply_ground_to(*rig->war, *rig->ws);
-    EXPECT_EQ(g.objectives_resupplied, 3);
-    EXPECT_EQ(g.objectives_flipped, 0);
+    EXPECT_EQ(g.objectives_resupplied, 6);
+    EXPECT_EQ(g.objectives_flipped, 3);
     EXPECT_EQ(rig->ws->objectives[0].supply,
               rig->war->objectives()[0].supply);
     EXPECT_EQ(rig->ws->objectives[0].last_repair,

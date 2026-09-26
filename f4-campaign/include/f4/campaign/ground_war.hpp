@@ -335,29 +335,111 @@ struct FrontColumn {
 // once here so the two can never drift.
 // ============================================================================
 
-/// One objective's front-relevant fields — the projection BOTH callers
-/// of the front computation build (the engine's live mirror, mutated by
-/// captures; the tasking side's save-time source view).
+/// One objective's troop-gate fields — the projection the engine's
+/// mirror and the consolidation phase build, and the carrier for
+/// stamp_front_defended().
+///
+/// `defended` is the troop-gate (2026-09 EMPL-2 review): the owner
+/// keeps a live battalion within kFrontGarrisonRangeGrid. Stock saves
+/// carry ownership bytes no troop ever earned (TestCamp: 361 DPRK-owned
+/// objectives south of the ROK army, first_owner ROK) — ownership is
+/// territorial state (supply, capture history, victory) and stays that.
+/// The FLOT no longer reads this struct at all (the front is battalion
+/// truth — front_columns_from_battalions); the stamp drives the
+/// CONSOLIDATION rule (un-defended pockets flip to the nearer army)
+/// and the viewer's solid/hollow objective rendering. Defaults true so
+/// a view nobody stamped gates nothing.
 struct FrontObjectiveView {
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+    std::uint8_t owner = 0;
+    bool defended = true;
+};
+
+/// The troop-gate radius (grid units, Chebyshev — the capture rule's
+/// own distance). Deliberately a constant, not a config knob: the front
+/// shape is INSENSITIVE to it on real data (TestCamp: contested-column
+/// mean row 459..479 for any radius 2..24, vs 288 ungated with the
+/// ghost line running to row 129), so a knob would be a dial that
+/// cannot turn the line meaningfully — the gate's presence or absence
+/// is the whole behavior.
+inline constexpr int kFrontGarrisonRangeGrid = 8;
+
+/// The contact rule's range (grid units, Chebyshev — every distance in
+/// this header speaks Chebyshev): a grid column is FRONT only when the
+/// two sides keep battalions within this range of each other in the
+/// column's ±kFrontBand band, the line drawn between the CLOSEST
+/// opposing pair. Extremes-based fronts read every lone scout as a
+/// contact (TestCamp: per-column extremes spread the line over rows
+/// 326..572 in 16 chaotic runs); the contact gate draws the line where
+/// the armies actually face each other (5 runs, rows 460..520, zero
+/// swing after smoothing — dead center of the two masses' interleave).
+inline constexpr int kFrontContactRangeGrid = 12;
+
+/// The front line's smoothing window (±columns, moving mean over the
+/// run's own columns, windows truncated at the run's ends). Integer
+/// math, deterministic.
+inline constexpr int kFrontSmoothColumns = 3;
+
+/// Consolidation's per-update flip cap: deep-pocket objectives — the
+/// owner keeps no garrison, the opposing army is strictly nearer —
+/// transition to the army actually standing there, a few per update
+/// (the wire-order head of the list first). Deterministic pacing: the
+/// territory follows the armies over campaign time instead of
+/// re-coloring the map in one tick. TestCamp's 361 southern DPRK towns
+/// (first_owner ROK, no DPRK battalion south of row 300) walk back to
+/// ROK at this pace; garrisoned holdings NEVER consolidate — they are
+/// captured through the combat ladder or not at all.
+inline constexpr int kConsolidatePerUpdate = 4;
+
+/// One battalion's front-relevant fields — the projection BOTH
+/// callers of the front computation build (the engine's live mirror;
+/// the tasking side's save-time source view, ledger-destroyed rows
+/// dropped). The front is TROOP truth: the line between the closest
+/// opposing battalions, not a read of ownership bytes.
+struct FrontUnitView {
     std::int32_t x = 0;
     std::int32_t y = 0;
     std::uint8_t owner = 0;
 };
 
-/// Project an IObjectiveSource into the front view (wire order).
-[[nodiscard]] std::vector<FrontObjectiveView>
-front_objective_view(const f4::world::IObjectiveSource& objectives);
+/// Project an IUnitCoreSource into the front unit view (wire order;
+/// the aggregate Battalion class only — the ranking rule's own face —
+/// ledger-destroyed rows dropped when the ledger is provided).
+[[nodiscard]] std::vector<FrontUnitView>
+front_unit_view(const f4::world::IUnitCoreSource& units,
+                const CampaignResultLedger* ledger = nullptr);
 
-/// The front line between two belligerents' objective holdings: every
-/// grid column in the objectives' x range, the contested ones (both
-/// sides hold objectives in the ±3-column band) carrying the midpoint
-/// row between the south side's furthest-north and the north side's
-/// furthest-south holdings. Sides by held-objective mean y (the smaller
-/// holds the south — deterministic). Integer midpoints, wire order.
+/// The engine mirror's face (destroyed rows skipped).
+[[nodiscard]] std::vector<FrontUnitView>
+front_unit_view(const std::vector<GroundUnitState>& units);
+
+/// The front line between two belligerents' BATTALION masses: every
+/// grid column in the battalions' x extent, the contested ones carrying
+/// the midpoint row between the closest opposing pair in the column's
+/// ±kFrontBand band — and contested ONLY when that pair is within
+/// kFrontContactRangeGrid (the contact rule above). Runs are smoothed
+/// by ±kFrontSmoothColumns moving mean. Sides by battalion mean y (the
+/// smaller holds the south — the wire grid's own orientation: TestCamp
+/// puts CIS/PRC at rows 850-1000, ROK/Japan at 50-200). Deterministic.
 [[nodiscard]] std::vector<FrontColumn>
-front_columns_from_objectives(
-    const std::vector<FrontObjectiveView>& objectives,
+front_columns_from_battalions(
+    const std::vector<FrontUnitView>& units,
     std::uint8_t side_a, std::uint8_t side_b);
+
+/// Stamp the troop-gate onto a projected view: a row is defended when
+/// the owner keeps a live Battalion within kFrontGarrisonRangeGrid
+/// (Chebyshev). The IUnitCoreSource overload filters the aggregate
+/// Battalion class (the ranking rule's own face) and skips
+/// ledger-destroyed battalions when the ledger is provided; the
+/// GroundUnitState overload is the engine mirror's face (destroyed
+/// rows skipped there). O(units × objectives) integer compares —
+/// rebuilt per orders cycle, measured noise at campaign scale.
+void stamp_front_defended(std::vector<FrontObjectiveView>& view,
+                          const f4::world::IUnitCoreSource& units,
+                          const CampaignResultLedger* ledger = nullptr);
+void stamp_front_defended(std::vector<FrontObjectiveView>& view,
+                          const std::vector<GroundUnitState>& units);
 
 /// The unit-target ranking for CAS tasking: the battalions of teams at
 /// WAR with `team` (the symmetric belligerence rule, land domain, the
@@ -393,6 +475,9 @@ struct GroundWarStats {
     int vehicle_losses = 0;      ///< vehicles lost (mirror of the ledger's)
     int battalions_destroyed = 0;
     int captures = 0;
+    /// Consolidation flips (deep pockets to the nearer army — the
+    /// kConsolidatePerUpdate-paced sibling of the capture ladder).
+    int consolidations = 0;
     int resupply_fires = 0;      ///< ground-supply cadence fires
     // --- DOM-2: the supply chain's books -------------------------------
     /// Supply units moved team stock → objective stocks (cumulative).
@@ -475,6 +560,26 @@ public:
         return front_;
     }
 
+    /// The troop-gate's own stamp, refreshed each front rebuild: TRUE
+    /// when the owner keeps a garrisoned battalion within
+    /// kFrontGarrisonRangeGrid of this objective — the same truth the
+    /// FLOT draws. The viewer keys its objective rendering off this
+    /// (solid owner fill = a defended holding; hollow = affiliation
+    /// without troops, a territorial claim, not a position). Linear
+    /// over the mirror; callers draw-cull long before it is warm.
+    [[nodiscard]] bool
+    objective_defended(std::uint32_t vu) const noexcept {
+        if (defended_.size() != objectives_.size()) {
+            return true;   // no stamp (a war-less world never rebuilds
+                           // the front) — legacy display, nothing to
+                           // gate on
+        }
+        for (std::size_t i = 0; i < objectives_.size(); ++i) {
+            if (objectives_[i].vu == vu) return defended_[i];
+        }
+        return false;
+    }
+
     [[nodiscard]] const GroundWarStats& stats() const noexcept {
         return stats_;
     }
@@ -482,10 +587,11 @@ public:
 private:
     // --- phases (each a deterministic walk; see the header doc) -------
     void fire_orders_();          ///< GTM-lite: score + assign targets
-    void rebuild_front_();        ///< FLOT columns from objective holdings
+    void rebuild_front_();        ///< FLOT columns from battalion contact
     void move_phase_();           ///< advance mobile battalions
     void engage_phase_();         ///< detect + resolve exchanges
     void capture_phase_();        ///< flip undefended enemy objectives
+    void consolidate_phase_();    ///< deep pockets flip to the nearer army
     void resupply_phase_(CampaignTime t);  ///< the last_resupply cadence
     void repair_phase_(CampaignTime t);    ///< the last_repair cadence
     /// Adopt the ledger's objective damage state into the mirror's
@@ -530,6 +636,9 @@ private:
     std::vector<std::uint32_t> unit_vus_;
 
     std::vector<FrontColumn> front_;
+    /// The troop-gate stamp per objectives_ row (the front's own
+    /// holding test, exposed via objective_defended for the viewer).
+    std::vector<std::uint8_t> defended_;
     std::int32_t min_x_ = 0;
     std::int32_t max_x_ = 0;
 

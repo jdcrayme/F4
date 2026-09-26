@@ -745,6 +745,16 @@ private:
         std::array<std::uint8_t, 16> wire_ratings{};  ///< .uni rating[16]
         std::array<std::uint8_t, 16> live_ratings{};  ///< the decay seat
         bool ratings_live = false;    ///< the live view seeded (wire/UCD)
+        /// Which column order the live view speaks. The two rating
+        /// tables disagree: the wire's rating[16] is kAroNames order
+        /// (CA,S,GA,SB,REC,SUPPORT — data-proven: TestCamp's support
+        /// squadrons carry 68..70 in column 5, everyone else 0), the
+        /// UCD's Scores[] is the reference MissionRollEnum order
+        /// (kRefAro*). The decay seat reads and decays in its seed's
+        /// own layout — reading the seed with the other table's index
+        /// is what sent support to out-of-range column 16 and scored
+        /// every tanker mission through the specialty fallback.
+        bool ratings_wire_layout = false;
         /// Roster slots drawn onto flights still owed to the tasking
         /// pipeline (the pick-time out-set — the ledger books draws at
         /// PUBLISH, after compose built the whole cycle, so the ATM
@@ -774,6 +784,17 @@ private:
     /// the specialty-derived fallback (header doc).
     [[nodiscard]] int rating_(const SquadronState& sq,
                               const MissionProfile& profile) const;
+
+    /// EMPL-2 review — the support gate: TRUE when the squadron's own
+    /// tables rate it for the profile's role (the wire rating row, or
+    /// the UCD column when the reference mapping has one). A squadron
+    /// neither table rates can still fly combat families (the fixture
+    /// fallback stands — unspecialized wings are taskable), but the
+    /// SUPPORT family is capability, not willingness: stock wars filed
+    /// AMIS_TANK from fighter squadrons whose support row is 0, and a
+    /// fighter with a tanker brain orbits as a fake KC-10.
+    [[nodiscard]] bool has_table_rating_(const SquadronState& sq,
+                                         const MissionProfile& profile) const;
 
     /// Effective availability (the ledger's one-pool number when a
     /// ledger is attached; the ATM's own counters otherwise).

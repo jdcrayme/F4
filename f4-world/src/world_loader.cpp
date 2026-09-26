@@ -535,6 +535,7 @@ std::vector<EntityId> populate_units(
         if (auto* sq_src = src.as_squadron(i)) {
             auto& sq = h.add<SquadronComponent>();
             sq.specialty = sq_src->specialty(i);
+            sq.role_ratings = sq_src->role_ratings(i);
             sq.aa_kills = sq_src->aa_kills(i);
             sq.ag_kills = sq_src->ag_kills(i);
             sq.as_kills = sq_src->as_kills(i);

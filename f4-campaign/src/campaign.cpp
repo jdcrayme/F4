@@ -218,8 +218,11 @@ std::uint32_t Campaign::select_unit_target_(std::uint8_t team) {
     if (objectives_ == nullptr) return 0;
     const auto pair = belligerent_pair(teams_);
     if (pair.size() != 2) return 0;
-    const auto front = front_columns_from_objectives(
-        front_objective_view(*objectives_), pair[0], pair[1]);
+    // The front is BATTALION truth (the contact rule — the line
+    // between the closest opposing battalions); the ledger skips
+    // battalions it has already spent.
+    const auto front = front_columns_from_battalions(
+        front_unit_view(units_, result_ledger_), pair[0], pair[1]);
     const auto ranked = rank_battalion_targets(
         units_, teams_, front, team, result_ledger_);
     if (ranked.empty()) return 0;

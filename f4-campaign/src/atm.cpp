@@ -64,6 +64,15 @@ int ref_aro_index(const MissionProfile& profile) {
     return kRefAroOther;   // ARO_SUPPORT and anything else
 }
 
+/// Profile aro name → the WIRE rating table's column (kAroNames order
+/// — the squadron's own rating[16] on the .uni record). The two tables
+/// disagree (the header's layout note on SquadronState); -1 when the
+/// name is off the wire vocabulary.
+int wire_aro_index(const MissionProfile& profile) {
+    const auto idx = aro_byte(profile.aro);
+    return idx ? static_cast<int>(*idx) : -1;
+}
+
 /// The role's specialty family (FindBestAir's `sc`): counter-air
 /// roles pair with SQUADRON_SPECIALTY_AA(1), the ground-attack family
 /// with SQUADRON_SPECIALTY_AG(2) — the reference's own mapping
@@ -316,6 +325,7 @@ AirTaskingManager::AirTaskingManager(
             if (any_wire) {
                 st.live_ratings = st.wire_ratings;
                 st.ratings_live = true;
+                st.ratings_wire_layout = true;   // the seed's own layout
             } else if (any_ucd) {
                 st.live_ratings = st.scores;
                 st.ratings_live = true;
@@ -479,7 +489,11 @@ void AirTaskingManager::decay_rating_(SquadronState& sq,
     // zero. The decayed view rides the flight (the Campaign syncs the
     // ledger — its write domain).
     if (!sq.ratings_live) return;
-    const int idx = ref_aro_index(profile);
+    // The seat decays in its seed's own layout (the layout note on
+    // SquadronState) — a wire-seeded view decays the kAroNames column,
+    // a UCD-seeded one the kRefAro* column.
+    const int idx = sq.ratings_wire_layout ? wire_aro_index(profile)
+                                           : ref_aro_index(profile);
     if (idx < 0 || idx >= static_cast<int>(sq.live_ratings.size())) return;
     auto& r = sq.live_ratings[static_cast<std::size_t>(idx)];
     if (r == 0) return;   // no rating for the role — nothing to decay
@@ -621,10 +635,14 @@ AirTaskingManager::generate_requests(std::uint8_t team, CampaignTime now) {
     if (cfg_.unit_strike && objectives_ != nullptr) {
         const auto pair = f4::campaign::belligerent_pair(teams_);
         if (pair.size() == 2) {
-            const auto front =
-                f4::campaign::front_columns_from_objectives(
-                    f4::campaign::front_objective_view(*objectives_),
-                    pair[0], pair[1]);
+            // The front is BATTALION truth (the contact rule — the
+            // line between the closest opposing battalions; the same
+            // computation the engine's rebuild runs — one rule, three
+            // faces). CAS ranks battalions against the line the
+            // armies actually make.
+            const auto front = f4::campaign::front_columns_from_battalions(
+                f4::campaign::front_unit_view(units_, ledger_),
+                pair[0], pair[1]);
             unit_targets = f4::campaign::rank_battalion_targets(
                 units_, teams_, front, team, ledger_);
         }
@@ -1255,6 +1273,19 @@ AirTaskingManager::find_best_air_(const MissionRequest& req,
             score += (sq.specialty == sc) ? 5 : -5;
         }
 
+        // EMPL-2 review — the support gate: a squadron neither table
+        // rates for the role cannot fly the SUPPORT family. The
+        // lowestScore gate below can't do this job — the fixture
+        // fallback rates an unspecialized wing 60 for everything, and
+        // the reference's own stock war filed its tankers from exactly
+        // such wings (TestCamp's 78 byte-39 flights on support-row-0
+        // squadrons). A deliberate divergence, per the review: tankers
+        // fly the tanker missions; fighters are receivers.
+        if (profile.aro == "ARO_SUPPORT" &&
+            !has_table_rating_(sq, profile)) {
+            continue;
+        }
+
         // The lowestScore gate: hopeless squadrons never compare.
         if (score <= lowest_score) continue;
 
@@ -1378,35 +1409,65 @@ AirTaskingManager::find_best_air_(const MissionRequest& req,
 
 int AirTaskingManager::rating_(const SquadronState& sq,
                                const MissionProfile& profile) const {
-    // UCD Scores[ref_aro] when the unit carries a nonzero table (the
-    // theater DB resolved its type); else the specialty fallback:
-    // AA-specialty squadrons rate 100 in the counter-air family and
-    // 30 outside it; AG-specialty the mirror; unspecialized 60 —
-    // taskable everywhere, specialists at their specialty. The exact
-    // numbers are F4's (the reference reads the UCD's 0..100 tables;
-    // a fixture without one needs SOME deterministic rating, and the
-    // specialty byte is the only role signal the wire itself carries).
-    //
-    // DOM-3 — the decay arm reads the LIVE view first: the seeded
-    // table (wire rating[16], else the UCD Scores) decayed per
-    // assignment. A live view entry of 0 falls through to the
-    // existing chain (a role the tables never rated); a squadron
-    // with no tables at all never decays (the fallback is the
-    // fixture's own artifact, not a rating the wire carries).
-    const int idx = ref_aro_index(profile);
-    if (cfg_.rating_decay && sq.ratings_live &&
-        idx >= 0 && idx < static_cast<int>(sq.live_ratings.size())) {
-        const int live = sq.live_ratings[static_cast<std::size_t>(idx)];
-        if (live != 0) return live;
+    // The chain, most-specific first:
+    //   1. the LIVE decay view (DOM-3), read in its SEED's own layout
+    //      (wire kAroNames vs UCD MissionRollEnum — the layout note on
+    //      SquadronState; the seed's column order is the seed's);
+    //   2. the wire rating row (kAroNames order) — the squadron's own
+    //      .uni table, the reference's rating[role]. Before the layout
+    //      split this table was read with the UCD index: support (wire
+    //      column 5) landed on out-of-range 16 and every tanker mission
+    //      scored the specialty fallback — the unspecialized 60 — which
+    //      is how fighters won tanker orbits;
+    //   3. the UCD Scores column (kRefAro* — the type's baseline, for
+    //      squadrons that never carried a wire table);
+    //   4. the specialty fallback: AA-specialty squadrons rate 100 in
+    //      the counter-air family and 30 outside it; AG-specialty the
+    //      mirror; unspecialized (byte 0 = UNSET in stock saves, not a
+    //      counter-air claim) 60 — taskable everywhere, specialists at
+    //      their specialty. F4's own numbers, kept for the combat
+    //      families; the SUPPORT family never reaches here without a
+    //      table (the has_table_rating_ gate).
+    const int ucd_idx = ref_aro_index(profile);
+    const int wire_idx = wire_aro_index(profile);
+    if (cfg_.rating_decay && sq.ratings_live) {
+        const int idx = sq.ratings_wire_layout ? wire_idx : ucd_idx;
+        if (idx >= 0 && idx < static_cast<int>(sq.live_ratings.size())) {
+            const int live = sq.live_ratings[static_cast<std::size_t>(idx)];
+            if (live != 0) return live;
+        }
     }
-    const int ucd = idx < static_cast<int>(sq.scores.size())
-                        ? sq.scores[static_cast<std::size_t>(idx)]
+    if (wire_idx >= 0 && wire_idx < static_cast<int>(sq.wire_ratings.size())) {
+        const int wire = sq.wire_ratings[static_cast<std::size_t>(wire_idx)];
+        if (wire != 0) return wire;
+    }
+    const int ucd = ucd_idx >= 0 &&
+                            ucd_idx < static_cast<int>(sq.scores.size())
+                        ? sq.scores[static_cast<std::size_t>(ucd_idx)]
                         : 0;
     if (ucd != 0) return ucd;
     const bool ca_family = profile.aro == "ARO_CA";
     if (sq.specialty == 1) return ca_family ? 100 : 30;
     if (sq.specialty == 2) return ca_family ? 30 : 100;
     return 60;
+}
+
+bool AirTaskingManager::has_table_rating_(
+    const SquadronState& sq, const MissionProfile& profile) const {
+    // Capability, not willingness: at least one of the squadron's own
+    // tables must carry a nonzero row for the role. The wire column is
+    // the real-save face (TestCamp's three support squadrons pass;
+    // the 91 fighter squadrons fail); the UCD column rides kRefAro*,
+    // which has no support slot — the reference's own gap, kept.
+    const int wire_idx = wire_aro_index(profile);
+    if (wire_idx >= 0 &&
+        wire_idx < static_cast<int>(sq.wire_ratings.size()) &&
+        sq.wire_ratings[static_cast<std::size_t>(wire_idx)] != 0) {
+        return true;
+    }
+    const int ucd_idx = ref_aro_index(profile);
+    return ucd_idx >= 0 && ucd_idx < static_cast<int>(sq.scores.size()) &&
+           sq.scores[static_cast<std::size_t>(ucd_idx)] != 0;
 }
 
 // ============================================================================

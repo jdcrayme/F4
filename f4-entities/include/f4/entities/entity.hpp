@@ -33,6 +33,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <compare>
@@ -610,6 +611,12 @@ namespace f4::entities {
     struct SquadronComponent : Component<SquadronComponent> {
         EntityId airbase;                       // resolved EntityId of home airbase
         uint8_t specialty = 0;
+        // The wire's per-squadron rating[16] (kAroNames order — see
+        // f4/campaign/mission_type.hpp). The role truth the sim side
+        // reads directly: the tanker role requires a nonzero support
+        // row (kAroSupport), so a stock war's byte-39 fighter flight
+        // spawns as a receiver, not a fake KC-10.
+        std::array<uint8_t, 16> role_ratings{};
         int16_t aa_kills = 0;
         int16_t ag_kills = 0;
         int16_t as_kills = 0;

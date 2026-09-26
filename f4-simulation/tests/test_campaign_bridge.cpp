@@ -383,6 +383,140 @@ TEST(CampaignBridge, SpawnFromFlightsReceiverRefuelLegGetsJoinStack) {
     EXPECT_EQ(route[5].action, f4::campaign::kWpLand);
 }
 
+TEST(CampaignBridge, SpawnFromFlightsUnratedTankerByteSpawnsAReceiver) {
+    // 2026-09 EMPL-2 review — "fighters are receivers": a byte-39
+    // flight whose squadron carries NO support rating (the stock war's
+    // own shape — all 78 TestCamp tanker flights sit on fighter
+    // squadrons) keeps a NORMAL brain and takes the receiver's join
+    // stack from its refuel leg. The mission byte alone no longer
+    // mints a tanker.
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 aircraft config fixture not available";
+
+    EntityWorld world;
+
+    auto airbase_h = world.create();
+    auto& airbase_tf = airbase_h.add<TransformComponent>();
+    airbase_tf.position = f4::geo::WorldPosition(0.0, 0.0, 50.0);
+
+    auto sq_h = world.create();
+    auto& sq = sq_h.add<SquadronComponent>();
+    sq.airbase = airbase_h.id();
+    // role_ratings left all-zero: the support row never rated.
+    auto& sq_uc = sq_h.add<UnitCoreComponent>();
+    sq_uc.class_table_index = 273;
+
+    auto f_h = world.create();
+    auto& fp = f_h.add<FlightPlanComponent>();
+    fp.squadron = sq_h.id();
+    fp.callsign_id = 1;
+    fp.callsign_num = 1;
+    fp.mission = 39;   // AMIS_TANK — the stock war's tanker byte
+
+    auto& wpc = f_h.add<WaypointPlanComponent>();
+    auto wp = [&](int16_t x, int16_t y, int16_t z, uint8_t action) {
+        WaypointState w;
+        w.x = x; w.y = y; w.z = z; w.action = action;
+        return w;
+    };
+    wpc.waypoints.push_back(wp(100, 100, 0, f4::campaign::kWpTakeoff));
+    wpc.waypoints.push_back(wp(110, 110, 20, f4::campaign::kWpNothing));
+    wpc.waypoints.push_back(wp(120, 120, 20, f4::campaign::kWpRefuel));
+    wpc.waypoints.push_back(wp(130, 130, 10, f4::campaign::kWpLand));
+
+    ClassTable ct;
+
+    ScenarioAirfield airfield;
+    airfield.runway_heading_rad = 0.0;
+    airfield.threshold_position = f4::geo::WorldPosition(0.0, 5000.0, 50.0);
+    airfield.departure_altitude_ft = 2550.0;
+
+    ScenarioAircraft tpl;
+    tpl.vis_type_index = 1052;
+    tpl.callsign = "EAGLE";
+    tpl.aircraft_config_path = "f16.json";
+
+    auto spawned = spawn_aircraft_from_flights(world, ct, cfg, airfield, tpl);
+    ASSERT_EQ(spawned.size(), 1u);
+
+    EntityHandle h(spawned[0], &world);
+    const auto* brain = h.get<f4::ai::BrainComponent>();
+    ASSERT_NE(brain, nullptr);
+    EXPECT_FALSE(brain->is_tanker())
+        << "an unrated byte-39 flight must not spawn into the tanker role";
+    EXPECT_TRUE(brain->refuel_eligible())
+        << "its refuel leg still makes it a receiver";
+    // The receiver's join stack (the same shape the receiver test pins).
+    const auto& route = brain->mission_plan().route;
+    ASSERT_EQ(route.size(), 6u);
+    EXPECT_EQ(route[1].action, f4::campaign::kWpRefuel);
+    EXPECT_EQ(route[1].loop_waypoints, 4);
+    EXPECT_EQ(route[5].action, f4::campaign::kWpLand);
+}
+
+TEST(CampaignBridge, SpawnFromFlightsRatedTankerByteSpawnsTheTanker) {
+    // The positive face: the same byte-39 flight on a squadron the
+    // save rates for support (role_ratings[kAroSupport] > 0) spawns
+    // INTO the tanker role — the AAR discovery picture's own subject.
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "F-16 aircraft config fixture not available";
+
+    EntityWorld world;
+
+    auto airbase_h = world.create();
+    auto& airbase_tf = airbase_h.add<TransformComponent>();
+    airbase_tf.position = f4::geo::WorldPosition(0.0, 0.0, 50.0);
+
+    auto sq_h = world.create();
+    auto& sq = sq_h.add<SquadronComponent>();
+    sq.airbase = airbase_h.id();
+    sq.role_ratings[static_cast<std::size_t>(f4::campaign::kAroSupport)] = 70;
+    auto& sq_uc = sq_h.add<UnitCoreComponent>();
+    sq_uc.class_table_index = 273;
+
+    auto f_h = world.create();
+    auto& fp = f_h.add<FlightPlanComponent>();
+    fp.squadron = sq_h.id();
+    fp.callsign_id = 1;
+    fp.callsign_num = 1;
+    fp.mission = 39;
+
+    auto& wpc = f_h.add<WaypointPlanComponent>();
+    auto wp = [&](int16_t x, int16_t y, int16_t z, uint8_t action) {
+        WaypointState w;
+        w.x = x; w.y = y; w.z = z; w.action = action;
+        return w;
+    };
+    // The AAR demo's tanker shape: no refuel leg of its own (the
+    // receivers carry the rendezvous mark) — takeoff, station, home.
+    wpc.waypoints.push_back(wp(100, 100, 0, f4::campaign::kWpTakeoff));
+    wpc.waypoints.push_back(wp(120, 120, 20, f4::campaign::kWpNothing));
+    wpc.waypoints.push_back(wp(130, 130, 10, f4::campaign::kWpLand));
+
+    ClassTable ct;
+
+    ScenarioAirfield airfield;
+    airfield.runway_heading_rad = 0.0;
+    airfield.threshold_position = f4::geo::WorldPosition(0.0, 5000.0, 50.0);
+    airfield.departure_altitude_ft = 2550.0;
+
+    ScenarioAircraft tpl;
+    tpl.vis_type_index = 1052;
+    tpl.callsign = "EAGLE";
+    tpl.aircraft_config_path = "f16.json";
+
+    auto spawned = spawn_aircraft_from_flights(world, ct, cfg, airfield, tpl);
+    ASSERT_EQ(spawned.size(), 1u);
+
+    EntityHandle h(spawned[0], &world);
+    const auto* brain = h.get<f4::ai::BrainComponent>();
+    ASSERT_NE(brain, nullptr);
+    EXPECT_TRUE(brain->is_tanker())
+        << "a support-rated byte-39 flight is a REAL tanker";
+    EXPECT_FALSE(brain->refuel_eligible())
+        << "the tanker's own refuel-marked leg must not arm the tanker";
+}
+
 TEST(CampaignBridge, SpawnFromFlightsCarriesAimpointFeature) {
     // EMPL-2d — the save's per-mission AIM-POINT ELEMENT rides the
     // route: the strike waypoint's `target_building` byte (the feature

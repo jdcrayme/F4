@@ -5,6 +5,89 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## EMPL-2 review round two — the contact FLOT, and territory that follows the armies
+
+- **The contact front** — the FLOT is now the line between the closest
+  opposing BATTALIONS, drawn only where they are actually in contact
+  (`front_columns_from_battalions`, `kFrontContactRangeGrid` 12,
+  smoothed by ±`kFrontSmoothColumns` 3 moving mean within each run).
+  The garrison-gated OBJECTIVE front of round one still let lone
+  garrisons yank the per-column extremes (TestCamp: seven chaotic
+  runs, rows 326..572, swinging 190+ rows inside one run); the contact
+  rule draws five tight runs in the two armies' interleave band (rows
+  460..520, zero swing) — a FEBA is where the armies face each other,
+  not where garrisons happen to sit. All three faces (the engine's
+  display front, the Campaign interdiction pick, the ATM's
+  unit_strike ranking) share the one computation; `objective_score_`'s
+  outward scan clamps against the front's own span now (the battalion
+  span can be narrower than the objective spread — a latent OOB the
+  swap exposed). `front_columns_from_objectives` is gone.
+- **Consolidation** — territory follows the armies. A new ground-war
+  phase flips un-defended objectives to whichever belligerent army is
+  STRICTLY nearer (`kConsolidatePerUpdate` 4 per update, wire order,
+  ledger-captured like any flip): stock saves carry ownership no troop
+  ever earned (TestCamp's 361 DPRK-owned southern towns, first_owner
+  ROK), and the capture ladder can't reach them (no battalion within
+  its 2-grid range, ever). Garrisoned holdings NEVER consolidate —
+  they are captured through the combat ladder or they hold;
+  equidistant pockets stay with their holder. The write-back lands
+  the flips, so a session played long enough walks the save's
+  ownership back to troop truth.
+- **The viewer reads the same truth**: objectives render SOLID in
+  owner color only when the engine's troop-gate stamp says garrisoned
+  (`GroundWar::objective_defended`); un-garrisoned claims render
+  hollow and dimmed — affiliation without a position.
+
+## EMPL-2 review — troop-truth FLOT, real tankers, readable routes
+
+- **The troop-gate (FLOT)** — the front line is TROOP truth now, not raw
+  ownership bytes. Stock saves carry ownership no troop ever earned
+  (TestCamp: 361 DPRK-owned objectives south of the ROK army,
+  first_owner ROK — the "FEBA around Pusan" read), and
+  `front_columns_from_objectives` drew that ghost line faithfully — the
+  engine's display FLOT AND the G2 tasking front (CAS/interdiction
+  ranking) both measured against a phantom. `FrontObjectiveView` gains
+  `defended` (default true — unstamped views front exactly as before);
+  `stamp_front_defended()` arms the gate at all three faces (the
+  engine's mirror rebuild, the Campaign interdiction pick, the ATM's
+  unit_strike ranking): a holding fronts only when the owner keeps a
+  live Battalion within `kFrontGarrisonRangeGrid` (8, Chebyshev — a
+  constant, not a knob: contested-column mean row moves 459→479 across
+  radii 2..24 on TestCamp, vs 288 ungated with the line at row 129).
+  Ownership bytes untouched — territory, capture history and supply
+  keep their truth; the FLOT is the line the armies actually make.
+- **The support gate + the rating-layout fix (tankers)** — fighters no
+  longer fly the tanker orbit. Two stacked causes: (1) the rating chain
+  read the wire's per-squadron rating[16] with the UCD Scores column
+  index — the two tables have DIFFERENT layouts (wire = kAroNames
+  order, data-proven: TestCamp's 3 real support squadrons carry
+  68..70 in column 5; UCD = the reference MissionRollEnum), so support
+  landed on out-of-range column 16 and EVERY tanker mission scored
+  through the specialty fallback (unspecialized 60 — taskable
+  everywhere); fixed: each table reads its own index, the decay seat
+  remembers its seed's layout (`ratings_wire_layout`), and the wire
+  row now outranks the UCD baseline. (2) `find_best_air_` gains the
+  support gate — a squadron neither table rates for the role cannot
+  fly the SUPPORT family (`has_table_rating_`), so stock wars' byte-39
+  fighter filings no longer fly; the reference's own stock war did
+  file them, which is the deliberate divergence the review directs.
+  The sim side agrees: the tanker role (brain, station hold, AAR
+  discovery) requires `SquadronComponent::role_ratings[kAroSupport] >
+  0` (populated from the save for the first time) — an unrated byte-39
+  flight spawns as a RECEIVER with its join stack, not a fake KC-10.
+  Specialty byte 0 documented as UNSET (92 of TestCamp's 94
+  squadrons), never a counter-air claim.
+- **The route tail, readable** — the saved route rides past its first
+  WP_LAND (the REFUEL hook + the DIVERT leg to the alternate field),
+  and drawing that tail like mission legs is what made "all flight
+  plans" read as spaghetti (371 of TestCamp's 449 flights end at an
+  alternate field, not home). The viewer now draws the mission legs
+  for everyone and the post-recovery tail only for the SELECTED
+  flight, muted; the inspector's waypoint list resolves airfield
+  target VUs to NAMES (the bare numbers were why home plate and the
+  alternate were indistinguishable) and marks the home plate and the
+  DIVERT leg — the route question answers itself in the panel.
+
 ## EMPL-2d — the stick aim-point element: the save's own feature index drives the aim
 
 - **EMPL-2d** — the employment plan's last named open item closes. The

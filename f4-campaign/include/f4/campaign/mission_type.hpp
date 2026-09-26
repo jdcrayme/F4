@@ -261,6 +261,17 @@ mission_category_name(MissionCategory cat) noexcept {
 /// must match them), then Strike / Ground-Attack / Strategic-Bombing /
 /// Reconnaissance / Support — the reference's role grouping order.
 /// Bytes beyond the table render "ARO_?" (same rule as AMIS_?).
+///
+/// SEMANTICS (2026-09 EMPL-2 review): in stock saves the byte is mostly
+/// UNSET — 92 of TestCamp's 94 squadrons carry 0, including the
+/// support-rated ones (the reference's own specialty vocabulary knows
+/// only AA=1/AG=2; 0 is "unspecified"). Treat 0 as UNSET, never as a
+/// positive counter-air claim: role truth rides the squadron's wire
+/// rating table (role_ratings[16], kAroNames order — column 5 below),
+/// not this byte. The name string stays "ARO_CA" (the kunsan binding
+/// and the profiles' ARO vocabulary hang off it); the consumers that
+/// must not read it as capability are the rating chain and the support
+/// gate (atm.cpp).
 inline constexpr std::size_t kAroCount = 6;
 inline constexpr std::string_view kAroNames[kAroCount] = {
     "ARO_CA",       // 0 — counter-air (fighters)
@@ -270,6 +281,13 @@ inline constexpr std::string_view kAroNames[kAroCount] = {
     "ARO_REC",      // 4 — reconnaissance
     "ARO_SUPPORT",  // 5 — support & special (AEW&C, tanker, SAR, ...)
 };
+
+/// The support row of the wire rating table (role_ratings[5]) — the
+/// tanker/AWACS family's capability column. Data-proven: every real
+/// support squadron in TestCamp carries 68..70 here; every fighter
+/// squadron carries 0.
+inline constexpr std::size_t kAroSupport = 5;
+static_assert(kAroNames[kAroSupport] == "ARO_SUPPORT");
 
 /// Squadron specialty byte -> role name ("ARO_?" when out of range).
 [[nodiscard]] std::string_view aro_name(std::uint8_t specialty_byte);

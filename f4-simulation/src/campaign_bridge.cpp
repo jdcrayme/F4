@@ -567,6 +567,18 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
     const auto* sq = fp->squadron.value != 0
         ? EntityHandle(fp->squadron, &world).get<SquadronComponent>()
         : nullptr;
+    // EMPL-2 review — a REAL tanker is a flight whose mission byte says
+    // tanker AND whose squadron the save rates for support
+    // (role_ratings[kAroSupport] > 0). Stock wars filed AMIS_TANK from
+    // fighter squadrons (TestCamp's 78 byte-39 flights, support row 0);
+    // the mission byte alone handed those fighters the tanker brain and
+    // the AAR station hold — a fake KC-10 orbiting with nobody it can
+    // actually service. Unrated tanker flights keep a normal brain and
+    // fly their route as receivers (the refuel-leg scan below picks
+    // them up exactly like any other receiver).
+    const bool real_tanker =
+        f4::campaign::mission_is_tanker(fp->mission) && sq != nullptr &&
+        sq->role_ratings[f4::campaign::kAroSupport] != 0;
     if (sq && sq->airbase.value != 0) {
         // B.3+: the flight's HOME base — resolve its airfield data so the
         // spawn pose, departure altitude and (downstream) the ATC
@@ -752,8 +764,7 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                 break;
             }
         }
-        if ((has_refuel_leg ||
-             f4::campaign::mission_is_tanker(fp->mission)) &&
+        if ((has_refuel_leg || real_tanker) &&
             plan->route.size() >= 2) {
             std::vector<f4::ai::modules::NavigationModule::Waypoint> flown;
             flown.reserve(plan->route.size());
@@ -773,9 +784,10 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
         // there. Synthesize the hold so the tanker orbits ON STATION
         // for 30 minutes (the reference's FindSupportFlights window
         // shape; the profile-table loitertime is the named follow-up)
-        // while the receivers join.
-        if (f4::campaign::mission_is_tanker(fp->mission) &&
-            plan->route.size() >= 2) {
+        // while the receivers join. REAL tankers only: an unrated
+        // byte-39 fighter has no boom to sit on (the real_tanker note
+        // at the top of this function).
+        if (real_tanker && plan->route.size() >= 2) {
             // The station pick: the route's OWN WP_REFUEL leg when it
             // carries one (the planner's rendezvous mark — the same
             // point the receivers' legs aim at, by construction);
@@ -886,8 +898,7 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
         // arms one joiner at a time; a disarmed waiter's nav resumes
         // the orbit (the station clock keeps the queue bounded — 45
         // min, then the receiver egresses and the war moves on).
-        if (has_refuel_leg &&
-            !f4::campaign::mission_is_tanker(fp->mission)) {
+        if (has_refuel_leg && !real_tanker) {
             std::size_t rend = plan->route.size();
             for (std::size_t i = 0; i < plan->route.size(); ++i) {
                 if (plan->route[i].action == f4::campaign::kWpRefuel) {
@@ -956,13 +967,16 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
     // EMPL-2 — the campaign AAR wiring (tanker role). Tanker-hood is
     // the mission byte across BOTH vocabularies the pipeline carries:
     // AMIS_TANKER (27, the ATM filings) and AMIS_TANK (39, the stock
-    // war's byte — TestCamp's 78 saved tanker flights). The role keys
-    // the Simulation's tanker discovery (the picture push + the
-    // traffic-picture skip); it does NOT touch the takeoff/landing
-    // phases — a ground-spawned campaign tanker taxis and departs like
-    // any flight (the scenario tanker's airborne start is the scenario
-    // path's own spawn pose, not a tanker-brain behavior).
-    if (f4::campaign::mission_is_tanker(fp->mission)) {
+    // war's byte — TestCamp's 78 saved tanker flights) — AND the
+    // squadron's own support rating (real_tanker, top of this
+    // function): the byte says what was asked, the rating says whether
+    // anyone with a boom answered. The role keys the Simulation's
+    // tanker discovery (the picture push + the traffic-picture skip);
+    // it does NOT touch the takeoff/landing phases — a ground-spawned
+    // campaign tanker taxis and departs like any flight (the scenario
+    // tanker's airborne start is the scenario path's own spawn pose,
+    // not a tanker-brain behavior).
+    if (real_tanker) {
         brain.set_tanker(true);
     }
 
@@ -1732,8 +1746,12 @@ spawn_aircraft_for_intent(
     // EMPL-2 — the tanker role from the intent's mission byte (the
     // synthetic path's role source; see the flight path's note — the
     // ATM's ADDTANKER filings carry AMIS_TANKER(27), which
-    // mission_is_tanker covers along with the stock war's byte 39).
-    if (f4::campaign::mission_is_tanker(intent.mission_byte)) {
+    // mission_is_tanker covers along with the stock war's byte 39) —
+    // gated on the squadron's support rating like the saved path: the
+    // support gate upstream means unrated squadrons no longer draw the
+    // mission, but a save that shipped one anyway spawns a receiver.
+    if (f4::campaign::mission_is_tanker(intent.mission_byte) &&
+        sq != nullptr && sq->role_ratings[f4::campaign::kAroSupport] != 0) {
         brain.set_tanker(true);
     }
 

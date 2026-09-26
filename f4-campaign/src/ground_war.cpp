@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 
@@ -355,6 +356,7 @@ void GroundWar::tick(CampaignTime delta_sec) {
         move_phase_();
         engage_phase_();
         capture_phase_();
+        consolidate_phase_();
         resupply_phase_(next_update_);
         repair_phase_(next_update_);
         pull_air_losses_();
@@ -460,52 +462,113 @@ void GroundWar::fire_orders_() {
 }
 
 // ============================================================================
-// The front line — per column, between the sides' forward holdings
+// The front line — between the closest opposing battalions
 // ============================================================================
 
-std::vector<FrontObjectiveView>
-front_objective_view(const f4::world::IObjectiveSource& objectives) {
-    std::vector<FrontObjectiveView> out;
-    out.reserve(static_cast<std::size_t>(objectives.objective_count()));
-    for (int i = 0; i < objectives.objective_count(); ++i) {
-        FrontObjectiveView v;
-        v.x = objectives.x(i);
-        v.y = objectives.y(i);
-        v.owner = objectives.owner(i);
-        out.push_back(v);
+// The troop-gate stamp (the header documents the rule and its
+// calibration). Two faces over one rule: the tasking side's unit
+// source and the engine's live mirror.
+
+void stamp_front_defended(std::vector<FrontObjectiveView>& view,
+                          const f4::world::IUnitCoreSource& units,
+                          const CampaignResultLedger* ledger) {
+    for (auto& v : view) v.defended = false;
+    for (int i = 0; i < units.unit_count(); ++i) {
+        if (units.unit_class(i) !=
+            f4::entities::UnitClass::Battalion) continue;
+        const std::uint32_t vu = units.id_num(i);
+        if (vu == 0) continue;
+        if (ledger != nullptr) {
+            const auto* rec = ledger->ground_unit(vu);
+            if (rec != nullptr && rec->destroyed) continue;
+        }
+        const std::uint8_t owner = units.owner(i);
+        const std::int32_t ux = units.x(i);
+        const std::int32_t uy = units.y(i);
+        for (auto& v : view) {
+            if (v.defended || v.owner != owner) continue;
+            if (chebyshev(ux, uy, v.x, v.y) <= kFrontGarrisonRangeGrid) {
+                v.defended = true;
+            }
+        }
+    }
+}
+
+void stamp_front_defended(std::vector<FrontObjectiveView>& view,
+                          const std::vector<GroundUnitState>& units) {
+    for (auto& v : view) v.defended = false;
+    for (const auto& u : units) {
+        if (u.destroyed) continue;
+        for (auto& v : view) {
+            if (v.defended || v.owner != u.owner) continue;
+            if (chebyshev(u.x, u.y, v.x, v.y) <= kFrontGarrisonRangeGrid) {
+                v.defended = true;
+            }
+        }
+    }
+}
+
+std::vector<FrontUnitView>
+front_unit_view(const f4::world::IUnitCoreSource& units,
+                const CampaignResultLedger* ledger) {
+    std::vector<FrontUnitView> out;
+    out.reserve(static_cast<std::size_t>(units.unit_count()));
+    for (int i = 0; i < units.unit_count(); ++i) {
+        if (units.unit_class(i) !=
+            f4::entities::UnitClass::Battalion) continue;
+        if (ledger != nullptr) {
+            const std::uint32_t vu = units.id_num(i);
+            const auto* rec = vu == 0 ? nullptr : ledger->ground_unit(vu);
+            if (rec != nullptr && rec->destroyed) continue;
+        }
+        out.push_back(FrontUnitView{units.x(i), units.y(i),
+                                    units.owner(i)});
+    }
+    return out;
+}
+
+std::vector<FrontUnitView>
+front_unit_view(const std::vector<GroundUnitState>& units) {
+    std::vector<FrontUnitView> out;
+    out.reserve(units.size());
+    for (const auto& u : units) {
+        if (u.destroyed) continue;
+        out.push_back(FrontUnitView{u.x, u.y, u.owner});
     }
     return out;
 }
 
 std::vector<FrontColumn>
-front_columns_from_objectives(
-    const std::vector<FrontObjectiveView>& objectives,
+front_columns_from_battalions(
+    const std::vector<FrontUnitView>& units,
     std::uint8_t side_a, std::uint8_t side_b) {
     std::vector<FrontColumn> front;
     if (side_a == side_b) return front;
 
-    // The columns' x range over ALL objectives (the engine's own
-    // min_x_..max_x_ snapshot rule — every column in the theater's
-    // objective span, not just the contested ones).
+    // The battalions' x extent: the front spans the ARMIES' span (the
+    // objective span rule dies with the objective front — a town no
+    // army stands near was never a front).
     std::int32_t min_x = 0;
     std::int32_t max_x = -1;
-    for (const auto& o : objectives) {
-        if (max_x < min_x) { min_x = o.x; max_x = o.x; }
+    for (const auto& u : units) {
+        if (max_x < min_x) { min_x = u.x; max_x = u.x; }
         else {
-            min_x = std::min(min_x, o.x);
-            max_x = std::max(max_x, o.x);
+            min_x = std::min(min_x, u.x);
+            max_x = std::max(max_x, u.x);
         }
     }
     if (max_x < min_x) return front;
 
-    // Sides by territory centroid (deterministic): the side whose
-    // held-objective mean y is smaller holds the south.
+    // Sides by battalion centroid (deterministic): the side whose
+    // mean y is smaller holds the south — the wire grid's own
+    // orientation (TestCamp puts CIS/PRC at rows 850-1000, ROK/Japan
+    // at 50-200; smaller y is south).
     const auto centroid_y = [&](std::uint8_t team) -> double {
         std::int64_t sum = 0;
         int n = 0;
-        for (const auto& o : objectives) {
-            if (o.owner != team) continue;
-            sum += o.y;
+        for (const auto& u : units) {
+            if (u.owner != team) continue;
+            sum += u.y;
             ++n;
         }
         return n == 0 ? 0.0 : static_cast<double>(sum) / n;
@@ -514,26 +577,70 @@ front_columns_from_objectives(
         ? side_a : side_b;
     const std::uint8_t north = south == side_a ? side_b : side_a;
 
+    // Per column: the CLOSEST opposing pair within the ±kFrontBand
+    // band, measured Chebyshev (the file's own distance); the column
+    // is front only when that pair is within kFrontContactRangeGrid
+    // (the contact rule — lone scouts beyond it are dispositions, not
+    // a front), the line at their midpoint row.
+    std::vector<FrontColumn> cols;
+    cols.reserve(static_cast<std::size_t>(max_x - min_x + 1));
     for (std::int32_t x = min_x; x <= max_x; ++x) {
-        bool have_s = false, have_n = false;
-        std::int32_t s_fwd = 0, n_fwd = 0;
-        for (const auto& o : objectives) {
-            if (std::abs(o.x - x) > kFrontBand) continue;
-            if (o.owner == south) {
-                if (!have_s || o.y > s_fwd) { s_fwd = o.y; have_s = true; }
-            } else if (o.owner == north) {
-                if (!have_n || o.y < n_fwd) { n_fwd = o.y; have_n = true; }
-            }
-        }
         FrontColumn col;
         col.x = x;
         col.south_owner = south;
         col.north_owner = north;
-        if (have_s && have_n) {
-            col.y = (s_fwd + n_fwd) / 2;
+        std::int32_t best_ce = -1;
+        std::int32_t sy = 0, ny = 0;
+        for (const auto& s : units) {
+            if (s.owner != south) continue;
+            if (std::abs(s.x - x) > kFrontBand) continue;
+            for (const auto& n : units) {
+                if (n.owner != north) continue;
+                if (std::abs(n.x - x) > kFrontBand) continue;
+                const std::int32_t ce =
+                    std::max(std::abs(s.x - n.x), std::abs(s.y - n.y));
+                if (best_ce < 0 || ce < best_ce) {
+                    best_ce = ce;
+                    sy = s.y;
+                    ny = n.y;
+                }
+            }
+        }
+        if (best_ce >= 0 && best_ce <= kFrontContactRangeGrid) {
+            col.y = (sy + ny) / 2;
             col.contested = true;
         }
-        front.push_back(col);
+        cols.push_back(col);
+    }
+
+    // Smooth within runs: ±kFrontSmoothColumns moving mean over the
+    // run's own contested columns (windows truncated at the run's
+    // ends; gaps reset the window). Integer math, deterministic.
+    front = std::move(cols);
+    std::vector<std::size_t> run;   // contiguous indices into front
+    for (std::size_t i = 0; i <= front.size(); ++i) {
+        const bool in_run = i < front.size() && front[i].contested;
+        if (in_run) {
+            run.push_back(i);
+            continue;
+        }
+        // Run boundary (or the one-past-the-end visit): smooth what
+        // gathered, then start over.
+        for (std::size_t k = 0; k < run.size(); ++k) {
+            const std::size_t lo =
+                k > static_cast<std::size_t>(kFrontSmoothColumns)
+                ? k - static_cast<std::size_t>(kFrontSmoothColumns) : 0;
+            const std::size_t hi = std::min(
+                run.size(),
+                k + static_cast<std::size_t>(kFrontSmoothColumns) + 1);
+            std::int64_t sum = 0;
+            for (std::size_t j = lo; j < hi; ++j) {
+                sum += front[run[j]].y;
+            }
+            front[run[k]].y = static_cast<std::int32_t>(
+                sum / static_cast<std::int64_t>(hi - lo));
+        }
+        run.clear();
     }
     return front;
 }
@@ -661,20 +768,28 @@ void GroundWar::rebuild_front_() {
     stats_.front_mean_y_fp = 0;
     if (war_pair_.size() < 2) return;
 
-    // G2: the shared FLOT math (front_columns_from_objectives) — this
-    // engine used to own the only copy; the tasking side now needs the
-    // same columns, so the computation lives once in the shared helper
-    // and BOTH call it. The engine's LIVE objective mirror (captures
-    // flip owners) is the projection here — the front still moves.
-    // min_x_..max_x_ was snapshotted at construction over the same
-    // objectives list, so the column span is identical by construction.
+    // G2: the shared FLOT math (front_columns_from_battalions) — the
+    // engine and the tasking side share the one computation. The front
+    // is TROOP truth: the line between the closest opposing BATTALIONS
+    // (the contact rule), never a read of ownership bytes — stock
+    // saves carry ownership no troop earned, and even garrisoned
+    // towns yanked the old per-column extremes into chaos (2026-09
+    // EMPL-2 review, round two).
+    // The troop-gate still stamps the mirror (objective_defended's
+    // read face — the viewer's solid/hold rendering) and feeds the
+    // consolidation phase: garrisoned holdings never flip.
     std::vector<FrontObjectiveView> view;
     view.reserve(objectives_.size());
     for (const auto& o : objectives_) {
         view.push_back(FrontObjectiveView{o.x, o.y, o.owner});
     }
-    front_ = front_columns_from_objectives(
-        view, war_pair_[0], war_pair_[1]);
+    stamp_front_defended(view, units_);
+    defended_.assign(objectives_.size(), 0);
+    for (std::size_t i = 0; i < view.size(); ++i) {
+        defended_[i] = view[i].defended ? 1 : 0;
+    }
+    front_ = front_columns_from_battalions(
+        front_unit_view(units_), war_pair_[0], war_pair_[1]);
 
     std::int64_t sum_y = 0;
     for (const auto& col : front_) {
@@ -1003,6 +1118,71 @@ void GroundWar::capture_phase_() {
                     u.vu);
             }
             break;
+        }
+    }
+}
+
+// ============================================================================
+// Consolidation — deep pockets flip to the army actually standing there
+// ============================================================================
+
+void GroundWar::consolidate_phase_() {
+    if (war_pair_.size() < 2) return;
+
+    // The capture ladder needs an enemy battalion WITHIN the capture
+    // range — so a town the enemy overran long ago (or ownership bytes
+    // no troop ever earned: TestCamp's 361 southern DPRK towns,
+    // first_owner ROK) sits mis-affiliated forever, and the map reads
+    // as if the war never moved. Consolidation completes what the
+    // capture ladder can't reach: an un-defended objective whose
+    // nearest belligerent battalion flies the OTHER flag transitions
+    // to that army, kConsolidatePerUpdate per update (the wire-order
+    // head first — deterministic pacing, the territory walks to the
+    // armies over campaign time). Garrisoned holdings NEVER
+    // consolidate — they are captured through the combat ladder or
+    // they hold.
+    int flips = 0;
+    for (std::size_t i = 0; i < objectives_.size(); ++i) {
+        if (flips >= kConsolidatePerUpdate) break;
+        auto& obj = objectives_[i];
+        if (obj.owner != war_pair_[0] && obj.owner != war_pair_[1]) {
+            continue;   // neutral territory is not the ground war's
+        }
+        // The stamp from the last front rebuild: a garrisoned holding
+        // is the owner's — consolidation does not touch it.
+        if (i < defended_.size() && defended_[i]) continue;
+
+        // The nearest live belligerent battalion on each side.
+        std::int32_t own_d = -1, enemy_d = -1;
+        std::uint32_t enemy_vu = 0;
+        std::uint8_t enemy = 0;
+        for (const auto& u : units_) {
+            if (u.destroyed) continue;
+            if (u.owner != war_pair_[0] && u.owner != war_pair_[1]) {
+                continue;
+            }
+            const std::int32_t d = chebyshev(u.x, u.y, obj.x, obj.y);
+            if (u.owner == obj.owner) {
+                if (own_d < 0 || d < own_d) own_d = d;
+            } else if (enemy_d < 0 || d < enemy_d) {
+                enemy_d = d;
+                enemy_vu = u.vu;
+                enemy = u.owner;
+            }
+        }
+        // STRICTLY nearer enemy army — an equidistant pocket stays
+        // with its holder (deterministic, and a pocket between two
+        // armies is contested ground, not a forfeit).
+        if (enemy_vu == 0 || (own_d >= 0 && enemy_d >= own_d)) continue;
+
+        const std::uint8_t from = obj.owner;
+        obj.owner = enemy;
+        ++flips;
+        ++stats_.consolidations;
+        if (ledger_ != nullptr) {
+            ledger_->apply_objective_capture(
+                static_cast<double>(clock_), obj.vu, from, enemy,
+                enemy_vu);
         }
     }
 }
@@ -1342,16 +1522,23 @@ int GroundWar::objective_score_(const GroundObjectiveState& o) const {
     //   (random(5) dropped — the determinism contract)
     int dist = 200;
     if (!front_.empty()) {
+        // The front spans the BATTALION extent now — an objective can
+        // sit OUTSIDE it (the old objective-span front guaranteed
+        // col < size; the battalion span does not), so every index is
+        // clamped against the span, not just against underflow.
         const auto col = static_cast<std::size_t>(o.x - front_.front().x);
         if (col < front_.size() && front_[col].contested) {
             dist = std::abs(o.y - front_[col].y);
         } else {
             // Nearest contested column (bounded outward scan).
             for (int r = 1; r <= 20 && dist == 200; ++r) {
-                const auto left = col >= static_cast<std::size_t>(r)
+                const auto ri = col + static_cast<std::size_t>(r);
+                const bool has_left = col >= static_cast<std::size_t>(r) &&
+                                      col - static_cast<std::size_t>(r) <
+                                          front_.size();
+                const auto left = has_left
                     ? front_[col - static_cast<std::size_t>(r)]
                     : FrontColumn{};
-                const std::size_t ri = col + static_cast<std::size_t>(r);
                 const auto& right = ri < front_.size()
                     ? front_[ri] : left;
                 if (left.contested) { dist = std::abs(o.y - left.y); break; }

@@ -86,7 +86,10 @@ const std::string class_table_path = "falcon4.ct.json";
 // byte, TestCamp's own shape) and one receiver (a strike flight whose
 // route carries the campaign wire's WP_REFUEL waypoint at the tanker's
 // station — the reference's tanker-covered-package shape). Both at the
-// same airbase; the station ~13 NM out at 20,000 ft.
+// same airbase; the station ~13 NM out at 20,000 ft. The squadron
+// carries a support rating row (kAroSupport column 5 = 70) — the 2026-09
+// review's tanker-role rule needs a squadron the save rates for support,
+// which is exactly what a REAL tanker squadron is.
 std::string aar_world_json() {
     return R"JSON({
   "theater": "aar-e2e",
@@ -112,7 +115,8 @@ std::string aar_world_json() {
     "items": [
       { "unit_class": "squadron", "domain": 2, "id_num": 4281,
         "x": 390, "y": 455, "z": 0, "owner": 2, "camp_id": 51,
-        "airbase_id": 4101, "name_id": 72 },
+        "airbase_id": 4101, "name_id": 72,
+        "role_ratings": [0,0,0,0,0,70,0,0,0,0,0,0,0,0,0,0] },
       { "unit_class": "package", "domain": 2, "id_num": 7029,
         "x": 392, "y": 451, "z": 0, "owner": 2 },
       { "unit_class": "flight", "domain": 2, "id_num": 5001,

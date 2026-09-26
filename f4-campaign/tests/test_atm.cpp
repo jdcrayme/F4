@@ -67,6 +67,11 @@ struct WorldOpts {
     // garrison-BARCAP threshold); 2 = the light airbase PLUS HEAVY
     // damage on the DPRK target 9001 (4 of 8 = 50%).
     int damage = 0;
+    // The support gate (2026-09 EMPL-2 review): whether the AA wing's
+    // fixture carries the support rating row (default true — the
+    // support-flag filings need an eligible wing; the gate test clears
+    // it).
+    bool wing1_support_rated = true;
 };
 
 f4::world::WorldState make_atm_world(const WorldOpts& opts = {}) {
@@ -143,6 +148,16 @@ f4::world::WorldState make_atm_world(const WorldOpts& opts = {}) {
     ws.units.push_back(sq(6001, 1, 1, 100, 100, 4281, "AA Wing"));
     ws.units.push_back(sq(6002, 1, 0, 250, 250, 4281, "Plain Wing"));
     ws.units.push_back(sq(6003, 6, 2, 400, 400, 9001, "DPRK Wing"));
+    // The support gate's fixture face (2026-09 EMPL-2 review): the AA
+    // wing carries a support row, so the support-flag filings (AWACS,
+    // ECM, tanker) have an eligible wing. The combat families never
+    // read that column (each table reads its own layout — see
+    // rating_); the unspecialized wing stays unrated, which is what
+    // the support-gate test below asserts on.
+    if (opts.wing1_support_rated) {
+        ws.units[1].role_ratings[static_cast<std::size_t>(
+            f4::campaign::kAroSupport)] = 70;
+    }
 
     if (opts.priority_table) {
         // Slot 1's table: ONLY INTERCEPT(9) and INTSTRIKE(13) nonzero.
@@ -467,6 +482,99 @@ TEST(AtmFindBestAir, ScoresRoleOverTheSpecialtyRatings) {
     auto flights = atm.compose_packages(reqs, 1, kNow);
     ASSERT_EQ(flights.size(), 1u);
     EXPECT_EQ(flights[0].squadron_vu, 6001u);   // the AA wing
+}
+
+TEST(AtmFindBestAir, SupportMissionsNeedARatedWing) {
+    // The gate (2026-09 EMPL-2 review): with NO wing rated for
+    // support, the BARCAP profile's ADDAWACS/ADDTANKER filings find
+    // nobody — the package still flies (the reference cancels the
+    // escort flight, not the package), but the supports never generate.
+    auto rig = Rig::make(WorldOpts{.wing1_support_rated = false},
+                         AtmConfig{.strategy = true});
+    MissionRequest r;
+    r.mission = 1;   // BARCAP — ADDAWACS + ADDTANKER flags
+    r.team = 1;
+    r.target_id = 9001;
+    r.priority = 120;
+    r.aircraft = 2;
+    r.tot = 5400;
+    r.tot_type = TotType::LE;
+    auto flights = rig->atm->compose_packages({r}, 1, kNow);
+    ASSERT_FALSE(flights.empty());
+    EXPECT_EQ(flights[0].role, FlightRole::Main);
+    EXPECT_EQ(flights[0].mission, 1);
+    EXPECT_EQ(rig->atm->stats().supports_filed, 0);
+    for (const auto& f : flights) {
+        EXPECT_NE(f.role, FlightRole::Support) << "mission " << f.mission;
+    }
+}
+
+TEST(AtmFindBestAir, RatedWingsFlyTheTankerMissions) {
+    // The positive face: the rated wing files the BARCAP profile's
+    // ADDTANKER (AMIS_TANKER, 27) — a support mission a support-rated
+    // squadron owns.
+    auto rig = Rig::make(WorldOpts{}, AtmConfig{.strategy = true});
+    MissionRequest r;
+    r.mission = 1;   // BARCAP — ADDAWACS + ADDTANKER
+    r.team = 1;
+    r.target_id = 9001;
+    r.priority = 120;
+    r.aircraft = 2;
+    r.tot = 5400;
+    r.tot_type = TotType::LE;
+    auto flights = rig->atm->compose_packages({r}, 1, kNow);
+    bool tanker_seen = false;
+    for (const auto& f : flights) {
+        if (f.mission == 27) {
+            tanker_seen = true;
+            EXPECT_EQ(f.role, FlightRole::Support);
+            EXPECT_EQ(f.squadron_vu, 6001u);   // the only rated wing
+        }
+    }
+    EXPECT_TRUE(tanker_seen);
+}
+
+TEST(AtmFindBestAir, CombatScoringReadsTheWireLayoutNotTheUcdIndex) {
+    // The layout pin: a wing whose WIRE table carries CA=100
+    // (kAroNames column 0) at the Plain wing's own cell. Scoring
+    // BARCAP at the wire layout rates it (100+4)/5 = 20, +2 quickest
+    // (150 grids beats the AA wing's 300) = 22 — it beats the AA
+    // wing's fallback 100 (20, no quickest). Under the old
+    // single-index chain (UCD ARO_CA=1 read against the wire table)
+    // this wing's CA column read 0, fell to the fallback 60 (12+2=14)
+    // and the AA wing won.
+    auto rig = Rig::make(WorldOpts{});
+    auto& ws = *rig->ws;
+    f4::world::UnitState wing;
+    wing.unit_class = f4::entities::UnitClass::Squadron;
+    wing.domain = 2;
+    wing.x = 250;
+    wing.y = 250;
+    wing.owner = 1;
+    wing.id_num = 6004;
+    wing.specialty = 0;   // unset — no fallback edge
+    wing.airbase_id = 4281;
+    wing.class_name = "CA Wire Wing";
+    wing.role_ratings[0] = 100;   // the wire CA column, kAroNames order
+    ws.units.push_back(wing);
+    // Drop the AA wing's specialty too, so its fallback is the flat 60
+    // — the only ratings in play that can win the walk are the wire
+    // table's own.
+    ws.units[1].specialty = 0;
+    rig->atm = std::make_unique<AirTaskingManager>(
+        rig->profiles, rig->adapters->campaign, rig->adapters->teams,
+        rig->adapters->units, &rig->adapters->objectives, AtmConfig{});
+
+    MissionRequest r;
+    r.mission = 1;   // BARCAP — ARO_CA
+    r.team = 1;
+    r.priority = 100;
+    r.aircraft = 2;
+    r.tot = 3600;
+    r.tot_type = TotType::LE;
+    auto flights = rig->atm->compose_packages({r}, 1, kNow);
+    ASSERT_EQ(flights.size(), 1u);
+    EXPECT_EQ(flights[0].squadron_vu, 6004u);   // the wire-rated wing
 }
 
 TEST(AtmFindBestAir, CounterAirWingStillTaskedForStrike) {

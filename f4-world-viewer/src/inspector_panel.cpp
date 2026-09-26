@@ -19,6 +19,8 @@
 #include "diagnostics.hpp"
 
 #include <f4/campaign/mission_type.hpp>  // mission_type_name (flight QC)
+#include <f4/campaign/route_builder.hpp> // kWpTakeoff/kWpLand (the
+                                         // waypoint list's divert mark)
 #include <f4/terrain/terrain_data.hpp>
 #include <f4/viewer/enum_text.hpp>
 #include <f4/world_types/class_table.hpp>        // unit_subtype_name(), DOMAIN_*
@@ -741,24 +743,101 @@ void ViewerApp::draw_inspector() {
                 // Waypoint list — B.3 QC upgrade: arrival time (campaign
                 // clock format), the target VU_ID, and the authoritative
                 // WP_ACTION names (campwp.h — see enum_text.hpp).
+                //
+                // 2026-09 review: the saved route rides PAST its first
+                // WP_LAND — the REFUEL hook and the DIVERT leg to the
+                // alternate field. Airfield waypoints now resolve the
+                // target VU to the objective's NAME (the bare number is
+                // why home plate and the alternate were
+                // indistinguishable), the takeoff row pins the home
+                // plate, and a LAND bound for any other field is marked
+                // DIVERT — the route-tail question ("objective, back to
+                // base, then to an alternate?") answers itself here.
                 {
                     auto* wp = h.get<f4::entities::WaypointPlanComponent>();
                     if (wp && !wp->waypoints.empty()) {
                         ImGui::Separator();
                         if (ImGui::TreeNode("Waypoints", "Waypoints (%d)", static_cast<int>(wp->waypoints.size()))) {
+                            // VU → objective name, static world first,
+                            // then the session's (a flight's base may be
+                            // resolvable in either map).
+                            auto obj_name = [&](std::uint32_t vu)
+                                -> const char* {
+                                if (vu == 0) return nullptr;
+                                const auto& pop_map =
+                                    impl_->pop.objective_id_map;
+                                const auto pit = pop_map.find(vu);
+                                if (pit != pop_map.end() &&
+                                    pit->second.valid()) {
+                                    auto nh = impl_->handle(pit->second);
+                                    auto tag = nh.get_tag(
+                                        f4::entities::tags::NAME);
+                                    if (tag && tag->as_string() &&
+                                        !tag->as_string()->empty()) {
+                                        return tag->as_string()->c_str();
+                                    }
+                                }
+                                if (impl_->session) {
+                                    const auto& smap =
+                                        impl_->objective_id_map();
+                                    const auto sit = smap.find(vu);
+                                    if (sit != smap.end() &&
+                                        sit->second.valid()) {
+                                        auto nh =
+                                            impl_->session_handle(
+                                                sit->second);
+                                        auto tag = nh.get_tag(
+                                            f4::entities::tags::NAME);
+                                        if (tag && tag->as_string() &&
+                                            !tag->as_string()->empty()) {
+                                            // static buffer: the tag
+                                            // lives in the session's
+                                            // world, outlives the row.
+                                            return tag->as_string()->c_str();
+                                        }
+                                    }
+                                }
+                                return nullptr;
+                            };
+                            // The home plate: the takeoff row's target.
+                            std::uint32_t home_vu = 0;
+                            for (const auto& w : wp->waypoints) {
+                                if (w.action ==
+                                    f4::campaign::kWpTakeoff) {
+                                    home_vu = w.target_num;
+                                    break;
+                                }
+                            }
                             ImGui::Text("idx  x    y    alt     action              arrive        target");
                             int wi = 0;
                             for (const auto& w : wp->waypoints) {
-                                char action_buf[40];
+                                char action_buf[48];
+                                const char* mark = "";
+                                if (w.action == f4::campaign::kWpTakeoff &&
+                                    w.target_num != 0) {
+                                    mark = " [home]";
+                                } else if (w.action ==
+                                               f4::campaign::kWpLand &&
+                                           home_vu != 0 &&
+                                           w.target_num != home_vu) {
+                                    mark = " [DIVERT]";
+                                }
                                 std::snprintf(action_buf, sizeof(action_buf),
-                                              "%u (%s)", static_cast<unsigned>(w.action),
-                                              f4::viewer::wp_action_name(w.action));
+                                              "%u (%s)%s", static_cast<unsigned>(w.action),
+                                              f4::viewer::wp_action_name(w.action),
+                                              mark);
                                 char tbuf[24];
                                 f4::viewer::format_campaign_time(
                                     w.arrive, tbuf, sizeof(tbuf));
                                 ImGui::Text("%-4d %-4d %-4d %-7u %-19s %-13s %u",
                                             wi++, w.x, w.y, w.z,
                                             action_buf, tbuf, w.target_num);
+                                if (w.target_num != 0) {
+                                    if (const char* nm =
+                                            obj_name(w.target_num)) {
+                                        ImGui::Text("     -> %s", nm);
+                                    }
+                                }
                             }
                             ImGui::TreePop();
                         }
