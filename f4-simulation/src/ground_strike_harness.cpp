@@ -21,6 +21,7 @@
 // over premature sharing; the copies stand until a tranche explicitly
 // authorizes the extraction, and the certificate baselines stay frozen).
 
+#include "harness_shared.hpp"
 #include <f4/simulation/ground_strike_harness.hpp>
 
 #include <f4/simulation/simulation.hpp>
@@ -312,57 +313,12 @@ const GroundStrikeReport& GroundStrikeHarness::execute(ProgressFn on_sample) {
     // without it. The scan is best-effort over the raw JSON; parse
     // problems defer to run_pass_'s authoritative load error, and the
     // post-load check stays as defense in depth.
-    {
-        std::ifstream in(opts_.scenario_json);
-        if (in) {
-            std::string text((std::istreambuf_iterator<char>(in)),
-                             std::istreambuf_iterator<char>());
-            try {
-                f4::json::Reader r(text);
-                r.skip_ws();
-                r.expect('{');
-                if (!r.consume('}')) {
-                    bool combat_enabled = false;  // CombatConfig default
-                    for (;;) {
-                        const std::string key = r.read_string();
-                        r.expect(':');
-                        if (key == "combat") {
-                            r.expect('{');
-                            if (!r.consume('}')) {
-                                for (;;) {
-                                    const std::string ck = r.read_string();
-                                    r.expect(':');
-                                    if (ck == "enabled") {
-                                        combat_enabled = r.read_bool();
-                                    } else {
-                                        r.skip_value();
-                                    }
-                                    if (r.consume('}')) break;
-                                    r.expect(',');
-                                }
-                            }
-                        } else {
-                            r.skip_value();
-                        }
-                        if (r.consume('}')) break;
-                        r.expect(',');
-                    }
-                    if (!combat_enabled) {
-                        report_.aborted = true;
-                        report_.abort_reason =
-                            "scenario combat.enabled is false — the "
-                            "harness refuses to run a non-combat scenario "
-                            "(silent success would be the worst failure "
-                            "class)";
-                        finalize_();
-                        return report_;
-                    }
-                }
-            } catch (const std::exception&) {
-                // Malformed or unexpected shape — run_pass_'s
-                // load_scenario() names the real problem.
-            }
-        }
+    if (std::string why;
+        harness_shared::combat_refusal_reason(opts_.scenario_json, &why)) {
+        report_.aborted = true;
+        report_.abort_reason = why;
+        finalize_();
+        return report_;
     }
 
     const auto wall_start = std::chrono::steady_clock::now();
