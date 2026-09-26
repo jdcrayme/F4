@@ -7,6 +7,7 @@
 // the burst cadence of guneval — short bursts, never a hose.
 
 #include "f4/ai/modules/gun_module.hpp"
+#include <f4/geo/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -15,7 +16,7 @@ namespace f4::ai::modules {
 
 namespace {
 
-constexpr double FEET_PER_NM = 6076.11548;
+constexpr double FEET_PER_NM = f4::geo::FEET_PER_NM;  // single-sourced (was a literal)
 
 /// Any one detection source = visible (SensorFusion::can_see's rule —
 /// inlined so the module layer stays on TargetInfo snapshots).

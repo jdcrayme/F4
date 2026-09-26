@@ -309,7 +309,7 @@ public:
 
     /// Force the machine to state `s` WITHOUT firing any entry/exit actions
     /// or recording a transition. This is an administrative reset — use it
-    /// to suppress a layer in a LayeredStateMachine (C2 fix) or to restore
+    /// to suppress a layer in a priority ladder (C2 fix) or to restore
     /// a machine to a known state for testing. The tick counter is NOT
     /// cleared (unlike reset()) — the machine's timeline continues.
     ///

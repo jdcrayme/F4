@@ -9,7 +9,6 @@
 // Components (current):
 //   f4::ai::AIControlOutput       — per-frame output to the FlightModel
 //   f4::ai::SkillLevel            — Recruit/Rookie/Veteran/Ace enum
-//   f4::ai::IAIBrain              — abstract brain interface
 //   f4::ai::TargetInfo            — per-target snapshot
 //   f4::ai::AirPicture            — host-built shared air-picture snapshot (PERF-1)
 //   f4::ai::SensorFusion          — target list + threat scoring
@@ -35,7 +34,7 @@
 
 #pragma once
 
-#include <f4/ai/ai_brain.hpp>
+#include <f4/ai/skill_level.hpp>
 #include <f4/ai/ai_output.hpp>
 #include <f4/ai/air_picture.hpp>
 #include <f4/ai/sensor_fusion.hpp>

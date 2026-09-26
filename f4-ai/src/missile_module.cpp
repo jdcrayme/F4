@@ -5,6 +5,7 @@
 // design notes.
 
 #include "f4/ai/modules/missile_module.hpp"
+#include <f4/math/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -13,7 +14,7 @@ namespace f4::ai::modules {
 
 namespace {
 
-constexpr double PI = 3.14159265358979323846;
+using f4::math::PI;
 
 /// Any one detection source = visible (SensorFusion::can_see's rule,
 /// inlined so this module does not depend on sensor_fusion.hpp — the

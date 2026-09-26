@@ -128,7 +128,6 @@ void MissileSimComponent::update(double dt, messaging::MessageBus& bus) {
             if (out.killed) {
                 dmg->killed = true;
                 dmg->killed_by = mc->shooter_id;
-                dmg->killed_at_tick = mc->tick_counter;
             }
             if (out.damage_applied > 0.0) {
                 bus.publish(DamageAppliedMessage{

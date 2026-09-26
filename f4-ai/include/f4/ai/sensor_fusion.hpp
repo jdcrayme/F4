@@ -47,7 +47,7 @@
 #include <vector>
 
 #include <f4/ai/air_picture.hpp>
-#include <f4/ai/ai_brain.hpp>
+#include <f4/ai/skill_level.hpp>
 #include <f4/ai/target_info.hpp>
 #include <f4/entities/entity.hpp>
 #include <f4/geo/position.hpp>

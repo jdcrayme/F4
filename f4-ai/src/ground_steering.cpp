@@ -3,6 +3,7 @@
 // GroundSteering implementation — see header for the sign-convention notes.
 
 #include "f4/ai/ground_steering.hpp"
+#include <f4/math/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -10,7 +11,7 @@
 namespace f4::ai {
 
 namespace {
-constexpr double PI = 3.14159265358979323846;
+using f4::math::PI;
 constexpr double TWO_PI = 2.0 * PI;
 constexpr double FPS_PER_KT = 1.6878098571011957;  // 1 knot in ft/s
 } // namespace

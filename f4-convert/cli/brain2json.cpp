@@ -14,42 +14,29 @@
 #include "f4/convert/brain_parser.hpp"
 #include "f4/data/brain_data.hpp"
 
+#include "f4/convert/simple_convert_cli.hpp"
+
 #include <cstdio>
 #include <string>
 
 int main(int argc, char** argv) {
-    if (argc != 3) {
-        std::fprintf(stderr, "Usage: %s <input.brn> <output.json>\n",
-                     argv[0]);
-        return 1;
-    }
-
-    const std::string inputPath = argv[1];
-    const std::string outputPath = argv[2];
-    std::printf("Converting %s -> %s\n", inputPath.c_str(), outputPath.c_str());
-
-    auto result = f4::convert::loadBrainFile(inputPath);
-    if (!result.ok) {
-        std::fprintf(stderr, "ERROR: failed to parse %s\n", inputPath.c_str());
-        for (auto const& e : result.errors)
-            std::fprintf(stderr, "  %s\n", e.c_str());
-        return 2;
-    }
-    for (auto const& w : result.warnings)
-        std::printf("WARNING: %s\n", w.c_str());
-
-    if (!f4::data::writeBrainDataFile(result.data, outputPath)) {
-        std::fprintf(stderr, "ERROR: failed to write %s\n", outputPath.c_str());
-        return 3;
-    }
-
-    std::printf("Archetypes: %zu\n", result.data.archetypes.size());
-    for (const auto& a : result.data.archetypes) {
+    return f4::convert::run_simple_convert(
+        argc, argv,
+        /*usage_args=*/"<input.brn> <output.json>",
+        /*load=*/[](const std::string& in) {
+            return f4::convert::loadBrainFile(in);
+        },
+        /*write=*/[](const auto& r, const std::string& output_path) {
+            return f4::data::writeBrainDataFile(r.data, output_path);
+        },
+        /*summarize=*/[](const auto& r) {
+        std::printf("Archetypes: %zu\n", r.data.archetypes.size());
+        for (const auto& a : r.data.archetypes) {
         std::printf("  %-12s %zu mode rows\n", a.name.c_str(),
-                    a.modes.size());
-    }
-    if (result.max_gs != 0.0) {
-        std::printf("Max Gs trailer: %.1f\n", result.max_gs);
-    }
-    return 0;
+        a.modes.size());
+        }
+        if (r.max_gs != 0.0) {
+        std::printf("Max Gs trailer: %.1f\n", r.max_gs);
+        }
+        });
 }

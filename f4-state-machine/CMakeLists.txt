@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(f4-state-machine VERSION 0.1.0 LANGUAGES CXX DESCRIPTION "Type-safe state machines with transition tables, layered priority, tracing, and serialization")
+project(f4-state-machine VERSION 0.1.0 LANGUAGES CXX DESCRIPTION "Type-safe state machines with transition tables, tracing")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,7 +15,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #
 # This library is the foundation for every stateful domain system in F4:
 #   - f4-flight-model: stall state machine (currently inline — to be migrated)
-#   - f4-ai: the 24-mode DigiMode priority ladder (LayeredStateMachine)
+#   - f4-ai: the DigiMode priority ladder (see f4/ai/brain_component.hpp)
 #   - f4-ai: 17-state landing SM, 5-state AAR SM, waypoint-progress SM
 #   - f4-campaign: mission-request lifecycle, squadron scheduling
 #

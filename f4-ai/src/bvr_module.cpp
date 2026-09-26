@@ -7,6 +7,8 @@
 // (fire control — via the embedded MissileModule).
 
 #include "f4/ai/modules/bvr_module.hpp"
+#include <f4/geo/constants.hpp>
+#include <f4/math/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -16,8 +18,8 @@ namespace f4::ai::modules {
 
 namespace {
 
-constexpr double FEET_PER_NM = 6076.11548;
-constexpr double PI = 3.14159265358979323846;
+constexpr double FEET_PER_NM = f4::geo::FEET_PER_NM;  // single-sourced (was a literal)
+using f4::math::PI;
 
 /// Any one detection source = visible (SensorFusion::can_see's rule,
 /// inlined to keep the module layer on TargetInfo snapshots only).

@@ -5,6 +5,7 @@
 // constant table and the escape-point rule).
 
 #include "f4/ai/modules/collision_avoid_module.hpp"
+#include <f4/math/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -14,7 +15,7 @@ namespace f4::ai::modules {
 
 namespace {
 
-constexpr double PI = 3.14159265358979323846;
+using f4::math::PI;
 
 [[nodiscard]] inline double heading_error(double desired,
                                           double current) noexcept {

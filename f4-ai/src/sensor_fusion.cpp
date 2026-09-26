@@ -15,6 +15,7 @@
 // system is the source of truth.
 
 #include "f4/ai/sensor_fusion.hpp"
+#include <f4/math/scalar.hpp>
 
 #include <f4/math/vec3.hpp>
 
@@ -58,13 +59,6 @@ constexpr double REACTION_DELAYS_SEC[] = {
 
 // 1 knot = 1.68781 ft/s (exact: 1 knot = 1852 m/hr, 1 m = 3.28084 ft, 1 hr = 3600 s)
 constexpr double FPS_PER_KNOT = 1.687809857;
-
-// Normalize angle to [0, 2*pi).
-inline double wrap_2pi(double a) noexcept {
-    while (a < 0.0)  a += TWO_PI;
-    while (a >= TWO_PI) a -= TWO_PI;
-    return a;
-}
 
 // Shortest signed angular difference (a - b), result in [-pi, pi].
 inline double angle_diff(double a, double b) noexcept {
@@ -428,7 +422,7 @@ void SensorFusion::compute_geometry(TargetInfo& t,
     // own_heading is the velocity-vector heading; if stationary, it's 0
     // (north), which is the convention FreeFalcon uses for ground ops.
     const double own_heading = velocity_heading_rad(ownship_vel);
-    t.azimuth_rad = wrap_2pi(angle_diff(bra.bearing_rad, own_heading));
+    t.azimuth_rad = f4::math::wrap2Pi(angle_diff(bra.bearing_rad, own_heading));
 
     // Elevation angle to target (above horizon = positive).
     const double dx = t.position.x - ownship_pos.x;  // east, ownship->target

@@ -7,6 +7,9 @@
 // turns), mengage.cpp (IR fire control — via the embedded MissileModule).
 
 #include "f4/ai/modules/wvr_module.hpp"
+#include <f4/geo/constants.hpp>
+#include <f4/math/scalar.hpp>
+#include <f4/math/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -16,8 +19,8 @@ namespace f4::ai::modules {
 
 namespace {
 
-constexpr double FEET_PER_NM = 6076.11548;
-constexpr double PI = 3.14159265358979323846;
+constexpr double FEET_PER_NM = f4::geo::FEET_PER_NM;  // single-sourced (was a literal)
+using f4::math::PI;
 
 /// Any one detection source = visible (SensorFusion::can_see's rule,
 /// inlined to keep the module layer on TargetInfo snapshots only).
@@ -30,13 +33,6 @@ constexpr double PI = 3.14159265358979323846;
 /// contact (not an incoming missile — that is MissileModule's job).
 [[nodiscard]] inline bool engageable(const TargetInfo& t) noexcept {
     return t.is_hostile && !t.is_missile && can_see(t);
-}
-
-/// Wrap to [0, 2*pi).
-[[nodiscard]] inline double wrap_2pi(double a) noexcept {
-    while (a < 0.0) a += 2.0 * PI;
-    while (a >= 2.0 * PI) a -= 2.0 * PI;
-    return a;
 }
 
 } // anonymous namespace
@@ -430,7 +426,7 @@ AIControlOutput WVRModule::update(double dt,
             if (fightable && target_->range_nm < cfg_.overshoot_range_nm &&
                 target_->rangedot > 300.0) {
                 tactic_ = WVRTactic::OverB;
-                desired_heading_rad_ = wrap_2pi(
+                desired_heading_rad_ = f4::math::wrap2Pi(
                     desired_heading_rad_ +
                     cfg_.overshoot_offset_rad * jink_side_);
             } else {
@@ -488,7 +484,7 @@ AIControlOutput WVRModule::update(double dt,
                 jink_timer_ = 0.0;
                 jink_side_ = -jink_side_;
             }
-            desired_heading_rad_ = wrap_2pi(
+            desired_heading_rad_ = f4::math::wrap2Pi(
                 target_bearing_rad() + cfg_.jink_offset_rad * jink_side_);
             // Altitude weave: the vertical jink on top of the horizontal.
             const double weave =
@@ -503,7 +499,7 @@ AIControlOutput WVRModule::update(double dt,
             gun_steering_active_ = false;  // separating, not aiming
             wants_lock_ = false;  // cold: no lock while separating
             if (fightable) {
-                desired_heading_rad_ = wrap_2pi(target_bearing_rad() + PI);
+                desired_heading_rad_ = f4::math::wrap2Pi(target_bearing_rad() + PI);
             }
             desired_alt_ft_ = clamp_alt_ft(engage_alt_ft_);
             break;

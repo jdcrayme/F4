@@ -1,10 +1,10 @@
-// f4-world-convert/tests/test_aii_config.cpp
+// f4-world-types/tests/test_aii_config.cpp
 //
 // B.0 — Falcon4.AII reader tests: bubble-key precedence (FreeFalcon
 // spellings + FILE_LAYOUT aliases), INI parsing semantics (comments,
 // folding, duplicates, sections), documented defaults, loud failures.
 
-#include <f4/world_convert/aii_config.hpp>
+#include <f4/world_types/aii_config.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -16,7 +16,7 @@
 
 namespace {
 
-namespace wc = f4::world_convert;
+namespace wt = f4::world_types;
 
 // Fixture shipped next to this test (F4_AII — see fixtures/Falcon4.AII).
 const std::filesystem::path fixture_path() {
@@ -44,13 +44,13 @@ struct TempIni {
 };
 
 TEST(AiiConfig, FixtureBubblesFromFreeFalconSpellings) {
-    const auto aii = wc::AiiConfig::load(fixture_path());
+    const auto aii = wt::AiiConfig::load(fixture_path());
     EXPECT_DOUBLE_EQ(aii.sim_bubble_size_grid(), 2.5);
     EXPECT_DOUBLE_EQ(aii.ground_bubble_size_grid(), 1.0);
 }
 
 TEST(AiiConfig, FixtureKeepsUndocumentedKeysReachable) {
-    const auto aii = wc::AiiConfig::load(fixture_path());
+    const auto aii = wt::AiiConfig::load(fixture_path());
     // Typed fields are only the two bubble settings — everything else
     // stays in the raw map (opt-in per key, no struct accretion).
     const auto* task = aii.lookup("ground", "MIN_TASK_GROUND");
@@ -71,7 +71,7 @@ TEST(AiiConfig, FileLayoutSpellingsAreAcceptedAliases) {
     TempIni ini("[Sim]\n"
                 "SIM_BUBBLE_SIZE = 3.0\n"
                 "GROUND_BUBBLE_SIZE = 0.5\n");
-    const auto aii = wc::AiiConfig::load(ini.path);
+    const auto aii = wt::AiiConfig::load(ini.path);
     EXPECT_DOUBLE_EQ(aii.sim_bubble_size_grid(), 3.0);
     EXPECT_DOUBLE_EQ(aii.ground_bubble_size_grid(), 0.5);
 }
@@ -84,7 +84,7 @@ TEST(AiiConfig, FreeFalconSpellingWinsOverAlias) {
                 "SIM_BUBBLE_SIZE = 9.0\n"
                 "BubbleRatioToUnitSpan = 1.0\n"
                 "GROUND_BUBBLE_SIZE = 9.0\n");
-    const auto aii = wc::AiiConfig::load(ini.path);
+    const auto aii = wt::AiiConfig::load(ini.path);
     EXPECT_DOUBLE_EQ(aii.sim_bubble_size_grid(), 2.5);
     EXPECT_DOUBLE_EQ(aii.ground_bubble_size_grid(), 1.0);
 }
@@ -94,7 +94,7 @@ TEST(AiiConfig, KeysOutOfSimSectionFoundByScan) {
     // finds them (deterministic: folded section-name order).
     TempIni ini("[Drifted]\n"
                 "SIM_BUBBLE_SIZE = 4.0\n");
-    const auto aii = wc::AiiConfig::load(ini.path);
+    const auto aii = wt::AiiConfig::load(ini.path);
     EXPECT_DOUBLE_EQ(aii.sim_bubble_size_grid(), 4.0);
     // The untouched setting keeps its default.
     EXPECT_DOUBLE_EQ(aii.ground_bubble_size_grid(), 1.0);
@@ -105,14 +105,14 @@ TEST(AiiConfig, MissingKeysKeepDocumentedDefaults) {
     // settings resolve to the documented defaults.
     TempIni ini("[Atc]\n"
                 "MaxApproachSpacing = 9000\n");
-    const auto aii = wc::AiiConfig::load(ini.path);
+    const auto aii = wt::AiiConfig::load(ini.path);
     EXPECT_DOUBLE_EQ(aii.sim_bubble_size_grid(), 2.5);
     EXPECT_DOUBLE_EQ(aii.ground_bubble_size_grid(), 1.0);
 }
 
 TEST(AiiConfig, EmptyFileIsValidAllDefaults) {
     TempIni ini("");
-    const auto aii = wc::AiiConfig::load(ini.path);
+    const auto aii = wt::AiiConfig::load(ini.path);
     EXPECT_DOUBLE_EQ(aii.sim_bubble_size_grid(), 2.5);
     EXPECT_DOUBLE_EQ(aii.ground_bubble_size_grid(), 1.0);
     EXPECT_TRUE(aii.sections().empty());
@@ -125,7 +125,7 @@ TEST(AiiConfig, CommentsAndDuplicateKeysLastWins) {
                 "MinBubbleSize = 2.0 ; duplicate — last wins\n"
                 "\n"
                 "\t\n"); // whitespace-only lines are skipped
-    const auto aii = wc::AiiConfig::load(ini.path);
+    const auto aii = wt::AiiConfig::load(ini.path);
     EXPECT_DOUBLE_EQ(aii.sim_bubble_size_grid(), 2.0);
 }
 
@@ -136,7 +136,7 @@ TEST(AiiConfig, MalformedLinesFailLoudlyWithLineNumbers) {
         EXPECT_THROW(
             {
                 try {
-                    wc::AiiConfig::load(ini.path);
+                    wt::AiiConfig::load(ini.path);
                 } catch (const std::runtime_error& e) {
                     EXPECT_NE(std::string(e.what()).find(":3:"),
                               std::string::npos)
@@ -152,7 +152,7 @@ TEST(AiiConfig, MalformedLinesFailLoudlyWithLineNumbers) {
         EXPECT_THROW(
             {
                 try {
-                    wc::AiiConfig::load(ini.path);
+                    wt::AiiConfig::load(ini.path);
                 } catch (const std::runtime_error& e) {
                     EXPECT_NE(std::string(e.what()).find("before any"),
                               std::string::npos)
@@ -168,7 +168,7 @@ TEST(AiiConfig, MalformedLinesFailLoudlyWithLineNumbers) {
         EXPECT_THROW(
             {
                 try {
-                    wc::AiiConfig::load(ini.path);
+                    wt::AiiConfig::load(ini.path);
                 } catch (const std::runtime_error& e) {
                     EXPECT_NE(std::string(e.what()).find("unterminated"),
                               std::string::npos)
@@ -184,7 +184,7 @@ TEST(AiiConfig, MalformedLinesFailLoudlyWithLineNumbers) {
         EXPECT_THROW(
             {
                 try {
-                    wc::AiiConfig::load(ini.path);
+                    wt::AiiConfig::load(ini.path);
                 } catch (const std::runtime_error& e) {
                     EXPECT_NE(std::string(e.what()).find("trailing junk"),
                               std::string::npos)
@@ -200,7 +200,7 @@ TEST(AiiConfig, MalformedLinesFailLoudlyWithLineNumbers) {
         EXPECT_THROW(
             {
                 try {
-                    wc::AiiConfig::load(ini.path);
+                    wt::AiiConfig::load(ini.path);
                 } catch (const std::runtime_error& e) {
                     EXPECT_NE(std::string(e.what()).find("empty key"),
                               std::string::npos)
@@ -219,7 +219,7 @@ TEST(AiiConfig, NonNumericBubbleValueFailsLoudly) {
     EXPECT_THROW(
         {
             try {
-                wc::AiiConfig::load(ini.path);
+                wt::AiiConfig::load(ini.path);
             } catch (const std::runtime_error& e) {
                 EXPECT_NE(std::string(e.what()).find("not a number"),
                           std::string::npos)
@@ -232,12 +232,12 @@ TEST(AiiConfig, NonNumericBubbleValueFailsLoudly) {
 
 TEST(AiiConfig, LoadIfExistsAbsentPathKeepsFallback) {
     // Empty path — the "not configured" case every pre-B.0 caller runs.
-    const auto empty = wc::AiiConfig::load_if_exists({});
+    const auto empty = wt::AiiConfig::load_if_exists({});
     EXPECT_DOUBLE_EQ(empty.sim_bubble_size_grid(), 2.5);
     EXPECT_DOUBLE_EQ(empty.ground_bubble_size_grid(), 1.0);
 
     // Missing file — same.
-    const auto missing = wc::AiiConfig::load_if_exists(
+    const auto missing = wt::AiiConfig::load_if_exists(
         std::filesystem::temp_directory_path() /
         "f4_aii_no_such_file_9x7z.aII");
     EXPECT_DOUBLE_EQ(missing.sim_bubble_size_grid(), 2.5);
@@ -245,21 +245,21 @@ TEST(AiiConfig, LoadIfExistsAbsentPathKeepsFallback) {
 
     // A caller-supplied fallback propagates (here: identical defaults —
     // the point is the fallback path returns it untouched).
-    const auto custom = wc::AiiConfig::load_if_exists(
+    const auto custom = wt::AiiConfig::load_if_exists(
         std::filesystem::temp_directory_path() / "f4_aii_no_such_file_9x7z.aII",
-        wc::AiiConfig{});
+        wt::AiiConfig{});
     EXPECT_DOUBLE_EQ(custom.sim_bubble_size_grid(), 2.5);
 }
 
 TEST(AiiConfig, LoadIfExistsPresentFileStillParses) {
     TempIni ini("[Sim]\nMinBubbleSize = 3.25\n");
-    const auto aii = wc::AiiConfig::load_if_exists(ini.path);
+    const auto aii = wt::AiiConfig::load_if_exists(ini.path);
     EXPECT_DOUBLE_EQ(aii.sim_bubble_size_grid(), 3.25);
 }
 
 TEST(AiiConfig, MissingFileThrowsFromLoad) {
     // load() (unlike load_if_exists) is loud about a missing file.
-    EXPECT_THROW(wc::AiiConfig::load(
+    EXPECT_THROW(wt::AiiConfig::load(
                      std::filesystem::temp_directory_path() /
                      "f4_aii_no_such_file_9x7z.aII"),
                  std::runtime_error);

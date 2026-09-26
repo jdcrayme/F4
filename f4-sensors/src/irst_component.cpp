@@ -7,6 +7,7 @@
 // factor for ground targets.
 
 #include <f4/sensors/irst_component.hpp>
+#include <f4/geo/constants.hpp>
 
 #include <f4/sensors/signature.hpp>
 
@@ -25,7 +26,7 @@ namespace f4::sensors {
 namespace {
 
 constexpr double kStationarySpeedFps = 1.0;   // radar's convention
-constexpr double kFeetPerNm = 6076.11548;
+constexpr double kFeetPerNm = f4::geo::FEET_PER_NM;  // single-sourced (was a literal)
 
 inline double angle_diff(double a, double b) noexcept {
     double d = a - b;

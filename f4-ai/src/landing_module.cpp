@@ -4,6 +4,7 @@
 // taxi-in. See header for the geometry conventions.
 
 #include "f4/ai/modules/landing_module.hpp"
+#include <f4/math/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -11,7 +12,7 @@
 namespace f4::ai::modules {
 
 namespace {
-constexpr double PI = 3.14159265358979323846;
+using f4::math::PI;
 constexpr double D2R = PI / 180.0;
 } // namespace
 

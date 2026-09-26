@@ -736,8 +736,6 @@ namespace f4::entities {
         double   max_hit_points = 0.0;   // nominal (VCD hit_points) value
         bool     killed       = false;
         uint64_t killed_by    = 0;       // EntityId::value of the shooter (0 = unknown)
-        uint64_t killed_at_tick = 0;     // killer-system-local tick of the killing blow
-                                         // (f4-weapons stores the missile's flown ticks)
     };
 
     /// Movement orders for ground units (Battalion / Brigade / TaskForce).

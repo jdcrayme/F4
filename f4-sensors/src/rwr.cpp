@@ -1,6 +1,7 @@
 // f4-sensors/src/rwr.cpp — RWR pure model + world-level sweep. See rwr.hpp.
 
 #include <f4/sensors/rwr.hpp>
+#include <f4/geo/constants.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -13,7 +14,7 @@ namespace f4::sensors {
 
 namespace {
 
-constexpr double kFeetPerNm = 6076.11548;
+constexpr double kFeetPerNm = f4::geo::FEET_PER_NM;  // single-sourced (was a literal)
 
 inline int warning_rank(RwrWarningType t) noexcept {
     switch (t) {

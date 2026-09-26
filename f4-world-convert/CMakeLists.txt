@@ -33,7 +33,6 @@ add_library(f4-world-convert STATIC
     src/team_decoder.cpp
     src/team_encoder.cpp
     src/class_table.cpp
-    src/aii_config.cpp
     src/theater_data.cpp
     src/world_json.cpp
     src/scenario_pack.cpp

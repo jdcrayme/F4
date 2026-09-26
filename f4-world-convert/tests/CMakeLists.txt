@@ -26,7 +26,6 @@ target_compile_definitions(test_class_table PRIVATE
     FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/"
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
 gtest_discover_tests(test_class_table PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
-f4_add_test(test_aii_config   test_aii_config.cpp)
 f4_add_test(test_objectives   test_objectives.cpp)
 f4_add_test(test_units        test_units.cpp)
 # The vehicle-group regression test strict-parses the export with the
