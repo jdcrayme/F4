@@ -62,14 +62,14 @@ target_link_libraries(json2cam PRIVATE f4-world-convert f4-io)
 # Tranche 0a.1 (NO_BINARY_RUNTIME_PLAN.md): eliminates the binary .ct from
 # the runtime. ClassTable::load_json() is the consumer-side counterpart.
 add_executable(ct2json cli/ct2json.cpp)
-target_link_libraries(ct2json PRIVATE f4-world-convert f4-json f4-io)
+target_link_libraries(ct2json PRIVATE f4-world-convert f4-json f4-io f4-assets)
 
 # CLI tool: wcd2json — convert Falcon4.WCD (binary campaign weapon-class
 # table) to open JSON. The real-data tier's weapon export
 # (COMBAT_CHAIN_PLAN.md §5): f4-weapons' wcd_weapon_data loader is the
 # runtime consumer.
 add_executable(wcd2json cli/wcd2json.cpp)
-target_link_libraries(wcd2json PRIVATE f4-world-convert f4-json f4-io)
+target_link_libraries(wcd2json PRIVATE f4-world-convert f4-json f4-io f4-assets)
 
 # CLI tool: campinit — CAMP-INIT-1's create-from-parameters face. Generates
 # a fresh .cam (Task-70 encoder stack + CamWriter) and its world JSON (the

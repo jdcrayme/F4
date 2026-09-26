@@ -38,6 +38,7 @@ target_link_libraries(f4-convert PUBLIC
     f4-data
 PRIVATE
     f4-math
+    f4-install
 )
 
 # ---------------------------------------------------------------------------

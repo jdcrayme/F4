@@ -28,6 +28,7 @@
 // }
 
 #include <f4/world_convert/class_table.hpp>
+#include <f4/assets/hash.hpp>
 #include <f4/json/writer.hpp>
 #include <f4/io/read_file.hpp>
 
@@ -45,23 +46,6 @@ namespace json = f4::json;
 
 namespace {
 
-// Compute a simple SHA-256-compatible content hash for the manifest. Uses
-// a stub here (the real manifest writer lives in f4-import; this CLI is
-// dependency-light). Returns a hex string of the file size + first/last
-// 32 bytes — enough for staleness detection without a crypto dependency.
-std::string content_fingerprint(const std::vector<uint8_t>& data) {
-    // FNV-1a 64-bit over the whole file — fast, no deps, good enough for
-    // staleness detection (the manifest's job is "did this file change?",
-    // not "is this file authentic?").
-    uint64_t h = 14695981039346656037ULL;  // FNV offset basis
-    for (uint8_t b : data) {
-        h ^= b;
-        h *= 1099511628211ULL;  // FNV prime
-    }
-    char buf[17];
-    std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(h));
-    return std::string(buf);
-}
 
 int run(const fs::path& ct_path, const fs::path& out_path, bool data_dir_mode) {
     // Load the binary class table (the library's existing decoder).
@@ -92,7 +76,8 @@ int run(const fs::path& ct_path, const fs::path& out_path, bool data_dir_mode) {
     w.string("version"); w.raw(":"); w.number(1); w.raw(",\n");
     w.string("source"); w.raw(":"); w.string(ct_path.filename().string()); w.raw(",\n");
     // FNV-1a fingerprint of the source binary — the manifest's staleness key.
-    w.string("source_fingerprint"); w.raw(":"); w.string(content_fingerprint(raw)); w.raw(",\n");
+    w.string("source_fingerprint"); w.raw(":"); w.string(f4::assets::fnv1a_64_hex({reinterpret_cast<const char*>(raw.data()),
+                                     raw.size()})); w.raw(",\n");
     w.string("first_entity_type"); w.raw(":"); w.number(100); w.raw(",\n");
     w.string("count"); w.raw(":"); w.number(static_cast<std::uint64_t>(ct.size())); w.raw(",\n");
     w.string("entries"); w.raw(": [\n");

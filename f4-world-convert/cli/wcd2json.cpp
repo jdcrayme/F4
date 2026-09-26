@@ -41,6 +41,7 @@
 // }
 
 #include <f4/world_convert/theater_data.hpp>
+#include <f4/assets/hash.hpp>
 #include <f4/json/writer.hpp>
 #include <f4/io/read_file.hpp>
 
@@ -58,18 +59,6 @@ namespace json = f4::json;
 
 namespace {
 
-// FNV-1a 64-bit over the raw binary — the same staleness fingerprint
-// ct2json writes (the manifest's "did this file change?" key).
-std::string content_fingerprint(const std::vector<uint8_t>& data) {
-    uint64_t h = 14695981039346656037ULL;  // FNV offset basis
-    for (uint8_t b : data) {
-        h ^= b;
-        h *= 1099511628211ULL;  // FNV prime
-    }
-    char buf[17];
-    std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(h));
-    return std::string(buf);
-}
 
 int run(const fs::path& db_dir, const fs::path& out_path, bool data_dir_mode) {
     // Load the binary weapon table (the library's existing decoder). The
@@ -116,7 +105,8 @@ int run(const fs::path& db_dir, const fs::path& out_path, bool data_dir_mode) {
     w.string("format"); w.raw(":"); w.string("f4-weapon-class-table"); w.raw(",\n");
     w.string("version"); w.raw(":"); w.number(1); w.raw(",\n");
     w.string("source"); w.raw(":"); w.string("FALCON4.WCD"); w.raw(",\n");
-    w.string("source_fingerprint"); w.raw(":"); w.string(content_fingerprint(raw)); w.raw(",\n");
+    w.string("source_fingerprint"); w.raw(":"); w.string(f4::assets::fnv1a_64_hex({reinterpret_cast<const char*>(raw.data()),
+                                     raw.size()})); w.raw(",\n");
     w.string("count"); w.raw(":"); w.number(static_cast<std::uint64_t>(wcd.entries.size())); w.raw(",\n");
     w.string("entries"); w.raw(": [\n");
     for (std::size_t i = 0; i < wcd.entries.size(); ++i) {

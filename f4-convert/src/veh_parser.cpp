@@ -4,6 +4,7 @@
 // for the format contract and the reference quirks).
 
 #include "f4/convert/veh_parser.hpp"
+#include <f4/install/file_finder.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -89,19 +90,12 @@ std::string stemOf(const std::string& listedPath) {
 // Returns an empty path when not found.
 fs::path resolveVehPath(const std::string& vehDir, const std::string& listed) {
     if (vehDir.empty()) return {};
+    // The .lst's entries may carry a subdirectory prefix; the scan is
+    // over the bare filename (the canonical finder's job from here).
     std::size_t slash = listed.find_last_of("/\\");
     const std::string base =
         slash == std::string::npos ? listed : listed.substr(slash + 1);
-    const std::string want = lowercase(base);
-    std::error_code ec;
-    for (fs::directory_iterator it(vehDir, ec), end; it != end && !ec;
-         it.increment(ec)) {
-        if (!it->is_regular_file(ec)) continue;
-        if (lowercase(it->path().filename().string()) == want) {
-            return it->path();
-        }
-    }
-    return {};
+    return f4::install::find_file_ci(vehDir, base);
 }
 
 struct VehFileParser {

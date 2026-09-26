@@ -4,6 +4,7 @@
 // for the format contract).
 
 #include "f4/convert/signature_parser.hpp"
+#include <f4/install/file_finder.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -71,16 +72,7 @@ std::string readFileToString(const std::string& path, bool& ok) {
 
 fs::path resolveInDir(const std::string& dir, const std::string& name) {
     if (dir.empty()) return {};
-    const std::string want = lowercase(name);
-    std::error_code ec;
-    for (fs::directory_iterator it(dir, ec), end; it != end && !ec;
-         it.increment(ec)) {
-        if (!it->is_regular_file(ec)) continue;
-        if (lowercase(it->path().filename().string()) == want) {
-            return it->path();
-        }
-    }
-    return {};
+    return f4::install::find_file_ci(dir, name);
 }
 
 } // namespace
