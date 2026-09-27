@@ -4,9 +4,13 @@
 // that map objective types and unit classes to SymbolKind values.
 // No Raylib GPU context or ImGui needed.
 
+#include <f4/renderer/symbol_library.hpp>
 #include <f4/renderer/symbols.hpp>
 
 #include <gtest/gtest.h>
+
+#include <string>
+#include <vector>
 
 using namespace f4::renderer;
 using UC = f4::entities::UnitClass;
@@ -272,3 +276,53 @@ TEST(SymbolMapping, UnitClass_Deterministic) {
         }
     }
 }
+
+// ── SymbolLibraryKey seam (the data-driven vocabulary's coverage) ────────────
+// Every SymbolKind must name library definitions that exist in the
+// committed f4_symbols.json corpus — the contract the SYMBOL-SVG-1 wiring
+// consumes (RenderEntityIcon prefers library keys, procedural fallback).
+// A missing key here means the wiring would silently fall back for a kind
+// the library was supposed to cover.
+
+#ifdef F4_SYMBOLS_JSON_PATH
+TEST(SymbolKeySeam, EveryKindNamesCorpusKeys) {
+    const auto corpus = f4::renderer::load_symbol_library(F4_SYMBOLS_JSON_PATH);
+    ASSERT_GT(corpus.size(), 0u) << "corpus loaded empty";
+    for (int i = 0; i < static_cast<int>(f4::renderer::SymbolKind::SymbolCount);
+         ++i) {
+        const auto kind = static_cast<f4::renderer::SymbolKind>(i);
+        const auto key = f4::renderer::symbol_key_for_kind(kind);
+        ASSERT_NE(key.primary, nullptr) << "kind " << i << " has no primary key";
+        EXPECT_NE(corpus.find(key.primary), nullptr)
+            << "kind " << i << ": primary key '" << key.primary
+            << "' missing from the corpus";
+        if (key.glyph != nullptr) {
+            EXPECT_NE(corpus.find(key.glyph), nullptr)
+                << "kind " << i << ": glyph key '" << key.glyph
+                << "' missing from the corpus";
+        }
+    }
+}
+
+TEST(SymbolKeySeam, PrimaryKeysAreUnique) {
+    // A duplicated primary would silently render one kind's symbol for
+    // another — the table must stay 1:1 with the corpus definitions. The
+    // one documented exception: UnitUnknown falls back AT frame_squadron
+    // (the circle frame — the corpus deliberately has no unit_unknown).
+    std::vector<const char*> seen;
+    for (int i = 0; i < static_cast<int>(f4::renderer::SymbolKind::SymbolCount);
+         ++i) {
+        const auto kind = static_cast<f4::renderer::SymbolKind>(i);
+        const auto key = f4::renderer::symbol_key_for_kind(kind);
+        if (kind == f4::renderer::SymbolKind::UnitUnknown) {
+            EXPECT_STREQ(key.primary, "frame_squadron");
+            continue;
+        }
+        for (const char* prior : seen) {
+            EXPECT_STRNE(prior, key.primary)
+                << "kind " << i << " duplicates '" << key.primary << "'";
+        }
+        seen.push_back(key.primary);
+    }
+}
+#endif

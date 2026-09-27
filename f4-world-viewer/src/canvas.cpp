@@ -455,7 +455,7 @@ void ViewerApp::draw_canvas() {
                 for (uint32_t x = 0; x < gw; ++x) {
                     const auto t = td.tile_type_at(x, y);
                     const auto c = f4::terrain::TerrainData::color_for_tile_type(t);
-                    const RlColor rc = to_rl(c);
+                    const f4::renderer::RlColor rc = to_rl(c);
                     const Vector2 p0 = impl_->world_to_screen(x * scale, y * scale);
                     const Vector2 p1 = impl_->world_to_screen((x + 1) * scale, (y + 1) * scale);
                     const Rectangle rect = {p0.x, p1.y, p1.x - p0.x, p0.y - p1.y};
@@ -583,7 +583,7 @@ void ViewerApp::draw_canvas() {
             }
 
             // Team filter
-            RlColor c = color_for_owner(owner);
+            f4::renderer::RlColor c = color_for_owner(owner);
             if (impl_->team_filter != 0xFF && owner != impl_->team_filter) {
                 c.r = static_cast<unsigned char>(c.r * 0.3f);
                 c.g = static_cast<unsigned char>(c.g * 0.3f);
@@ -591,7 +591,7 @@ void ViewerApp::draw_canvas() {
                 c.a = static_cast<unsigned char>(c.a * 0.3f);
             }
 
-            const RlColor outline = {
+            const f4::renderer::RlColor outline = {
                 static_cast<unsigned char>(c.r * 0.4f),
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
@@ -618,7 +618,7 @@ void ViewerApp::draw_canvas() {
                 f4::renderer::RenderEntityIcon(h, p.x, p.y, base_size, c,
                                                outline);
             } else {
-                const RlColor dim{static_cast<unsigned char>(c.r * 0.5f),
+                const f4::renderer::RlColor dim{static_cast<unsigned char>(c.r * 0.5f),
                                   static_cast<unsigned char>(c.g * 0.5f),
                                   static_cast<unsigned char>(c.b * 0.5f),
                                   70};
@@ -795,7 +795,7 @@ void ViewerApp::draw_canvas() {
             // Owner from tag
             auto team_tag = h.get_tag(f4::entities::tags::TEAM);
             const uint8_t owner = (team_tag && team_tag->as_int()) ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
-            RlColor c = color_for_owner(owner);
+            f4::renderer::RlColor c = color_for_owner(owner);
             if (impl_->team_filter != 0xFF && owner != impl_->team_filter) {
                 c.r = static_cast<unsigned char>(c.r * 0.3f);
                 c.g = static_cast<unsigned char>(c.g * 0.3f);
@@ -813,7 +813,7 @@ void ViewerApp::draw_canvas() {
                 c.b = static_cast<unsigned char>(c.b * 0.3f);
                 c.a = static_cast<unsigned char>(c.a * 0.3f);
             }
-            const RlColor outline = {
+            const f4::renderer::RlColor outline = {
                 static_cast<unsigned char>(c.r * 0.4f),
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
@@ -980,7 +980,7 @@ void ViewerApp::draw_canvas() {
                            Color{xcol, xcol, xcol, 150});
                 continue;
             }
-            RlColor c = color_for_owner(static_cast<std::uint8_t>(t.team));
+            f4::renderer::RlColor c = color_for_owner(static_cast<std::uint8_t>(t.team));
             if (impl_->team_filter != 0xFF && t.team != impl_->team_filter) {
                 c.r = static_cast<unsigned char>(c.r * 0.3f);
                 c.g = static_cast<unsigned char>(c.g * 0.3f);
@@ -995,7 +995,7 @@ void ViewerApp::draw_canvas() {
                 // AGG: translucent fill — the aggregate look.
                 c.a = 205;
             }
-            const RlColor agg_outline = {
+            const f4::renderer::RlColor agg_outline = {
                 static_cast<unsigned char>(c.r * 0.4f),
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
@@ -1047,7 +1047,7 @@ void ViewerApp::draw_canvas() {
             // Owner color (campaign origin; gray for unattributed).
             auto* org = h.get<f4::simulation::CampaignOriginComponent>();
             const uint8_t owner = org ? org->team_slot : 0;
-            RlColor c = color_for_owner(owner);
+            f4::renderer::RlColor c = color_for_owner(owner);
             if (impl_->team_filter != 0xFF && owner != impl_->team_filter) {
                 c.r = static_cast<unsigned char>(c.r * 0.3f);
                 c.g = static_cast<unsigned char>(c.g * 0.3f);
@@ -1093,7 +1093,7 @@ void ViewerApp::draw_canvas() {
             // The symbol: fighter glyph, filled owner color, airborne
             // full-strength / grounded dimmed (the taxiing picture at
             // campaign speed is mostly ground traffic at the start).
-            const RlColor outline = {
+            const f4::renderer::RlColor outline = {
                 static_cast<unsigned char>(c.r * 0.4f),
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
@@ -1201,8 +1201,8 @@ void ViewerApp::draw_canvas() {
             // otherwise (scenario templates' aircraft don't all carry a
             // campaign origin).
             auto* org = h.get<f4::simulation::CampaignOriginComponent>();
-            RlColor c = org ? color_for_owner(org->team_slot)
-                            : RlColor{80, 200, 220, 255};
+            f4::renderer::RlColor c = org ? color_for_owner(org->team_slot)
+                            : f4::renderer::RlColor{80, 200, 220, 255};
 
             // Route polyline (BELOW the symbol): the selected aircraft's
             // always; the rest when "all flight plans" is on.
@@ -1238,7 +1238,7 @@ void ViewerApp::draw_canvas() {
 
             // Symbol: fighter glyph with a cyan outline — visibly a QC
             // aircraft even when a session paints its own picture on top.
-            const RlColor outline{80, 200, 220, 255};
+            const f4::renderer::RlColor outline{80, 200, 220, 255};
             auto* fm = h.get<f4::flight::FlightModelComponent>();
             const bool airborne = fm && fm->model().state().gear.inAir;
             if (!airborne) {
@@ -1292,7 +1292,7 @@ void ViewerApp::draw_canvas() {
 
             auto* org = h.get<f4::simulation::CampaignOriginComponent>();
             const uint8_t owner = org ? org->team_slot : 0;
-            RlColor c = color_for_owner(owner);
+            f4::renderer::RlColor c = color_for_owner(owner);
             // Parked = dim (the ramp picture, not the air picture).
             c.r = static_cast<unsigned char>(c.r * 0.45f);
             c.g = static_cast<unsigned char>(c.g * 0.45f);
@@ -1413,7 +1413,7 @@ void ViewerApp::draw_canvas() {
                     (p.y < sy_min && q.y < sy_min) ||
                     (p.y > sy_max && q.y > sy_max)) continue;
 
-                const RlColor c = color_for_owner(owner);
+                const f4::renderer::RlColor c = color_for_owner(owner);
                 const float width = is_sel ? 2.5f : 1.0f;
                 const uint8_t alpha = is_sel ? 235 : 130;
                 DrawLineEx(p, q, width,
@@ -1552,7 +1552,7 @@ void ViewerApp::draw_canvas() {
             const bool is_selected =
                 (impl_->sel_kind == Impl::SelectionKind::Objective &&
                  impl_->sel_entity == eid);
-            const RlColor owner = color_for_owner(own->team);
+            const f4::renderer::RlColor owner = color_for_owner(own->team);
             for (int arc = 0; arc < 8; ++arc) {
                 const float ratio = rad->detect_ratio[arc];
                 if (ratio <= 0.0f) continue;
@@ -1689,7 +1689,7 @@ void ViewerApp::draw_canvas() {
                 auto* own = h.get<f4::entities::OwnershipComponent>();
                 if (!tr || !own) continue;
                 const Vector2 p = world_to_mini(impl_->grid_x(tr), impl_->grid_y(tr));
-                const RlColor oc = color_for_owner(own->team);
+                const f4::renderer::RlColor oc = color_for_owner(own->team);
                 if (impl_->sel_kind == Impl::SelectionKind::Objective &&
                     impl_->sel_entity == eid) {
                     DrawCircleV(p, 3.0f, Color{255, 255, 100, 255});
@@ -1708,7 +1708,7 @@ void ViewerApp::draw_canvas() {
                 auto team_tag = h.get_tag(f4::entities::tags::TEAM);
                 const uint8_t owner = (team_tag && team_tag->as_int()) ? static_cast<uint8_t>(*team_tag->as_int()) : 0;
                 const Vector2 p = world_to_mini(impl_->grid_x(tr), impl_->grid_y(tr));
-                const RlColor uc = color_for_owner(owner);
+                const f4::renderer::RlColor uc = color_for_owner(owner);
                 DrawPixel(static_cast<int>(p.x), static_cast<int>(p.y),
                           Color{uc.r, uc.g, uc.b, 255});
             }

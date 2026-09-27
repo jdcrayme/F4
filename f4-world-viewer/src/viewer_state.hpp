@@ -113,7 +113,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "symbols.hpp"  // Backward-compat aliases → f4::renderer::SymbolKind etc.
+#include <f4/renderer/symbols.hpp>           // SymbolKind, RlColor, draw_symbol
 #include <f4/renderer/ground_layout_models.hpp>  // AirfieldGeometry3D + builder (shared)
 using f4::renderer::AirfieldGeometry3D;
 
@@ -126,11 +126,7 @@ namespace f4::viewer {
 // tile rendering, objective icon tinting, unit fill colors) and
 // imgui_panels.cpp (the legend panel swatches).
 // ---------------------------------------------------------------------------
-// RlColor now comes from f4::renderer::RlColor via the using alias
-// in symbols.hpp. The struct layout is identical:
-//   struct RlColor { unsigned char r, g, b, a; };
-
-inline RlColor color_for_owner(uint8_t owner) {
+inline f4::renderer::RlColor color_for_owner(uint8_t owner) {
     switch (owner) {
         case 0:  return {128, 128, 128, 255}; // neutral — gray
         case 1:  return {220,  60,  60, 255}; // enemy — red
@@ -143,7 +139,7 @@ inline RlColor color_for_owner(uint8_t owner) {
     }
 }
 
-inline RlColor to_rl(const f4::terrain::Color4& c) {
+inline f4::renderer::RlColor to_rl(const f4::terrain::Color4& c) {
     return {c.r, c.g, c.b, c.a};
 }
 
@@ -953,11 +949,9 @@ struct ViewerApp::Impl {
 
     // --- Procedural symbols ---
     //
-    // Symbol drawing is now provided by f4::renderer::draw_symbol()
-    // (raylib direct) and f4::renderer::draw_symbol_imgui() (ImGui draw
-    // list). Call sites in canvas.cpp use f4::renderer::draw_symbol()
-    // directly; imgui_panels.cpp uses draw_symbol_imgui() via the
-    // f4::viewer::draw_symbol_imgui using alias from symbols.hpp.
+    // Symbol drawing lives in f4::renderer (symbols.hpp: draw_symbol /
+    // draw_symbol_imgui; the SymbolLibrary seam in symbol_library.hpp).
+    // Call sites qualify f4::renderer names directly.
 
     // --- Camera transforms (defined in camera.cpp) ---
 

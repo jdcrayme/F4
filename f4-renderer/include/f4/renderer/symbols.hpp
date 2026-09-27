@@ -138,6 +138,32 @@ enum class SymbolKind : uint16_t {
 [[nodiscard]] SymbolKind symbol_for_unit(f4::entities::UnitClass cls,
                                           uint8_t subtype) noexcept;
 
+// ---------------------------------------------------------------------------
+// SymbolLibraryKey — the data-driven vocabulary's address for a SymbolKind.
+//
+// This is the SEAM the SymbolLibrary (symbol_library.hpp, backed by
+// f4_symbols.json) is consumed through: every procedural SymbolKind names
+// the library definition that replaces it. Objectives address their shape
+// directly ("obj_airbase"); unit frames address their frame
+// ("frame_battalion"); composed unit kinds carry BOTH the standalone
+// composed symbol ("unit_armor" — frame and glyph baked) and the
+// frame-agnostic glyph ("glyph_armor") for the compositional render path.
+// `primary`/`glyph` are never null for valid kinds except a unit's glyph
+// when the kind IS a frame; UnitUnknown maps at the circle frame
+// (frame_squadron) — the procedural fallback's own shape — because the
+// corpus deliberately has no unit_unknown definition.
+// ---------------------------------------------------------------------------
+struct SymbolLibraryKey {
+    const char* primary;   // objective shape / unit frame / composed unit symbol
+    const char* glyph;     // frame-agnostic glyph (composed unit kinds only)
+};
+
+// The canonical SymbolKind -> library-key mapping. Pure function over a
+// static table; the coverage test (test_symbol_keys.cpp) pins every key
+// against the committed f4_symbols.json corpus so the wiring can never
+// silently fall back for a kind the library actually defines.
+[[nodiscard]] SymbolLibraryKey symbol_key_for_kind(SymbolKind kind) noexcept;
+
 // Free-function ImGui variant — renders the same symbol vocabulary into an
 // ImGui draw list for use in panels/legends. Defined in symbols.cpp.
 //   dl          — target draw list (e.g. ImGui::GetWindowDrawList())

@@ -26,6 +26,78 @@
 namespace f4::renderer {
 
 // ---------------------------------------------------------------------------
+// SymbolKind -> SymbolLibraryKey (the data-driven vocabulary's seam)
+// ---------------------------------------------------------------------------
+// Table order MUST match the SymbolKind enum order (objectives, unit
+// frames, composed unit kinds in ground/air/naval order, UnitUnknown) —
+// test_symbol_keys.cpp pins every key against the committed
+// f4_symbols.json corpus and static_asserts the size below.
+namespace {
+
+constexpr SymbolLibraryKey kLibraryKeys[] = {
+    // === Objectives ===
+    {"obj_airbase", nullptr},       {"obj_airstrip", nullptr},
+    {"obj_army_base", nullptr},     {"obj_beach", nullptr},
+    {"obj_border", nullptr},        {"obj_bridge", nullptr},
+    {"obj_chemical", nullptr},      {"obj_city", nullptr},
+    {"obj_com_control", nullptr},   {"obj_depot", nullptr},
+    {"obj_factory", nullptr},       {"obj_ford", nullptr},
+    {"obj_fortification", nullptr}, {"obj_hill_top", nullptr},
+    {"obj_intersection", nullptr},  {"obj_nuclear", nullptr},
+    {"obj_pass", nullptr},          {"obj_port", nullptr},
+    {"obj_power_plant", nullptr},   {"obj_radar", nullptr},
+    {"obj_radio_tower", nullptr},   {"obj_rail_terminal", nullptr},
+    {"obj_railroad", nullptr},      {"obj_refinery", nullptr},
+    {"obj_road", nullptr},          {"obj_sam_site", nullptr},
+    {"obj_town", nullptr},          {"obj_village", nullptr},
+    {"obj_harts", nullptr},         {"obj_air_terminal", nullptr},
+    {"obj_unknown", nullptr},
+    // === Unit frames ===
+    {"frame_battalion", nullptr},   {"frame_brigade", nullptr},
+    {"frame_squadron", nullptr},    {"frame_task_force", nullptr},
+    {"frame_flight", nullptr},      {"frame_package", nullptr},
+    // === Ground unit kinds (composed symbol + frame-agnostic glyph) ===
+    {"unit_armor", "glyph_armor"},
+    {"unit_air_defense", "glyph_air_defense"},
+    {"unit_airmobile", "glyph_airmobile"},
+    {"unit_armored_cav", "glyph_armored_cav"},
+    {"unit_artillery", "glyph_artillery"},
+    {"unit_hq", "glyph_hq"},
+    {"unit_infantry", "glyph_infantry"},
+    {"unit_engineer", "glyph_engineer"},
+    {"unit_marine", "glyph_marine"},
+    {"unit_mechanized", "glyph_mechanized"},
+    {"unit_rocket", "glyph_rocket"},
+    {"unit_sa_missile", "glyph_sa_missile"},
+    {"unit_supply", "glyph_supply"},
+    // === Air unit kinds ===
+    {"unit_fighter", "glyph_fighter"},
+    {"unit_bomber", "glyph_bomber"},
+    {"unit_transport", "glyph_transport"},
+    {"unit_helicopter", "glyph_helicopter"},
+    // === Naval unit kinds ===
+    {"unit_carrier", "glyph_carrier"},
+    {"unit_naval_surface", "glyph_naval_surface"},
+    // === Fallback: no unit_unknown in the corpus — the circle frame IS
+    // the procedural fallback's shape ===
+    {"frame_squadron", nullptr},
+};
+
+static_assert(sizeof(kLibraryKeys) / sizeof(kLibraryKeys[0]) ==
+                  static_cast<size_t>(SymbolKind::SymbolCount),
+              "kLibraryKeys must cover every SymbolKind exactly once");
+
+} // namespace
+
+SymbolLibraryKey symbol_key_for_kind(SymbolKind kind) noexcept {
+    const auto i = static_cast<std::size_t>(kind);
+    if (i >= sizeof(kLibraryKeys) / sizeof(kLibraryKeys[0])) {
+        return {"obj_unknown", nullptr};
+    }
+    return kLibraryKeys[i];
+}
+
+// ---------------------------------------------------------------------------
 // Mapping tables (pure functions)
 // ---------------------------------------------------------------------------
 

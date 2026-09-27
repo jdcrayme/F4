@@ -24,6 +24,8 @@ set_tests_properties(coord_transform PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
 add_executable(test_symbol_mapping test_symbol_mapping.cpp ${IMGUI_SOURCES})
 target_include_directories(test_symbol_mapping PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_compile_definitions(test_symbol_mapping PRIVATE
+    F4_SYMBOLS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../f4_symbols.json")
 target_link_libraries(test_symbol_mapping PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME symbol_mapping COMMAND test_symbol_mapping)
 set_tests_properties(symbol_mapping PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
