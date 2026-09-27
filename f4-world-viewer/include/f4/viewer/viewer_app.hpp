@@ -387,6 +387,12 @@ private:
     /// generated-missions table (click a row to select + pan to the
     /// target). See campaign_session_view.cpp.
     void draw_campaign_session_view();
+    /// V-CAMP: the "Event Log" window — the campaign's running log.
+    /// Every drained campaign event frozen into display text at
+    /// arrival, newest at the bottom, team-colored, substring-filtered.
+    /// The rows outlive the session. See event_log.hpp +
+    /// campaign_session_view.cpp.
+    void draw_event_log_view();
     /// V-CAMP: start/stop the live campaign session over the loaded
     /// world JSON (impl_->last_world_json_path). Start resolves the
     /// class table / aircraft config / mission profiles from the

@@ -260,6 +260,7 @@ void ViewerApp::draw_imgui() {
             ImGui::MenuItem("Campaign Info", nullptr, &impl_->show_campaign_info);
             ImGui::MenuItem("ATO / Tasking", nullptr, &impl_->show_ato);
             ImGui::MenuItem("Campaign Session", nullptr, &impl_->show_campaign_window);
+            ImGui::MenuItem("Event Log", nullptr, &impl_->show_event_log_window);
             ImGui::MenuItem("Mission QC", nullptr, &impl_->show_mission_qc);
             ImGui::MenuItem("Minimap", nullptr, &impl_->show_minimap);
             ImGui::EndMenu();
@@ -709,6 +710,10 @@ void ViewerApp::draw_imgui() {
     // V-CAMP: the live campaign session window (draw last — the
     // generated-missions table reads the same tick run() just drained).
     draw_campaign_session_view();
+
+    // V-CAMP: the campaign's running log (reads the rows the frame
+    // drain froze; outlives the session itself).
+    draw_event_log_view();
 
     // SHOWCASE-1: the Mission QC discovery window (scenario roster +
     // recorded traces → replay). See mission_qc_view.cpp.

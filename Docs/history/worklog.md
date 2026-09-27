@@ -37,3 +37,72 @@ is a follow-on when the procedural vocabulary deletes).
 Tests: test_symbol_draw 3/3; f4-renderer + f4-world-viewer ctest
 103/103; headless screenshot visually confirmed.
 
+
+---
+Task ID: EVENT-LOG-1
+Agent: main
+Task: The world viewer needed the original game's running theater log —
+the animated yellow circles (capture_markers: decaying rings on freshly
+captured objectives) show THAT something happened but never say WHAT.
+
+Work Log:
+- Found the machinery already in place: the CAMP-HOST-2 event stream is
+  armed at adopt (all kinds) and drained every frame into
+  `session_events` (capped 100) in refresh_session_snapshot; the
+  Campaign Session window's "Events" collapsing header rendered a
+  14-row tail. But its formatter's `default: return false` silently
+  dropped the pilot_assigned/pilot_lost/pilot_recovered/roe_changed/
+  slot_denied families (the comment deferred them to "when the war
+  books grow a face" — the books landed as CAMP-DOM-3/4 and nobody
+  circled back).
+- New `event_log.hpp/cpp` (f4-world-viewer/src, deliberately
+  ImGui-free): EventLogRow = {arrived_wall, abs_t (epoch + envelope t),
+  team slot (0xFF = teamless), frozen label[176]}.
+  event_log_append formats the row AT ARRIVAL — the objective-name
+  resolver (new Impl::objective_display_name on the render-plane seam)
+  runs while the session is alive, so the log reads back after the
+  session stops. Store = deque capped 2000, newest last, cleared at
+  adopt.
+- The window (ViewerApp::draw_event_log_view, in
+  campaign_session_view.cpp): substring filter, Follow tail-pin
+  (SetScrollHereY at the bottom), Clear, per-row team color dot from
+  color_for_owner (the map palette, one axis with the canvas).
+  Auto-opens with the session start (show_event_log_window), Windows
+  menu item alongside Campaign Session.
+- The compact feed in the Campaign Session window now delegates to the
+  SAME format_campaign_event_label — it gains the personnel/scheduling
+  lines for free; its local 95-line lambdas (event_time +
+  format_event_label) deleted.
+- Formatting quirks worth knowing: kill lines carry "[killer_sq vs
+  victim_sq]" (the feed's old line didn't name squadrons); slot_denied
+  renders the airbase name through the objective map (falls back to
+  "#id"); roe_changed renders level + scope ("RoE TIGHT: team 1").
+
+Found + fixed en route: objective_display_name's first cut resolved
+through the SESSION engine's objective_id_map — which only carries
+mission targets (the spawner feeds it), so every ground capture printed
+"#NNN". The POP map (PopulatedWorld.objective_id_map, populated by
+populate_world) carries EVERY world objective; the resolver now checks
+pop first and the session map second (Impl::objective_entity returns
+the entity + which world owns it). The canvas capture rings carried
+the SAME latent gap — they resolved through the session map only, so
+the yellow rings silently never drew for ground captures (only for
+air-mission targets); the marker path now shares objective_entity.
+- Name resolution floor: small front objectives print as #<vu> because
+  class_name is EMPTY for them in the parsed data — a temporary
+  [PROBE] stderr instrument proved ids resolve in the pop map but the
+  objective rows carry no name string. The theater name table behind
+  ObjectivePriorityComponent::nameid is loaded NOWHERE in the repo
+  (only the inspector prints the raw nameid). Resolving it is a data-
+  pipeline tranche of its own, deliberately left.
+
+Deliberately NOT done: no per-kind suppression checkboxes (the
+substring filter covers "hide the tasking cycles" by typing a kind
+name); no persistence across app restarts (the journal is the wire's
+job, not the viewer's).
+
+Tests: test_event_log 7/7 (every-kind-formats across all 15 kinds, name
+resolution + #id fallback, personnel faces, envelope accessors, cap/
+order, case-insensitive filter); f4-world-viewer ctest 95/95; headless
+--session --play --smoke-seconds 330 screenshot shows the log filling
+with tasking/mission lines as the first ATM cycle crosses.

@@ -115,6 +115,8 @@
 #include <f4/renderer/ground_layout_models.hpp>  // AirfieldGeometry3D + builder (shared)
 using f4::renderer::AirfieldGeometry3D;
 
+#include "event_log.hpp"                     // EventLogStore (the campaign log)
+
 namespace f4::viewer {
 
 // ---------------------------------------------------------------------------
@@ -533,6 +535,14 @@ struct ViewerApp::Impl {
     /// frame session lock once per frame). Capped ring — the feed shows
     /// the newest tail; capture markers key off it.
     std::deque<f4::campaign::api::CampaignEvent> session_events;
+    /// The Event Log (draw_event_log_view): every drained event frozen
+    /// into display text at arrival, newest last, capped ring. Survives
+    /// a stopped session; a fresh adopt clears it.
+    EventLogStore event_log;
+    char event_log_filter[64] = "";   ///< substring filter ("" = all)
+    bool event_log_autoscroll = true; ///< pin to the newest row
+    /// The Event Log window itself (Windows menu).
+    bool show_event_log_window = false;
     /// Recently captured objectives: (objective contract id, wall-clock
     /// GetTime() stamp) — the canvas draws a decaying ring for a few
     /// seconds after the capture event lands.
@@ -602,6 +612,42 @@ struct ViewerApp::Impl {
         return f4::entities::EntityHandle(id,
             const_cast<f4::entities::EntityWorld*>(
                 &session->engine().sim().world()));
+    }
+    /// An objective VU id's entity and the world that owns it: pop =
+    /// the static world's handle() (EVERY world objective), else the
+    /// session world's session_handle() (spawned mission targets only —
+    /// the spawner feeds that map). An invalid EntityId = neither knows
+    /// it. The Event Log's row freezer, the session feed, and the
+    /// capture rings share this.
+    [[nodiscard]] std::pair<f4::entities::EntityId, bool>
+    objective_entity(std::uint32_t id) const {
+        {
+            const auto it = pop.objective_id_map.find(id);
+            if (it != pop.objective_id_map.end() && it->second.valid()) {
+                return {it->second, true};
+            }
+        }
+        if (session) {
+            const auto& map = session->engine().objective_id_map();
+            const auto it = map.find(id);
+            if (it != map.end() && it->second.valid()) {
+                return {it->second, false};
+            }
+        }
+        return {f4::entities::EntityId{}, false};
+    }
+    /// An objective contract id's display name ("" = unknown) — the
+    /// Event Log's row freezer and the session window's feed share it.
+    /// Small front objectives carry NO name in the parsed data (the
+    /// theater name table behind ObjectivePriorityComponent::nameid is
+    /// not loaded anywhere yet) — callers render the raw id for those;
+    /// the nameid table is a named data-pipeline gap, not this helper's.
+    [[nodiscard]] std::string objective_display_name(std::uint32_t id) const {
+        const auto [eid, in_pop] = objective_entity(id);
+        if (!eid.valid()) return {};
+        auto oh = in_pop ? handle(eid) : session_handle(eid);
+        auto* ot = oh.get<f4::entities::ObjectiveTypeComponent>();
+        return ot ? ot->class_name : std::string{};
     }
     /// The handle for a UNIT selection: the session's entity when a
     /// session runs and one resolves there, else the static world's.

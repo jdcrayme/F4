@@ -44,6 +44,7 @@
 // the ATO window, and this window all see the same tick.
 
 #include "viewer_state.hpp"
+#include "event_log.hpp"
 #include <f4/viewer/enum_text.hpp>
 #include <f4/viewer/pipeline_io.hpp>
 
@@ -288,6 +289,11 @@ bool ViewerApp::adopt_session_start() {
         impl_->session_snap = SessionSnapshot{};
         impl_->session_snap_serial = 0;
         impl_->session_snap_valid = false;
+        // A fresh war = a fresh log (the old rows belong to the last
+        // session; they're gone the moment a new one is adopted).
+        impl_->event_log.clear();
+        impl_->event_log_filter[0] = '\0';
+        impl_->event_log_autoscroll = true;
         impl_->sel_kind = Impl::SelectionKind::None;
         impl_->sel_entity = f4::entities::EntityId{};
         // V-THREAD: launch the campaign runner — the worker thread that
@@ -305,8 +311,10 @@ bool ViewerApp::adopt_session_start() {
         impl_->session_runner->start();
         // The session's controls live in this window — surface it when
         // the war actually comes up (the Start menu item already opened
-        // it; this covers programmatic --session starts too).
+        // it; this covers programmatic --session starts too). The Event
+        // Log opens with it: the war's running log is the point.
         impl_->show_campaign_window = true;
+        impl_->show_event_log_window = true;
         // V-3DLIVE: reset the camera-bubble tracking (a fresh session
         // re-points the bubble on the next camera move).
         impl_->last_bubble_zoom = -1.0f;
@@ -367,6 +375,12 @@ void ViewerApp::Impl::refresh_session_snapshot() {
             capture_markers.emplace_back(
                 ev.objective_captured.objective_id, GetTime());
         }
+        // The Event Log freezes the row NOW, while the session that
+        // resolves objective ids is alive — the window reads text.
+        event_log_append(event_log, ev, GetTime(), session_epoch_s,
+                         [this](std::uint32_t id) {
+                             return objective_display_name(id);
+                         });
         session_events.push_back(std::move(ev));
         while (session_events.size() > 100) session_events.pop_front();
     }
@@ -1090,120 +1104,16 @@ void ViewerApp::draw_campaign_session_view() {
     // --- Event feed (CAMP-HOST-2) ----------------------------------------
     //
     // The war's narrative as it happens: missions filed, objectives
-    // captured/damaged/repaired, kills, reinforcements, weather. The
-    // stream is armed at adopt (all kinds) and drained every frame
-    // under the frame session lock (refresh_session_snapshot); this
-    // section renders the newest tail, newest first. Objective ids
-    // resolve through the render-plane bridge (the missions table's
-    // own pattern).
+    // captured/damaged/repaired, kills, reinforcements, weather, the
+    // personnel books. The stream is armed at adopt (all kinds) and
+    // drained every frame under the frame session lock
+    // (refresh_session_snapshot); this section renders the newest tail,
+    // newest first. This is the compact face — the Windows > Event Log
+    // window is the full running log.
     if (ImGui::CollapsingHeader("Events",
                                 ImGuiTreeNodeFlags_DefaultOpen)) {
         const auto objective_name = [this](std::uint32_t id) {
-            const auto& obj_map = impl_->objective_id_map();
-            const auto it = obj_map.find(id);
-            if (it == obj_map.end() || !it->second.valid()) {
-                return std::string{};
-            }
-            auto oh = impl_->session_handle(it->second);
-            auto* ot = oh.get<f4::entities::ObjectiveTypeComponent>();
-            return ot ? ot->class_name : std::string{};
-        };
-        const auto event_time =
-            [](const f4::campaign::api::CampaignEvent& ev) -> std::int64_t {
-            using K = f4::campaign::api::CampaignEvent::Kind;
-            switch (ev.kind) {
-                case K::MissionFiled:          return ev.mission_filed.t;
-                case K::Kill:                  return ev.kill.t;
-                case K::ObjectiveDamage:       return ev.objective_damage.t;
-                case K::ObjectiveCaptured:     return ev.objective_captured.t;
-                case K::ReinforcementDelivered:
-                                               return ev.reinforcement_delivered.t;
-                case K::WeatherChanged:        return ev.weather_changed.t;
-                case K::RoeChanged:            return ev.roe_changed.t;
-                case K::TaskingCycle:          return ev.tasking_cycle.t;
-                case K::ActionFiled:           return ev.action_filed.t;
-                case K::Verdict:               return ev.verdict.t;
-                case K::ObjectiveRepaired:     return ev.objective_repaired.t;
-                case K::PilotAssigned:         return ev.pilot_assigned.t;
-                case K::PilotLost:             return ev.pilot_lost.t;
-                case K::PilotRecovered:        return ev.pilot_recovered.t;
-                case K::SlotDenied:            return ev.slot_denied.t;
-            }
-            return 0;
-        };
-        const auto format_event_label =
-            [&](const f4::campaign::api::CampaignEvent& ev, char* buf,
-                std::size_t cap) -> bool {
-            using K = f4::campaign::api::CampaignEvent::Kind;
-            switch (ev.kind) {
-                case K::MissionFiled: {
-                    const std::string nm = objective_name(
-                        ev.mission_filed.target_objective_id);
-                    std::snprintf(buf, cap, "mission: %s team %u -> %s",
-                                  ev.mission_filed.mission_name.c_str(),
-                                  ev.mission_filed.team,
-                                  nm.empty() ? "?" : nm.c_str());
-                    return true;
-                }
-                case K::Kill:
-                    std::snprintf(buf, cap,
-                                  "air kill: team %u downed team %u (%s)",
-                                  ev.kill.killer_team, ev.kill.victim_team,
-                                  ev.kill.weapon.c_str());
-                    return true;
-                case K::ObjectiveDamage: {
-                    const std::string nm =
-                        objective_name(ev.objective_damage.objective_id);
-                    std::snprintf(buf, cap, "objective damaged: %s (%u features)",
-                                  nm.empty() ? "?" : nm.c_str(),
-                                  ev.objective_damage.features_damaged);
-                    return true;
-                }
-                case K::ObjectiveCaptured: {
-                    const std::string nm = objective_name(
-                        ev.objective_captured.objective_id);
-                    std::snprintf(buf, cap, "CAPTURED: %s -> team %u",
-                                  nm.empty() ? "?" : nm.c_str(),
-                                  ev.objective_captured.new_owner);
-                    return true;
-                }
-                case K::ObjectiveRepaired: {
-                    const std::string nm = objective_name(
-                        ev.objective_repaired.objective_id);
-                    std::snprintf(buf, cap, "repaired %u features at %s",
-                                  ev.objective_repaired.features_repaired,
-                                  nm.empty() ? "?" : nm.c_str());
-                    return true;
-                }
-                case K::ReinforcementDelivered:
-                    std::snprintf(buf, cap,
-                                  "reinforcements: %d aircraft (%d squadrons)",
-                                  ev.reinforcement_delivered.aircraft,
-                                  ev.reinforcement_delivered.squadrons_touched);
-                    return true;
-                case K::WeatherChanged:
-                    std::snprintf(buf, cap, "weather: %s",
-                                  ev.weather_changed.condition.c_str());
-                    return true;
-                case K::TaskingCycle:
-                    std::snprintf(buf, cap, "tasking cycle: %d intents",
-                                  ev.tasking_cycle.intents);
-                    return true;
-                case K::ActionFiled:
-                    std::snprintf(buf, cap, "action filed: %s (team %u, %d%% damage)",
-                                  ev.action_filed.mission_name.c_str(),
-                                  ev.action_filed.team,
-                                  ev.action_filed.damage_pct);
-                    return true;
-                case K::Verdict:
-                    std::snprintf(buf, cap, "verdict: %s (leader team %d, swing %d)",
-                                  ev.verdict.band.c_str(), ev.verdict.leader,
-                                  ev.verdict.swing);
-                    return true;
-                default:
-                    return false;  // pilot/roe/slot lines: shown when the
-                                   // war books grow a face for them
-            }
+            return impl_->objective_display_name(id);
         };
 
         if (impl_->session_events.empty()) {
@@ -1214,12 +1124,13 @@ void ViewerApp::draw_campaign_session_view() {
             const std::size_t first = n > kMaxRows ? n - kMaxRows : 0;
             char line[192];
             for (std::size_t i = n; i-- > first;) {
-                if (format_event_label(impl_->session_events[i], line,
-                                       sizeof(line))) {
+                if (format_campaign_event_label(
+                        impl_->session_events[i], objective_name, line,
+                        sizeof(line))) {
                     char tbuf[24];
                     format_abs_campaign_time(
                         impl_->session_epoch_s +
-                            event_time(impl_->session_events[i]),
+                            campaign_event_time(impl_->session_events[i]),
                         tbuf, sizeof(tbuf));
                     ImGui::Text("%s  %s", tbuf, line);
                 }
@@ -1253,6 +1164,92 @@ void ViewerApp::draw_campaign_session_view() {
         return;
     }
 
+    ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
+// The Event Log window — the campaign's running log
+// ---------------------------------------------------------------------------
+// The original game printed a scrolling theater log; the closest thing
+// this viewer had was four-second yellow rings on freshly captured
+// objectives. This is the log: every drained campaign event frozen into
+// display text at arrival (event_log_append — the session that resolves
+// objective ids is alive then), newest at the bottom, colored by the
+// owning team, filtered by substring. The rows outlive the session —
+// stop the war and the log still reads; adopt a new one and it clears.
+// ---------------------------------------------------------------------------
+
+void ViewerApp::draw_event_log_view() {
+    if (!impl_->show_event_log_window) return;
+    // Under the Campaign Session window (which sits at 260,30). Without
+    // a size the window auto-fits its content and the scrolling child
+    // collapses it to a single row.
+    ImGui::SetNextWindowPos(ImVec2(260, 400), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(560, 380), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Event Log", &impl_->show_event_log_window)) {
+        ImGui::End();
+        return;
+    }
+
+    // Controls: substring filter, follow-the-tail, clear.
+    ImGui::SetNextItemWidth(220.0f);
+    ImGui::InputTextWithHint("##event_log_filter", "filter (substring)",
+                             impl_->event_log_filter,
+                             sizeof(impl_->event_log_filter));
+    ImGui::SameLine();
+    ImGui::Checkbox("Follow", &impl_->event_log_autoscroll);
+    ImGui::SameLine();
+    if (ImGui::Button("Clear")) {
+        impl_->event_log.clear();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%zu rows%s", impl_->event_log.size(),
+                        impl_->session ? "" : " (no live session)");
+    ImGui::Separator();
+
+    if (impl_->event_log.empty()) {
+        ImGui::TextDisabled(impl_->session
+                                ? "(no events yet — start the clock)"
+                                : "(no events — the log fills while a "
+                                  "campaign session runs)");
+        ImGui::End();
+        return;
+    }
+
+    const bool filtered = impl_->event_log_filter[0] != '\0';
+    char tbuf[24];
+    ImGui::BeginChild("event_log_rows", ImVec2(0, 0));
+    for (const auto& row : impl_->event_log) {
+        if (filtered &&
+            !event_log_matches(impl_->event_log_filter, row.label)) {
+            continue;
+        }
+        format_event_log_time(row.abs_t, tbuf, sizeof(tbuf));
+
+        // The owning team's color dot — the map palette, one axis with
+        // the canvas; teamless families (weather, verdict, cycles) draw
+        // no dot.
+        if (row.team != 0xFF) {
+            const auto c = color_for_owner(row.team);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            const float row_h = ImGui::GetTextLineHeight();
+            dl->AddCircleFilled(ImVec2(p.x + 5.0f, p.y + row_h * 0.5f),
+                                3.5f, IM_COL32(c.r, c.g, c.b, 255));
+        }
+        ImGui::Dummy(ImVec2(14.0f, ImGui::GetTextLineHeight()));
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", tbuf);
+        ImGui::SameLine();
+        ImGui::TextUnformatted(row.label);
+    }
+    // Follow: pin to the bottom while the tail is in view. Scrolling up
+    // un-pins for as long as the user stays away from the bottom.
+    if (impl_->event_log_autoscroll &&
+        ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) {
+        ImGui::SetScrollHereY(1.0f);
+    }
+    ImGui::EndChild();
     ImGui::End();
 }
 

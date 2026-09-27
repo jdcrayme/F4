@@ -5,6 +5,40 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## EVENT-LOG-1 — the world viewer's running log (the war prints its book)
+
+- **The Event Log window** — the original game printed a scrolling
+  theater log; this viewer's only event faces were four-second yellow
+  capture rings and a 14-row feed buried in the Campaign Session window
+  that silently DROPPED the pilot/roe/slot families (`default: return
+  false`). Windows > Event Log (auto-opens with every session start, "
+  like the original") is the log: every drained campaign event frozen
+  into display text AT ARRIVAL — the objective-name resolver runs while
+  the session that owns the ids is alive, so the log reads back after
+  the session is gone — newest at the bottom, team-colored via the map
+  palette (`color_for_owner`), substring-filtered, follow-the-tail,
+  clear button, 2000-row cap.
+- **One formatter, two faces** — `event_log.hpp/cpp` is the ImGui-free
+  model (store + envelope accessors + `format_campaign_event_label`);
+  ALL 15 v1 families have a face now (`test_event_log` pins it — the
+  log never drops a family). The Campaign Session window's compact feed
+  delegates to the same formatter and gains the personnel/scheduling
+  lines for free. The drain hook lives in `refresh_session_snapshot`
+  next to the feed/capture-marker fills; a fresh adopt clears the log.
+- **The capture rings get the same repair** — the yellow decaying rings
+  resolved captured objectives through the SESSION engine's id map,
+  which only carries mission targets, so ground captures (the vast
+  majority) silently never drew their ring. The new
+  `Impl::objective_entity` checks the pop map (every world objective)
+  first and the session map second; the log's name resolution and the
+  rings share it. Names still print as `#<vu>` for small front
+  objectives — the theater name table behind `nameid` is loaded
+  NOWHERE; that's the named data-pipeline gap this tranche leaves.
+- `test_event_log` 7/7 (every-kind-formats, names, personnel faces,
+  envelope accessors, cap/order, filter); f4-world-viewer ctest 95/95;
+  a 330 s headless --session --play run shows the log filling with
+  capture/verdict lines, team-dotted, follow pinned to the tail.
+
 ## SYMBOL-SVG-3 — the procedural vocabulary deletes (the library is the only render source)
 
 - **`draw_symbol` and `draw_symbol_imgui` are gone** — the parity eyeball

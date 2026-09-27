@@ -106,3 +106,19 @@ target_include_directories(test_campaign_queries PRIVATE
 target_link_libraries(test_campaign_queries PRIVATE
     GTest::gtest_main f4-campaign-api f4-json)
 gtest_discover_tests(test_campaign_queries PROPERTIES LABELS "f4-world-viewer" TIMEOUT 60)
+
+# --- V-CAMP: the Event Log's model + formatters ------------------------
+# event_log.cpp is deliberately ImGui-free — the store, the envelope
+# accessors, and the every-family-has-a-face label formatter unit-test
+# with no GL context (the log never drops a family — that is the pin).
+add_executable(test_event_log
+    test_event_log.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/event_log.cpp
+)
+target_include_directories(test_event_log PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+target_link_libraries(test_event_log PRIVATE
+    GTest::gtest_main f4-campaign-api f4-json f4-world-types)
+gtest_discover_tests(test_event_log PROPERTIES LABELS "f4-world-viewer" TIMEOUT 60)

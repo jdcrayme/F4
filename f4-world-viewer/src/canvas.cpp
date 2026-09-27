@@ -1641,11 +1641,14 @@ void ViewerApp::draw_canvas() {
             }
             const std::uint32_t vu = it->first;
             ++it;
-            if (!impl_->session) continue;
-            const auto& id_map = impl_->objective_id_map();
-            const auto found = id_map.find(vu);
-            if (found == id_map.end() || !found->second.valid()) continue;
-            auto h = impl_->session_handle(found->second);
+            // The pop map first — a captured objective is a world
+            // objective; the session engine's map only carries mission
+            // targets, so ground captures never resolved here (the
+            // rings silently never drew for them).
+            const auto [eid, in_pop] = impl_->objective_entity(vu);
+            if (!eid.valid()) continue;
+            auto h = in_pop ? impl_->handle(eid)
+                            : impl_->session_handle(eid);
             auto* tr = h.get<f4::entities::TransformComponent>();
             if (!tr) continue;
             const Vector2 p =
