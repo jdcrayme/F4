@@ -1,0 +1,32 @@
+# Byte-identity rule: the manifest fingerprints, the golden round-trips,
+# and the byte-for-byte fixture tests read the WORKING TREE bytes, so text
+# materializes as LF on every platform (no autocrlf smudge). Committed
+# blobs are already LF; this file only pins the checkout direction and
+# keeps the Falcon binaries out of any normalization path.
+* text=auto eol=lf
+
+# Windows shell scripts keep CRLF — cmd's goto/label scan misparses
+# LF-only batch files.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Falcon binaries and assets — never normalized. Auto-detection already
+# treats these as binary; the explicit list keeps them safe if a future
+# file's content stops tripping the heuristic.
+*.cam     -text -eol
+*.bin     -text -eol
+*.png     -text -eol
+*.jpg     -text -eol
+*.jpeg    -text -eol
+*.glb     -text -eol
+*.wav     -text -eol
+*.ogg     -text -eol
+*.exe     -text -eol
+*.dll     -text -eol
+*.lib     -text -eol
+*.pdb     -text -eol
+# Falcon data tables, terrain tiles, and model fixtures (binary records).
+FALCON4.* -text -eol
+Falcon4.* -text -eol
+THEATER.* -text -eol
+KoreaObj.* -text -eol
