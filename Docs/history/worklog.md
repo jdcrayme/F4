@@ -1,4 +1,70 @@
 ---
+Task ID: SYMBOL-SVG-2
+Agent: main
+Task: The Inkscape authoring path — per review direction, edit map
+symbols in an external SVG editor and REMOVE the in-app Symbol Creator
+(1,026 lines of editor UI) instead of building out its SVG buttons.
+
+Work Log:
+- Removed the Symbol Creator: symbol_creator.cpp/.hpp deleted; the
+  Tools menu item, the Impl member, and the CMake source line with
+  them. make_default_symbol_library stays in f4-renderer (tests use
+  it); its header comment no longer names the Creator.
+- merge_symbol_svg_directory (f4-renderer, svg_import.hpp): scan a
+  directory of *.svg, key each by filename stem, add_or_replace into a
+  SymbolLibrary. Sorted scan (deterministic merge + error order).
+  Errors are COLLECTED per file, never thrown — a half-finished
+  Inkscape export is skipped and named, the map never blanks. Missing
+  directory = 0 merges (clean first run).
+- Viewer wiring (viewer_app.cpp/viewer_state.hpp): Impl gains
+  symbol_library + use_symbol_library (default true) +
+  symbols_dir + symbol_load_errors; reload_symbol_library() runs in
+  the ctor — load_symbol_library("f4_symbols.json") resolved cwd with
+  a two-level upward walk (repo root / Build/), then
+  merge_symbol_svg_directory over "symbols/" (or --symbols-dir).
+  status_msg reports "map symbols: 75 corpus + N SVG (E errors)".
+  The public set_symbols_dir() re-resolves and reloads.
+- Library-first rendering: RenderEntityIcon takes an optional
+  const SymbolLibrary* (default nullptr = unchanged procedural path —
+  every existing caller and test unaffected). symbol_key_for_kind
+  (SYMBOL-SVG-1-PREP) resolves the kind's key; a missing key falls
+  back to draw_symbol, so an icon can never go blank. canvas.cpp's
+  three objective/unit call sites pass the loaded library when
+  use_symbol_library is on.
+- The parity loop: View > Layers > "SVG map symbols" toggles the
+  data-driven path against the procedural vocabulary (the flag the
+  queue wanted); View > "Reload symbol library" re-runs the load
+  without restarting. CLI: --symbols-dir <path>;
+  --export-symbols <dir> (headless exit before any window) writes one
+  <key>.svg per loaded symbol.
+- symbols/ committed: all 75 corpus symbols exported via
+  --export-symbols (the starter set — edit any of them in Inkscape and
+  the next launch renders it) + README.md documenting the workflow,
+  the color-role convention (currentColor + data-color-role; absolute
+  colors are forbidden — symbols render in the team palette), and the
+  geometry rules (viewBox "-1 -1 2 2", evenodd subpath holes,
+  frame_*/glyph_* composition).
+- Lesson (recurring): bash heredocs mangle backslash-n escapes into
+  real newlines in generated C++ strings — two builds failed on
+  "newline in constant" before the text was hand-repaired. Use the
+  Edit tool for any generated text containing escapes.
+
+Deliberately NOT done: deleting symbols.cpp's procedural vocabulary
+(stays until the SVG renders are eyeballed against it via the toggle —
+the fallback is also the safety net for missing keys); campaign_icon
+through world_json (now unblocked: a campaign can reference any loaded
+key); directory hot-reload (the View menu reload covers the loop).
+
+Tests: test_svg_import 16/16 (the new SymbolSvgDirectory merge test:
+override-by-stem replaces not duplicates, broken-file skip + error
+collection, missing-dir zero); renderer + world-viewer ctest 102/102;
+full Debug rebuild clean; --export-symbols run verified headless exit.
+
+QUEUE (revised): eyeball the SVG renders against procedural via the
+toggle -> delete symbols.cpp's ~850-line vocabulary (and draw_symbol's
+switch) -> campaign_icon through world_json -> optional hot-reload.
+
+---
 Task ID: SYMBOL-SVG-1-PREP
 Agent: main
 Task: Cleanup in preparation for the SYMBOL-SVG-1 wiring (load

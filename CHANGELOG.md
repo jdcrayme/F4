@@ -5,6 +5,34 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## SYMBOL-SVG-2 — the Inkscape authoring path (the Creator is removed)
+
+- **Scope change (review direction)**: the in-app Symbol Creator is
+  REMOVED — its planned SVG Import/Export buttons were the old plan, and
+  an on-disk editor plus file convention beats 1,026 lines of bespoke
+  editor UI. SVG files are the authoring surface now.
+- **The load path** — the viewer starts by loading `f4_symbols.json` (the
+  committed corpus) merged with every `symbols/*.svg` override (filename
+  stem = key: `obj_airbase.svg` replaces `obj_airbase`;
+  `merge_symbol_svg_directory` in f4-renderer). Parse failures are
+  collected and skipped — a half-finished Inkscape export never blanks
+  the map — and the status bar reports corpus + overrides + errors.
+- **Library-first rendering** — `RenderEntityIcon` gains an optional
+  library (nullptr = the old procedural behavior); the canvas passes the
+  loaded one: library-first, procedural fallback when a key is missing.
+  The `SVG map symbols` toggle in Layers is the parity switch (flip it to
+  compare against the procedural vocabulary), and View > Reload symbol
+  library closes the edit-reload-look loop. `--symbols-dir` and headless
+  `--export-symbols <dir>` are the CLI faces.
+- **`symbols/` is committed** — all 75 corpus symbols exported as SVGs
+  (the starter set: editing any map symbol in Inkscape takes effect on
+  the next launch) plus a README documenting the workflow, the
+  color-role convention, and the geometry rules. The procedural
+  `symbols.cpp` vocabulary stays until the renders are eyeballed via the
+  toggle — then it deletes (the last SYMBOL-SVG-1 queue item).
+- `test_svg_import` 16/16 (override-by-stem, broken-file skip, missing
+  dir); renderer + world-viewer ctest 102/102.
+
 ## SYMBOL-SVG-1 prep — the key seam
 
 - **`symbol_key_for_kind(SymbolKind)` → `SymbolLibraryKey`** — the
