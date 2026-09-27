@@ -5,6 +5,61 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## QC-SUITE-1 — the Windows suite repair (7 red tests → 1 named)
+
+- **LF checkout pinned (`.gitattributes`)** — the byte-identity tests read
+  the WORKING TREE bytes, but with `core.autocrlf=true` and no attributes a
+  Windows clone materialized CRLF: every manifest fingerprint/size missed
+  by the line count (f16.json 36559 on disk vs the manifest's 34434) and
+  the dat-fixture byte-for-byte regen failed. The committed blobs were
+  already all LF — `* text=auto eol=lf` pins the smudge; the Falcon
+  binaries (`.cam`/`.ct`/`Falcon4.*`/`THEATER.*`/`KoreaObj.*`) carry
+  `-text -eol`; `*.bat` keeps CRLF. The manifest-fingerprint and
+  dat-fixture reproducibility gates pass on a CRLF-configured clone.
+- **The emit-tables read stream closes before `remove_all`** — both
+  `TheaterData.EmitTablesJson*` tests held the tables.json ifstream at
+  test-body scope while deleting the temp dir: on Windows the stream's own
+  handle is the sharing violation (MSVC opens without FILE_SHARE_DELETE;
+  POSIX never refuses the unlink). 38/38.
+- **The unarmed note only fires when nothing was delivered** —
+  `strike_flights_armed` counts live Bomb stations POST-run, so a flight
+  that released its whole stick ends at 0 and `qc_missions.py` rendered
+  "unarmed (loadout concern)" on delivery rows (the Cookbook §7 known
+  quirk). The note now gates on `released == 0` too; delivery rows render
+  "released N, impacts M".
+- **The strike certificate holds again** —
+  `GroundStrikeHarness.StrikeRunsCertifiesAndIsDeterministic` had been
+  failing since the runway-frame anchoring (6359dd1) rotated the shipped
+  scenario's route to the real airbase: the harness kept injecting the
+  target at the fixed world point (0, 30000, 0) — 131 NM off the route —
+  so the gate never saw the aim and the strike window closed with the
+  stick unfired (the end-state dump the harness now captures names exactly
+  that: `nav=Done wp=3/3 delivery_wp=1 strike_target=0`). Three stacked
+  repairs: (1) the trigger-stall verdict appends each striker's end state
+  (phase, nav rung vs the delivery index, the module counters, the release
+  geometry, both hold_fire gates); (2) the injected objective derives as
+  the ground point under the FIRST armed striker's delivery waypoint
+  (`target_position_explicit` pins the legacy verbatim point); (3) the
+  release path keys the impact plane AND the recorded miss on the brain's
+  RESOLVED aim (`CombatIntent::bomb_aim` — the EMPL-2d feature the planner
+  named) instead of the objective center: the stick had been landing
+  ~21 ft from the aimed feature while "missing" the center by 437-979 ft.
+  `release_bomb` gains an optional `resolved_aim` (default = the old
+  center behavior). 6/6 green; the precision gate (min_miss < the MK-82
+  lethal radius) holds at ~20 ft.
+- **Named, not fixed: the MSVC trim divergence** —
+  `PolesEnvelope.AiCruiseNavTuneSlowModeGolden` fails on MSVC because
+  diag_poles' damped-Newton trim does not converge (AI mode: residual
+  1.17e3, the AI integrator states ai_vsTgt/ai_altI/ai_speedI top the
+  residuals; plant mode: residual 1.5, throttle pegged 0.031, alt 333 ft
+  low) — the golden was pinned on GCC. No `/fp:fast` anywhere; the
+  divergence is codegen/libm-class. A numerics session on the Newton
+  (seed from the analytic cruise trim; FD-scale audit against the GCC
+  trace) is the named follow-up. The 24-hour CAMP-INIT harness (TIMEOUT
+  900, "170 s real-time" on container hardware) times out on a 2-core
+  Debug box — machine-bound; `ctest -LE slow` (the fast-tier twin) is the
+  local substitute.
+
 ## EMPL-2 review round two — the contact FLOT, and territory that follows the armies
 
 - **The contact front** — the FLOT is now the line between the closest

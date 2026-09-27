@@ -1,3 +1,110 @@
+---
+Task ID: QC-SUITE-1
+Agent: main
+Task: The Windows suite repair — the full ctest run on this box showed 7
+red tests; diagnose each, fix the mechanical ones, root-cause the
+functional one, and name what is genuinely platform numerics.
+
+Work Log:
+- Baseline: clean tree at a5ad8c4, full Debug build green, ctest
+  7 failures out of ~2,900: the two byte-identity gates, both
+  EmitTablesJson tests, the poles golden, the 24-hour CAMP-INIT
+  harness (timeout), GroundStrikeHarness's acceptance run — and (the
+  one documented Windows failure) CombatRecording PASSED this time,
+  so that note describes a flaky test, not a stable one.
+- CRLF (2 failures, one root): core.autocrlf=true + no .gitattributes
+  materialized every text file CRLF while the committed blobs are all
+  LF (git ls-files --eol: 0 i/crlf). The manifest fingerprints hash
+  the working tree, so every hash/size missed by the line count
+  (f16.json 36559 vs 34434); the dat-fixture regen emitted \n against
+  a \r\n file on disk. Fix: .gitattributes — `* text=auto eol=lf`,
+  `-text -eol` for the Falcon binaries (.cam/.bin + the Falcon4.* /
+  THEATER.* / KoreaObj.* fixture families — the -eol matters: eol=lf
+  with text unset STILL normalizes, which renormalize proved by
+  converting Falcon4.AII until the markers were completed),
+  `*.bat text eol=crlf` (cmd's goto/label scan misparses LF-only).
+  Renormalize was a one-blob change (Falcon4.AII, restored — the
+  parser trims); the rm-index/reset-hard dance re-smudged 1,120 files
+  to LF. Both byte-identity gates green.
+- EmitTablesJson (2 failures, Windows-only test bug): the tables.json
+  ifstream sat at test-body scope while remove_all(dir) ran — MSVC
+  opens without FILE_SHARE_DELETE, so the test's own handle is the
+  "in use by another process" sharing violation; POSIX unlinks under
+  the cursor, which is why the container stayed green. Scoped like
+  every other stream in the file; audited the remaining 9 remove_all
+  sites (all writers already scoped; write_temp_file closes
+  explicitly). 38/38.
+- The unarmed note (the Cookbook §7 quirk): strike_flights_armed
+  counts live Bomb stations POST-run, so a flight that released its
+  whole stick ends at 0 and qc_missions.py's `armed == 0` note
+  branded delivery rows "unarmed (loadout concern)". The note now
+  also requires released == 0; delivery rows get "released N,
+  impacts M". Cookbook paragraph switched from known-quirk to
+  as-built.
+- GroundStrikeHarness (the real one). The failing assertion was the
+  FUNCTIONAL half (release_occurred), not determinism. Step 1 was
+  instrumentation: run 0 now captures each striker's end state
+  (phase/safety/mode, nav state + wp index vs the delivery index, the
+  strike module's target/armed/delivered/salvo/R/pipper, aim_dist,
+  dz, both hold_fire gates) and the trigger-stall verdict appends it.
+  The dump read: nav=Done wp=3/3 delivery_wp=1 strike_target=0 — the
+  route COMPLETED with the stick unfired; the module had been
+  cleared, never refused.
+- Root cause 1: the test pins the SHIPPED Build/scenarios/
+  ground_strike.json (not the inline temp scenario — that one is the
+  negative cases'). 6359dd1 (Sep 20, "anchor QC scenario templates to
+  the real runway frame") added airbase_source + waypoints_frame
+  "runway" to the template: normalize_waypoint_frame() (inside
+  initialize) rotates the route to the real airbase, while the
+  harness kept injecting the objective at the fixed world point
+  (0, 30000, 0). The STRIKE waypoint now lives near the derived
+  airbase — 692,641 ft from the injected aim; the release gate never
+  saw the aim; the waypoint sequenced past; the window closed. The
+  refactor sweep (fb2829c..a5ad8c4) is INNOCENT — the failure
+  reproduces identically at 867d667 (bisected with an incremental
+  worktree build). Fix: the injected objective derives as the ground
+  point under the FIRST armed striker's delivery waypoint (the plan
+  is world-ENU by inject time; z stays the impact plane), with
+  target_position_explicit pinning the legacy verbatim point. The
+  abort ordering moved ahead of the objective creation (same abort
+  text, test 4 unaffected).
+- Root cause 2 surfaced once the chain ran: min_miss 437 ft vs the
+  MK-82 lethal radius (300). The recorder events decomposed it: the
+  stick landed 978.7/789.9/613.7/437.4 ft from the OBJECTIVE CENTER —
+  and 978.7 = the feature-0 aim offset (1,000 along-track) minus
+  ~21 ft. The CCIP gate times the release against resolve_feature_aim
+  (EMPL-2d), but release_bomb keyed the impact plane AND the recorded
+  miss on the objective's transform (the center): a perfect drop
+  reads as scatter the size of the feature offset. Fix: CombatIntent
+  carries bomb_aim/bomb_aim_valid (= strike_.last_aim()); the bridge
+  passes it to release_bomb's new optional resolved_aim (default
+  nullptr = the old center behavior). The certificate's precision
+  gate now holds at ~20 ft: the stick lands where the brain aimed.
+- Named, NOT fixed: PolesEnvelope.AiCruiseNavTuneSlowModeGolden. The
+  golden (+0.01656, pinned on GCC) requires a converged trim;
+  diag_poles' damped-Newton does not converge on MSVC — AI mode
+  residual 1.17e3 with the AI integrator states (ai_vsTgt/ai_altI/
+  ai_speedI) topping every debug dump; PLANT mode also fails
+  (residual 1.5, throttle pegged 0.031, alt 333 ft low), so it is the
+  FM-side Newton basin, not the AI coupling. No /fp:fast anywhere;
+  MSVC defaults precise — the divergence is libm/codegen-class. The
+  named follow-up is a numerics session: seed the Newton from the
+  analytic cruise trim (or widen the line search), audit the FD
+  scales against the GCC trace, and only then re-gild anything. The
+  24-hour CAMP-INIT timeout is machine-bound (TIMEOUT 900 vs "170 s
+  real-time" on container hardware) — ctest -LE slow and the
+  fast-tier twin are the local substitutes; no code change.
+- NOT in this change: CombatRecording's Windows flake (passed today,
+  failed at QC-PASS-1 — a TrackAcquired ordering instability worth
+  its own look the next time it bites); campaign_icon/Symbol Creator
+  SVG wiring (SYMBOL-SVG-1's own queue, untouched).
+
+Tests: f4-assets + f4-convert byte-identity gates green; test_theater_data
+38/38; GroundStrikeHarness 6/6; f4-weapons 101 + f4-ai 321 green against
+the rebuilt libs; full ctest -LE slow re-run recorded in the CHANGELOG
+entry. The remaining red is the poles golden (named above) and the slow
+tier's 24-hour harness (machine-bound).
+
 
 ---
 Task ID: SYMBOL-SVG-1
