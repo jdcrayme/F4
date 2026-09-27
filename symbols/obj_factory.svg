@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+  <title>Factory</title>
+  <desc>Box with two chimneys on top</desc>
+  <path d="M -0.6 -0.3 L 0.6 -0.3 L 0.6 0.3 L -0.6 0.3 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -0.6 -0.3 L 0.6 -0.3 L 0.6 0.3 L -0.6 0.3 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M -0.3 -0.66 L -0.18 -0.66 L -0.18 -0.3 L -0.3 -0.3 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -0.3 -0.66 L -0.18 -0.66 L -0.18 -0.3 L -0.3 -0.3 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M 0.18 -0.66 L 0.3 -0.66 L 0.3 -0.3 L 0.18 -0.3 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M 0.18 -0.66 L 0.3 -0.66 L 0.3 -0.3 L 0.18 -0.3 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+</svg>

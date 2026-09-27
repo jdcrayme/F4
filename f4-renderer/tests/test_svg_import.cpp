@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -454,6 +455,48 @@ TEST(SvgRoundTrip, JsonIOCarriesColorRolesAndHoles) {
     const std::string out = f4::renderer::symbol_library_to_json(lib);
     EXPECT_NE(out.find("\"color_role\": \"fill_blend\""), std::string::npos);
     EXPECT_NE(out.find("\"holes\""), std::string::npos);
+}
+
+TEST(SymbolSvgDirectory, MergeOverridesByKeyAndSkipsBroken) {
+    // The Inkscape load path: symbols/*.svg keyed by filename stem,
+    // replacing corpus definitions; a half-finished export is skipped
+    // (collected as an error), never thrown — the map must not blank.
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "f4_svg_dir_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+
+    auto lib = f4::renderer::make_default_symbol_library();
+    const auto* sq = lib.find("example_square");
+    ASSERT_NE(sq, nullptr);
+    f4::renderer::save_symbol_as_svg(*sq, dir / "example_square.svg");
+    {
+        std::ofstream broken(dir / "broken.svg");
+        broken << "<svg><g filter=\"url(#x\"></g></svg>";  // out of subset
+    }
+    { std::ofstream notes(dir / "notes.txt"); notes << "not a symbol"; }
+
+    f4::renderer::SymbolLibrary target =
+        f4::renderer::make_default_symbol_library();
+    std::vector<std::string> errors;
+    const auto merged =
+        f4::renderer::merge_symbol_svg_directory(target, dir, &errors);
+    EXPECT_EQ(merged, 1u);
+    ASSERT_EQ(errors.size(), 1u);
+    EXPECT_NE(errors[0].find("broken.svg"), std::string::npos);
+
+    // The override replaced (not duplicated) the same-key definition.
+    EXPECT_EQ(target.size(), lib.size());
+    EXPECT_NE(target.find("example_square"), nullptr);
+
+    // A missing directory is a clean zero (first run: dir not created yet).
+    std::vector<std::string> errs2;
+    EXPECT_EQ(f4::renderer::merge_symbol_svg_directory(
+                  target, dir / "does_not_exist", &errs2),
+              0u);
+    EXPECT_TRUE(errs2.empty());
+
+    std::filesystem::remove_all(dir);
 }
 
 } // namespace

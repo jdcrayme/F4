@@ -18,6 +18,8 @@
 
 #include <f4/renderer/entity_render.hpp>
 
+#include <f4/renderer/symbol_library.hpp>  // the library-first icon path
+
 #include <f4/renderer/feature_mesh.hpp>     // build_feature_mesh, draw_feature_mesh
 #include <f4/renderer/render_resources.hpp>
 #include <cstdint>
@@ -327,12 +329,25 @@ void RenderEntityIcon(f4::entities::EntityHandle& entity,
                       float center_x, float center_y,
                       float size_px,
                       RlColor fill_color, RlColor outline_color,
-                      bool filled)
+                      bool filled, const SymbolLibrary* library)
 {
     // Determine the icon, then draw it. If the entity has no icon
     // components (e.g. a Campaign or Team entity), this is a no-op.
     const auto info = entity_icon_info(entity);
     if (!info.valid) return;
+
+    // Library-first: the data-driven definition replaces the procedural
+    // switch whenever the kind's key resolves; a missing key falls back
+    // so an icon can never go blank (the corpus is coverage-tested, but
+    // SVG overrides come from the wild).
+    if (library != nullptr) {
+        const auto key = symbol_key_for_kind(info.kind);
+        if (library->find(key.primary) != nullptr) {
+            draw_library_symbol(*library, key.primary, center_x, center_y,
+                                size_px, fill_color, outline_color, filled);
+            return;
+        }
+    }
 
     draw_symbol(info.kind, center_x, center_y, size_px,
                 fill_color, outline_color, filled);

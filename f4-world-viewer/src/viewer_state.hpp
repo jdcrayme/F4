@@ -31,7 +31,6 @@
 #include <f4/viewer/viewer_app.hpp>
 #include <f4/viewer/hex_inspector.hpp>
 #include <f4/viewer/class_table_browser.hpp>
-#include <f4/viewer/symbol_creator.hpp>
 #include <f4/viewer/settings.hpp>
 #include <f4/viewer/replay_mode.hpp>   // ReplayState (Path B2 — trace playback)
 
@@ -113,6 +112,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <f4/renderer/symbol_library.hpp>    // SymbolLibrary (data-driven symbols)
 #include <f4/renderer/symbols.hpp>           // SymbolKind, RlColor, draw_symbol
 #include <f4/renderer/ground_layout_models.hpp>  // AirfieldGeometry3D + builder (shared)
 using f4::renderer::AirfieldGeometry3D;
@@ -931,13 +931,6 @@ struct ViewerApp::Impl {
     // Class Table Browser panel — owned by the viewer, opened via Tools menu.
     ClassTableBrowser class_table_browser;
 
-    // Symbol Creator panel — owned by the viewer, opened via Tools menu.
-    // Interactive editor for the data-driven symbol library (see
-    // f4/renderer/symbol_library.hpp). Lets the user build symbol
-    // definitions by dragging points on a 2D canvas, then save/load
-    // the resulting library to JSON. The eventual refactor of
-    // symbols.cpp will consume the same library data model.
-    SymbolCreator symbol_creator;
 
     // Scheduled screenshot (for headless smoke tests)
     bool screenshot_pending = false;
@@ -947,11 +940,20 @@ struct ViewerApp::Impl {
     // VU_ID.num → EntityId lookups are now in pop.objective_id_map and
     // pop.unit_id_map (populated by populate_world). No separate rebuild needed.
 
-    // --- Procedural symbols ---
+    // --- Map symbols (data-driven library + procedural fallback) ---
     //
-    // Symbol drawing lives in f4::renderer (symbols.hpp: draw_symbol /
-    // draw_symbol_imgui; the SymbolLibrary seam in symbol_library.hpp).
-    // Call sites qualify f4::renderer names directly.
+    // symbol_library is loaded at startup (reload_symbol_library):
+    // f4_symbols.json (the committed corpus) merged with every
+    // symbols/*.svg override (filename stem = key — edit a symbol in
+    // Inkscape, drop it there, reload). use_symbol_library routes
+    // RenderEntityIcon library-first; a missing key falls back to the
+    // procedural vocabulary, so an icon can never go blank.
+    f4::renderer::SymbolLibrary symbol_library;
+    bool use_symbol_library = true;
+    std::vector<std::string> symbol_load_errors;
+    std::filesystem::path symbols_dir;   // empty = the default search
+    void reload_symbol_library();
+    bool export_symbols(const std::filesystem::path& dir, std::string* err);
 
     // --- Camera transforms (defined in camera.cpp) ---
 

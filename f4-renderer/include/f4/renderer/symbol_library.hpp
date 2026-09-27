@@ -214,8 +214,7 @@ void save_symbol_library(const SymbolLibrary& lib,
                           const std::filesystem::path& path);
 
 /// Return a small library with 3 trivial example symbols (square,
-/// triangle, diamond). Used by the Symbol Creator tool as the initial
-/// content on first launch, and by unit tests as a known-good fixture.
+/// triangle, diamond). Used by unit tests as a known-good fixture.
 [[nodiscard]] SymbolLibrary make_default_symbol_library();
 
 /// Recompute derived fill caches for every filled polygon in `def`:

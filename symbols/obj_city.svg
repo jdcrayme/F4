@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+  <title>City</title>
+  <desc>Cluster of 3 buildings of varying heights</desc>
+  <path d="M -0.5 -0.075 L 0 -0.075 L 0 0.625 L -0.5 0.625 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -0.5 -0.075 L 0 -0.075 L 0 0.625 L -0.5 0.625 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M 0.025 -0.225 L 0.525 -0.225 L 0.525 0.525 L 0.025 0.525 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M 0.025 -0.225 L 0.525 -0.225 L 0.525 0.525 L 0.025 0.525 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M -0.25 -0.475 L 0.25 -0.475 L 0.25 0.675 L -0.25 0.675 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -0.25 -0.475 L 0.25 -0.475 L 0.25 0.675 L -0.25 0.675 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+</svg>

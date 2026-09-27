@@ -247,6 +247,14 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity);
 // This is a convenience wrapper: it calls entity_icon_info() and then
 // draw_symbol(). If the entity has no icon components, this is a no-op.
 //
+// Library-first rendering: when `library` is non-null, the kind's
+// library key (symbol_key_for_kind) is resolved first and drawn via
+// draw_library_symbol(); a missing key falls back to the procedural
+// path, so the corpus and any SVG overrides can never blank an icon.
+// Pass the viewer's loaded library to get the data-driven symbols
+// (f4_symbols.json + symbols/*.svg overrides); nullptr keeps the
+// purely procedural vocabulary.
+//
 // @param entity        Entity handle to render (must be valid)
 // @param center_x      Screen-space X center of the symbol
 // @param center_y      Screen-space Y center of the symbol
@@ -254,12 +262,14 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity);
 // @param fill_color    Fill color (typically team color)
 // @param outline_color Outline color
 // @param filled        If false, draws outline only (for hover/selection)
+// @param library       Optional data-driven symbol library (library-first)
 // ---------------------------------------------------------------------------
 
 void RenderEntityIcon(f4::entities::EntityHandle& entity,
                       float center_x, float center_y,
                       float size_px,
                       RlColor fill_color, RlColor outline_color,
-                      bool filled = true);
+                      bool filled = true,
+                      const class SymbolLibrary* library = nullptr);
 
 } // namespace f4::renderer

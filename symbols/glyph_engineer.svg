@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+  <title>Engineer</title>
+  <desc>E shape</desc>
+  <path d="M -0.35 -0.35 L -0.35 0.35" fill="none" stroke="#000000" stroke-width="0.046875" />
+  <path d="M -0.35 -0.35 L 0.175 -0.35" fill="none" stroke="#000000" stroke-width="0.046875" />
+  <path d="M -0.35 0 L 0.105 0" fill="none" stroke="#000000" stroke-width="0.046875" />
+  <path d="M -0.35 0.35 L 0.175 0.35" fill="none" stroke="#000000" stroke-width="0.046875" />
+</svg>

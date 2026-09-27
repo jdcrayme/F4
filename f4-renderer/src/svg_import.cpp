@@ -1060,4 +1060,34 @@ void save_symbol_as_svg(const SymbolDefinition& def,
     }
 }
 
+std::size_t merge_symbol_svg_directory(SymbolLibrary& lib,
+                                       const std::filesystem::path& dir,
+                                       std::vector<std::string>* errors) {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir, ec)) return 0;
+
+    // Sorted so the merge order (and any error list) is deterministic —
+    // the directory scan must not depend on the filesystem's mood.
+    std::vector<std::filesystem::path> files;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".svg") {
+            files.push_back(entry.path());
+        }
+    }
+    std::sort(files.begin(), files.end());
+
+    std::size_t merged = 0;
+    for (const auto& path : files) {
+        try {
+            lib.add_or_replace(import_symbol_from_svg_file(path));
+            ++merged;
+        } catch (const std::exception& e) {
+            if (errors != nullptr) {
+                errors->push_back(path.filename().string() + ": " + e.what());
+            }
+        }
+    }
+    return merged;
+}
+
 } // namespace f4::renderer

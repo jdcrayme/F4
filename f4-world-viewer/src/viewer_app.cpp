@@ -23,6 +23,8 @@
 #include "viewer_state.hpp"
 
 #include <f4/install/installation.hpp>
+#include <f4/renderer/symbol_library.hpp>
+#include <f4/renderer/svg_import.hpp>
 #include <f4/viewer/settings.hpp>
 #include <f4/viewer/replay_mode.hpp>
 #include <rlImGui.h>
@@ -78,6 +80,10 @@ bool take_screenshot_to(const std::string& requested) {
 // Public API
 // ---------------------------------------------------------------------------
 ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {
+    // Map symbols first: the corpus + any SVG overrides are independent
+    // of the install, and every later frame reads them.
+    impl_->reload_symbol_library();
+
     // Restore the last install path from persisted settings. If the user
     // has already pointed at a Falcon install, we don't make them do it
     // again on every launch — detect() runs in ~50ms, fast enough that
@@ -665,6 +671,77 @@ void ViewerApp::set_initial_camera(float center_x, float center_y, float zoom) {
     impl_->cam_y = center_y;
     impl_->cam_zoom = zoom;
     impl_->initial_camera_set = true;
+}
+
+void ViewerApp::Impl::reload_symbol_library() {
+    namespace fs = std::filesystem;
+    symbol_library = f4::renderer::SymbolLibrary{};
+    symbol_load_errors.clear();
+
+    // Repo-root resolution with an upward walk: the viewer may run from
+    // the checkout root, from Build/, or from Build/<generator-dir>.
+    const auto resolve = [](const fs::path& name) {
+        std::error_code ec;
+        fs::path p = name;
+        if (fs::exists(p, ec)) return p;
+        p = fs::path("..") / name;
+        if (fs::exists(p, ec)) return p;
+        p = fs::path("..") / ".." / name;
+        if (fs::exists(p, ec)) return p;
+        return fs::path(name);
+    };
+
+    std::size_t corpus = 0;
+    try {
+        symbol_library =
+            f4::renderer::load_symbol_library(resolve("f4_symbols.json"));
+        corpus = symbol_library.size();
+    } catch (const std::exception& e) {
+        symbol_load_errors.push_back(std::string("f4_symbols.json: ") +
+                                     e.what());
+    }
+
+    const fs::path dir = symbols_dir.empty() ? resolve("symbols") : symbols_dir;
+    const std::size_t overrides =
+        f4::renderer::merge_symbol_svg_directory(symbol_library, dir,
+                                                 &symbol_load_errors);
+
+    std::string msg = "map symbols: " + std::to_string(corpus) + " corpus";
+    if (overrides > 0) msg += " + " + std::to_string(overrides) + " SVG";
+    if (!symbol_load_errors.empty()) {
+        msg += " (" + std::to_string(symbol_load_errors.size()) + " load error" +
+               (symbol_load_errors.size() > 1 ? "s" : "") + ")";
+    }
+    status_msg = msg;
+}
+
+bool ViewerApp::Impl::export_symbols(const std::filesystem::path& dir,
+                                     std::string* err) {
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec && !std::filesystem::is_directory(dir)) {
+        if (err) *err = "cannot create '" + dir.string() + "': " + ec.message();
+        return false;
+    }
+    for (const auto& def : symbol_library.symbols()) {
+        try {
+            f4::renderer::save_symbol_as_svg(def, dir / (def.key + ".svg"));
+        } catch (const std::exception& e) {
+            if (err) *err = def.key + ": " + e.what();
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ViewerApp::export_symbols(const std::filesystem::path& dir,
+                               std::string* err) {
+    return impl_->export_symbols(dir, err);
+}
+
+void ViewerApp::set_symbols_dir(const std::filesystem::path& dir) {
+    impl_->symbols_dir = dir;
+    impl_->reload_symbol_library();
 }
 
 void ViewerApp::set_window_size(int width, int height) noexcept {

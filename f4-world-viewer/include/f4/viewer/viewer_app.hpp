@@ -236,6 +236,19 @@ public:
     /// be called before run().
     void set_window_size(int width, int height) noexcept;
 
+    /// Override the directory scanned for SVG symbol overrides
+    /// (<stem>.svg replaces the symbol keyed <stem>). Empty (the default)
+    /// resolves "symbols" against the checkout root. Reloading the
+    /// library is part of the call.
+    void set_symbols_dir(const std::filesystem::path& dir);
+
+    /// Write every loaded map symbol as an SVG into `dir` (one file per
+    /// key: <key>.svg) — the Inkscape authoring starter set. Creates the
+    /// directory when missing. Returns false (with *err set) on I/O
+    /// failure. The --export-symbols CLI flag fronts this.
+    bool export_symbols(const std::filesystem::path& dir,
+                        std::string* err = nullptr);
+
     /// Start the sim RUNNING (default start is paused at parking). Before run().
     void set_paused(bool paused) noexcept;
 

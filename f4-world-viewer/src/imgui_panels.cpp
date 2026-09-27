@@ -63,6 +63,7 @@ void for_each_layer_group(ImplT* impl, Fn&& fn) {
         {"Objectives", &impl->show_objectives},
         {"Units",      &impl->show_units},
         {"Grid",       &impl->show_grid},
+        {"SVG map symbols", &impl->use_symbol_library},
     });
     fn("Overlays", 1, {
         {"Radar arcs (static)",      &impl->show_radar_arcs},
@@ -243,6 +244,11 @@ void ViewerApp::draw_imgui() {
             // Canvas layers, grouped into submenus (same table as the
             // Layers panel).
             draw_layer_groups_menu(impl_.get());
+            ImGui::Separator();
+            // The Inkscape loop: edit symbols/<key>.svg, reload, look.
+            if (ImGui::MenuItem("Reload symbol library")) {
+                impl_->reload_symbol_library();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Windows")) {
@@ -315,17 +321,6 @@ void ViewerApp::draw_imgui() {
             if (ImGui::MenuItem("Class Table Browser...", nullptr, ctb_open)) {
                 if (!ctb_open) impl_->class_table_browser.open();
             }
-            // Symbol Creator — interactive editor for the data-driven
-            // symbol library. Lets the user build symbol definitions
-            // (lists of polylines + polygons) by dragging points on a
-            // 2D canvas, then save/load the library to JSON. The
-            // eventual refactor of symbols.cpp will consume the same
-            // library data model (see f4/renderer/symbol_library.hpp).
-            const bool sc_open = impl_->symbol_creator.is_open();
-            if (ImGui::MenuItem("Symbol Creator...", nullptr, sc_open)) {
-                if (!sc_open) impl_->symbol_creator.open();
-            }
-            ImGui::Separator();
             // Install Diagnostics — shows the full diagnostic report
             // (where we looked for FALCON4.ct, every theater dir probed,
             // every campaign path + exists check). The "what's actually
@@ -698,11 +693,6 @@ void ViewerApp::draw_imgui() {
     impl_->class_table_browser.set_entity_world(&impl_->eworld,
                                                 impl_->world_generation);
     impl_->class_table_browser.draw();
-
-    // --- Symbol Creator panel (Tools > Symbol Creator) ---
-    // Interactive editor for the data-driven symbol library. Drawn
-    // after the other Tools panels so it can take focus when opened.
-    impl_->symbol_creator.draw();
 
     // --- Campaign + Teams panels (auto-open when a world is loaded —
     // show CampaignState fields and the .tea-enriched team roster

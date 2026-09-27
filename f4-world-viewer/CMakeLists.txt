@@ -129,7 +129,6 @@ add_library(f4_world_viewer STATIC
     src/hex/decoders.cpp
     src/hex/hex_inspector.cpp
     src/class_table_browser.cpp
-    src/symbol_creator.cpp
     src/scenario_player_view.cpp     # Consolidated f4-scenario-player (scenario mode)
     src/airfield_overlays.cpp        #   scenario airfield overlays (moved from f4-scenario-player)
     src/radio_log.cpp                #   scenario ATC radio transcript (moved from f4-scenario-player)

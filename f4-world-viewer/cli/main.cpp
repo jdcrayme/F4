@@ -117,6 +117,12 @@ int main(int argc, char** argv) {
     // needed).
     std::string replay_path;
     bool have_replay = false;
+    std::string symbols_dir;              // --symbols-dir <path>: SVG
+                                          // symbol overrides (default:
+                                          // checkout-root symbols/)
+    std::string export_symbols_dir;       // --export-symbols <dir>: write
+                                          // every loaded symbol as SVG
+                                          // and exit (headless)
     std::string select_name;              // --select <substring>
     int ct_preview_entity = -1;           // --ct-preview <entity_type>:
                                           // open the Class Table Browser
@@ -199,6 +205,10 @@ int main(int argc, char** argv) {
         } else if (a == "--replay" && i + 1 < argc) {
             replay_path = argv[++i];
             have_replay = true;
+        } else if (a == "--symbols-dir" && i + 1 < argc) {
+            symbols_dir = argv[++i];
+        } else if (a == "--export-symbols" && i + 1 < argc) {
+            export_symbols_dir = argv[++i];
         } else if (a == "--select" && i + 1 < argc) {
             select_name = argv[++i];
         } else if (a == "--ct-preview" && i + 1 < argc) {
@@ -337,6 +347,22 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    // Export every loaded map symbol as SVG into a directory + exit
+    // (no GUI). The user runs: f4-world-viewer --export-symbols symbols
+    // This writes one <key>.svg per symbol (f4_symbols.json + any
+    // --symbols-dir overrides) as the Inkscape authoring starter set:
+    // edit a file, drop it back, and the next launch renders it.
+    if (!export_symbols_dir.empty()) {
+        std::string err;
+        if (app.export_symbols(export_symbols_dir, &err)) {
+            std::cout << "exported map symbols to " << export_symbols_dir
+                      << "\n";
+            return 0;
+        }
+        std::cerr << "error: export failed: " << err << "\n";
+        return 1;
+    }
+
     // Write an install snapshot to disk + exit (no GUI). Dumps
     // the first 8 KB of every interesting Falcon4 data file as a hex
     // dump, so the dev team can ground-truth binary struct layouts.
@@ -445,7 +471,8 @@ int main(int argc, char** argv) {
                 return 1;
             }
         }
-        app.set_window_size(window_w, window_h);
+        if (!symbols_dir.empty()) app.set_symbols_dir(symbols_dir);
+                app.set_window_size(window_w, window_h);
         app.set_time_scale(scenario_speed);
         if (start_running) app.set_paused(false);
         if (start_follow) app.set_follow_camera(true);

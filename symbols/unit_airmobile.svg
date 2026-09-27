@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
+  <title>Airmobile</title>
+  <desc>Battalion + helicopter silhouette</desc>
+  <path d="M -1 -0.75 L 1 -0.75 L 1 0.75 L -1 0.75 Z" fill="currentColor" data-color-role="fill_blend" />
+  <path d="M -1 -0.75 L 1 -0.75 L 1 0.75 L -1 0.75 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+  <path d="M 0.2 0.1 L 0.141421 0.241421 L 1.22465e-17 0.3 L -0.141421 0.241421 L -0.2 0.1 L -0.141421 -0.0414214 L -3.67394e-17 -0.1 L 0.141421 -0.0414214 Z" fill="#000000" data-color-role="outline" />
+  <path d="M 0 -1.5 L 0 -1" fill="none" stroke="#000000" stroke-width="0.046875" />
+  <path d="M -0.45 -0.3 L 0.45 -0.3" fill="none" stroke="#000000" stroke-width="0.046875" />
+  <path d="M 0 -0.3 L 0 -0.05" fill="none" stroke="#000000" stroke-width="0.046875" />
+  <path d="M 0 0.3 L 0.3 0.45" fill="none" stroke="#000000" stroke-width="0.046875" />
+</svg>

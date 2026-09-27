@@ -91,4 +91,16 @@ inline constexpr float kSymbolReferenceSizePx = 64.0f;
 void save_symbol_as_svg(const SymbolDefinition& def,
                         const std::filesystem::path& path);
 
+/// Merge every *.svg in `dir` into `lib`, keyed by filename stem —
+/// an obj_airbase.svg REPLACES the corpus's obj_airbase definition, a
+/// new stem adds a new key. Returns the number of symbols merged.
+/// Parse failures are collected, not thrown: each bad file appends
+/// "<filename>: <what>" to *errors (when non-null) and is skipped — a
+/// half-finished Inkscape export must never blank the map. A missing
+/// directory is fine (returns 0): first run, the directory may not
+/// exist yet.
+[[nodiscard]] std::size_t merge_symbol_svg_directory(
+    SymbolLibrary& lib, const std::filesystem::path& dir,
+    std::vector<std::string>* errors = nullptr);
+
 } // namespace f4::renderer

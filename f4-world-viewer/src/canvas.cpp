@@ -616,14 +616,20 @@ void ViewerApp::draw_canvas() {
             }
             if (defended) {
                 f4::renderer::RenderEntityIcon(h, p.x, p.y, base_size, c,
-                                               outline);
+                                               outline, /*filled=*/true,
+                                               impl_->use_symbol_library
+                                                   ? &impl_->symbol_library
+                                                   : nullptr);
             } else {
                 const f4::renderer::RlColor dim{static_cast<unsigned char>(c.r * 0.5f),
                                   static_cast<unsigned char>(c.g * 0.5f),
                                   static_cast<unsigned char>(c.b * 0.5f),
                                   70};
                 f4::renderer::RenderEntityIcon(h, p.x, p.y, base_size, dim,
-                                               outline, /*filled=*/false);
+                                               outline, /*filled=*/false,
+                                               impl_->use_symbol_library
+                                                   ? &impl_->symbol_library
+                                                   : nullptr);
             }
             if (pri && pri->priority >= 40) {
                 const float ring_r = base_size * 0.5f + 3.0f;
@@ -818,7 +824,11 @@ void ViewerApp::draw_canvas() {
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
                 255};
-            f4::renderer::RenderEntityIcon(h, p.x, p.y, s, c, outline);
+            f4::renderer::RenderEntityIcon(h, p.x, p.y, s, c, outline,
+                                           /*filled=*/true,
+                                           impl_->use_symbol_library
+                                               ? &impl_->symbol_library
+                                               : nullptr);
 
             // Selection state for the per-unit detail lines below:
             // destinations and waypoints are drawn ONLY for the selected
