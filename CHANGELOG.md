@@ -5,6 +5,44 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## QC-SUITE-2 — the poles golden, honestly (1 red → 0)
+
+- **The trim map is a function of x again** — the AI-closed Newton could
+  not converge on ANY platform; "MSVC numerics" was the wrong theory.
+  `diag_poles`' `Session::step` never applied the x vector's four AI-state
+  coordinates before steering (setAiStates existed; only setFullState
+  called it), so the map's AI rows read whatever the PREVIOUS evaluation
+  left behind: F was path-dependent, the Jacobian's AI columns were
+  fiction, and the line search compared incomparable states. Applied, the
+  trim's residual fell from 1.17e3 chaos to physically-tiny motion.
+- **The nonsmooth AI states leave the coordinate set** — ai_vsTgt (the
+  slew limiter's state: algebraic near trim, a lambda_d=1 marcher when
+  binding) and ai_prevA (overwritten by steer() from the current frame
+  every evaluation — a zero column, always) singularized the Newton
+  system. They stay APPLIED for flight continuity but are no longer
+  coordinates or residual rows; the eigen report keeps all four AI rows.
+  The AI trim gained the plant path's outer discipline (each pass
+  re-settles from the template — the vt/z blend cures a diverged pass's
+  wander — best residual wins) with the settle running the AI IN the loop
+  (aiPilotInput is now the one shared input builder).
+- **The slow-mode golden reads the time domain** — the FD Jacobian cannot
+  resolve the AI-closed phugoid: the mode moves the state ~0.4% per major
+  frame, at the FD noise floor of the stiff filter rows, and
+  lambda_c = ln(lambda_d)/dt amplifies that noise per toolchain. The old
+  +0.01656 golden was GCC's sludge — MSVC read +0.009 and +0.377 in the
+  same code — and the 900 s verify run shows 12 phugoid cycles of FLAT
+  envelope: sigma -0.0021 (a +0.0166 mode would double every ~42 s and
+  cannot hide in that fit). `diag_poles` fits and prints the envelope
+  rate (`--verify-sec` added); the golden is -0.0021 ± 5e-3 and the
+  regression gate trips past +0.01 — an order of magnitude under
+  pre-STAB-P1's +0.2196 re-growth. `PolesEnvelope` 5/5 on Windows/MSVC;
+  the suite is fully green (`ctest -LE slow`).
+- **Hygiene** — `receiver_pairing_` widened to uint64 (it narrowed
+  EntityId::value past 2^32 — the C4244 was the symptom); the
+  CombatRecording acquisition assertion dumps every track-event pair it
+  recorded (QC-PASS-1's one-time failure passes 10/10 today —
+  build-labile, and the next flip reads its own evidence).
+
 ## QC-SUITE-1 — the Windows suite repair (7 red tests → 1 named)
 
 - **LF checkout pinned (`.gitattributes`)** — the byte-identity tests read

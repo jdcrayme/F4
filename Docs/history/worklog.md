@@ -1,4 +1,87 @@
 ---
+Task ID: QC-SUITE-2
+Agent: main
+Task: The two named follow-ups from QC-SUITE-1 — the poles golden (the
+"MSVC numerics" test) and the CombatRecording flake — plus the named
+hygiene items.
+
+Work Log:
+- PolesEnvelope.AiCruiseNavTuneSlowModeGolden. The QC-SUITE-1 verdict
+  ("MSVC codegen/libm divergence, needs a numerics session") was WRONG —
+  there was no platform mystery. The real chain, each layer exposed by
+  fixing the one above:
+  1. Session::step() (diag_poles' Newton map) never applied the x
+     vector's four AI integrator coordinates before calling steer() —
+     setAiStates existed but only setFullState called it. The map's AI
+     rows read whatever the PREVIOUS evaluation left in the steering
+     core: F was path-dependent (not a function of x), the Jacobian's
+     AI columns measured fiction, the line search compared
+     incomparable states. Applying the coordinates before steer is the
+     whole fix for this layer; the residual fell 1.17e3 -> tens.
+  2. With F honest, the Newton still plateaued: ai_vsTgt and ai_prevA
+     are not dynamic states. vs_target near trim is ALGEBRAIC (the
+     slew limiter unbound: next = raw, zero column) or a lambda_d = 1
+     marcher when bound (column exactly 1 — a degenerate unit
+     eigenvalue); prev_alpha_est is overwritten by steer() from the
+     current frame EVERY evaluation (zero column, always). Either way
+     the coordinate set spans a singular direction. They stay APPLIED
+     (flight continuity) but left the coordinate/residual set; the
+     eigen report keeps all four AI rows.
+  3. The AI trim also lacked the plant path's outer discipline: each
+     pass now re-settles from the template (the settle's vt/z blend
+     actively cures a diverged pass's z wander — the +211 ft drift
+     that was poisoning the eigen) and best residual wins, with the
+     settle running the AI IN the loop from the template's seeded
+     integrators (the AI integrators walk to their own quasi-trim;
+     aiPilotInput() is now the one shared pilot-input builder —
+     verifyRun's diverged copy folded in).
+  4. THE GOLDEN ITSELF. With the trim as good as the solver gets,
+     worst_slow read +0.243 (gate test red too) while the TIME DOMAIN
+     was stable. The FD Jacobian cannot resolve the AI-closed
+     phugoid AT ALL: the mode moves the state ~0.4% per major frame —
+     at the FD noise floor of the stiff filter rows (1e-3/1e-4
+     scales) — and lambda_c = ln(lambda_d)/dt amplifies the noise
+     into the slow band. GCC's +0.01656 golden was GCC's noise; MSVC
+     read +0.009 (pre-QC-SUITE-1) and +0.377/+0.243 (post-fixes) in
+     the same code. The 900 s verify run settles it: 12 phugoid
+     cycles of FLAT envelope, sigma -0.0021 (a +0.0166 mode doubles
+     amplitude every ~42 s and cannot hide in that fit).
+  Fix: diag_poles fits the VS envelope's exponential rate over the
+  per-half-cycle peaks (first peak skipped — kick transient) and
+  prints "phugoid sigma"; --verify-sec added (the fit wants >= 600 s;
+  default verify stays 180). The golden test (renamed
+  AiCruiseNavTunePhugoidSigmaGolden) and the regression gate
+  (SlowModeGate) now assert the time-domain sigma: golden -0.0021
+  +- 5e-3, gate trips past +0.01 (an order of magnitude under
+  pre-STAB-P1's +0.2196). PolesEnvelope 5/5 on MSVC. The honest GCC
+  cross-check is still wanted when a container is next available —
+  the time-domain fit should agree to integration precision, not
+  codegen luck, which is the point of the re-measurement.
+- CombatRecordingReplaysTheFight: 10/10 stress passes on this build;
+  the acquisition emission path is seeded-RNG deterministic over
+  id-keyed state (no pointer-order dependence found). The QC-PASS-1
+  failure was a build-labile engagement flip, unreproducible here.
+  The acquisition assertion now dumps every TrackAcquired/TrackDropped
+  pair it DID record (combat_event_kind_name + ids + the expected
+  pair) so the next flip reads its own evidence.
+- Hygiene: receiver_pairing_ widened to unordered_map<uint64,uint64>
+  (it narrowed EntityId::value past 2^32 — ids are 0x1_0000000E-shaped;
+  the C4244 at simulation.cpp:1445 was the symptom). __pycache__/
+  + *.pyc ignored. The remaining pre-existing compiler warnings
+  (QC-PASS-1's "pre-existing only" set) were NOT swept — they are
+  cosmetic against a full-tree clean rebuild and nothing in this
+  session's touched files warns.
+
+Tests: PolesEnvelope 5/5; CombatIntegration.CombatRecordingReplaysTheFight
+10/10 stress + green after the diagnostic; full rebuild 0 errors; full
+ctest -LE slow recorded green in the CHANGELOG entry.
+
+QUEUE (named, not started): GCC/container cross-check of the phugoid
+sigma fit (the one open verification); the pre-existing warning sweep
+(a full clean rebuild's worth); the feature queues from QC-SUITE-1
+(SYMBOL-SVG-1 wiring endgame first).
+
+---
 Task ID: QC-SUITE-1
 Agent: main
 Task: The Windows suite repair — the full ctest run on this box showed 7
