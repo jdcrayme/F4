@@ -258,11 +258,12 @@ mission type**, checked in as fixtures, where the expectation table of
      #   — the full A-G chain incl. the EMPL-2d aim-point rule), exit 0
      ```
 
-     Known quirk: the SEADSTRIKE row renders "unarmed (loadout
-     concern)" because the summary's `strike_flights_armed` counter
-     reads 0 while releases happened — the counter's arm-detection
-     predates in-run arming; the releases in the ledger are the
-     truth. A generator (`campaign init --showcase <type>`)
+     Note on the SEADSTRIKE row: `strike_flights_armed` counts live
+     Bomb stations POST-run, and a flight that releases its whole
+     stick ends at 0 — so the matrix runner renders "unarmed
+     (loadout concern)" only when released is ALSO 0; a delivery row
+     renders "released N, impacts M" (the ledger is the truth). A
+     generator (`campaign init --showcase <type>`)
      synthesizing per-type worlds from the class table + profiles
      remains the follow-on (the campinit CLI's natural home).
 

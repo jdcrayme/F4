@@ -17,7 +17,10 @@
 #     * Strike/SEAD/CAS: armed > 0 and released == 0  → EMPLOYMENT FAIL
 #       (the flight was armed but never received/pressed a ground
 #       target; autopsy: trace.json ai_state + target_description)
-#     * armed == 0 → NOTE (loadout/weapon-table concern, not tasking)
+#     * armed == 0 and released == 0 → NOTE (loadout/weapon-table
+#       concern, not tasking). The counter is measured POST-run (a
+#       release debits the store), so released > 0 means the flight
+#       carried and delivered: that row gets the release note instead.
 #
 # The C++ gates stay the authority (exit 2/3/4/5/6/7/8 — see the
 # campaign_qc header); this tool renders them PER TYPE alongside its
@@ -316,7 +319,10 @@ def verdict_for(row: dict, args) -> tuple[str, str]:
                     "EMPLOYMENT: armed %d, released 0 after %d min — no "
                     "ground target ever set? autopsy: trace.json ai_state "
                     "+ target_description" % (s["armed"], args.minutes))
-        if s["armed"] == 0:
+        if s["armed"] == 0 and s["released"] == 0:
+            # strike_flights_armed counts live Bomb stations POST-run, so
+            # a flight that released its whole stick ends at 0 — that is
+            # delivery, not a loadout concern.
             notes.append("unarmed (loadout/weapon-table concern)")
         elif s["released"] > 0:
             notes.append("released %d, impacts %d"
