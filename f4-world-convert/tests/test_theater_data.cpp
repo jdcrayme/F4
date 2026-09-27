@@ -1653,11 +1653,17 @@ TEST(TheaterData, EmitTablesJsonRealFixtureStrictJsonWithKnownRows) {
     const auto out_path = dir / "tables.json";
     ASSERT_NO_THROW(f4::world_convert::emit_tables_json(db, out_path.string()));
 
-    std::ifstream f(out_path, std::ios::binary);
-    ASSERT_TRUE(f.good());
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    const std::string json = ss.str();
+    // The read stream must close before remove_all: an open ifstream is
+    // a sharing violation on Windows (its own handle is the "other
+    // process"; POSIX unlinks it without complaint).
+    std::string json;
+    {
+        std::ifstream f(out_path, std::ios::binary);
+        ASSERT_TRUE(f.good());
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        json = ss.str();
+    }
 
     // 1. Strict JSON (the runtime loader's own walk).
     {
@@ -1725,11 +1731,16 @@ TEST(TheaterData, EmitTablesJsonFullScaleSynthetic) {
 
     const auto out_path = dir / "tables.json";
     ASSERT_NO_THROW(f4::world_convert::emit_tables_json(db, out_path.string()));
-    std::ifstream f(out_path, std::ios::binary);
-    ASSERT_TRUE(f.good());
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    const std::string json = ss.str();
+    std::string json;
+    {
+        // Same Windows constraint as the RealFixture test: closed before
+        // remove_all or the delete is a sharing violation.
+        std::ifstream f(out_path, std::ios::binary);
+        ASSERT_TRUE(f.good());
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        json = ss.str();
+    }
 
     EXPECT_NE(json.find("\"units\": 296"), std::string::npos);
     // Strict JSON at full scale.
