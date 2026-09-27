@@ -747,7 +747,7 @@ private:
     /// tanker lives and stays airborne; erased on the hysteresis
     /// release (the tanker left the release ring). Bounded by the
     /// receiver count.
-    std::unordered_map<std::uint32_t, std::uint32_t> receiver_pairing_;
+    std::unordered_map<std::uint64_t, std::uint64_t> receiver_pairing_;
 
     // SimData AI data (BRAINDAT.brn + FORMDAT.FIL, converted to canonical
     // JSON by f4-convert). OWNED HERE because both consumers take

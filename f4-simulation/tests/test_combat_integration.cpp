@@ -994,6 +994,36 @@ TEST(CombatIntegration, WvrMergeScenarioFilePlaysOut) {
 #endif
 }
 
+// On an acquisition-assertion failure, name what WAS recorded: every track
+// event in the file with its pair, so the next build-labile engagement flip
+// (QC-PASS-1's "TrackAcquired ids missing" — the same code passed 10/10 on
+// a later build) reads its own evidence instead of a bare boolean.
+std::string build_track_diagnostic(
+    const std::vector<f4::recorder::CombatEvent>& ev,
+    std::uint64_t shooter, std::uint64_t bandit) {
+    int track_events = 0;
+    std::string out = "\n  track events recorded:";
+    for (const auto& e : ev) {
+        if (e.kind != f4::recorder::CombatEventKind::TrackAcquired &&
+            e.kind != f4::recorder::CombatEventKind::TrackDropped) {
+            continue;
+        }
+        ++track_events;
+        out += "\n    ";
+        out += f4::recorder::combat_event_kind_name(e.kind);
+        out += " tick=" + std::to_string(e.tick) +
+               " subject=" + std::to_string(e.subject_id) +
+               " object=" + std::to_string(e.object_id);
+    }
+    if (track_events == 0) {
+        out += "\n    (none — the radar never acquired anything)";
+    }
+    out += "\n    expected subject=" + std::to_string(shooter) +
+           " object=" + std::to_string(bandit) +
+           " (EAGLE1/BANDIT1 — a different pair means the engagement flipped)";
+    return out;
+}
+
 // ============================================================================
 // 8. M4 — the fight REPLAYS HEADLESS. The same BVR engagement as (5), run
 //    with recording on, written to disk, and re-loaded through the
@@ -1106,7 +1136,8 @@ TEST(CombatIntegration, CombatRecordingReplaysTheFight) {
     ASSERT_NE(find_event(f4::recorder::CombatEventKind::TrackAcquired,
                          shooter_id.value, bandit_id.value),
               nullptr)
-        << "the radar acquisition never made it into the recording";
+        << "the radar acquisition never made it into the recording"
+        << build_track_diagnostic(ev, shooter_id.value, bandit_id.value);
 
     // The lock warning on the victim.
     ASSERT_NE(find_event(f4::recorder::CombatEventKind::RwrLock,
