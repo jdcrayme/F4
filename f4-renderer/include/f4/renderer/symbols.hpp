@@ -1,34 +1,17 @@
 // f4-renderer/include/f4/renderer/symbols.hpp
 //
-// PUBLIC HEADER — procedural symbol vocabulary for F4 rendering.
-// Moved from f4-world-viewer to f4-renderer so all viewer apps can
-// share the same symbol drawing code.
+// PUBLIC HEADER — the SymbolKind address space for F4 map symbols.
 //
 // Design
 // ------
-// Every objective and unit on the canvas is drawn as a small procedural
-// glyph composed from raylib primitives (triangles, rectangles, circles,
-// lines). There are NO texture assets — symbols scale crisply at any zoom,
-// pick up the team color automatically, and add zero startup cost.
-//
-// Vocabulary
-// ----------
-//   SymbolKind enum — one entry per drawable (objective_type or
-//                     unit_class + subtype combination).
-//   symbol_for_objective_type(uint8_t) -> SymbolKind
-//       Replaces Impl::icon_for_objective_type. Pure function.
-//   symbol_for_unit(UnitClass, uint8_t subtype) -> SymbolKind
-//       Replaces Impl::icon_for_unit. Pure function.
-//
-// Two render paths share the same geometry:
-//   Impl::draw_symbol(...)              — raylib direct (used by canvas.cpp).
-//   draw_symbol_imgui(ImDrawList*, ...) — ImGui draw list (used by the
-//                                         Legend panel and any other widget
-//                                         that wants a live symbol preview).
-//
-// Both paths take an explicit fill color and outline color, so callers
-// can render team-colored symbols on the canvas and white-on-dark symbols
-// in the legend from the same vocabulary.
+// An entity names its symbol in two hops: a component's objective_type or
+// (unit_class, unit_subtype) maps to a SymbolKind (this header's pure
+// functions), and the SymbolKind resolves to a data-driven definition via
+// symbol_key_for_kind() — the seam the SymbolLibrary (symbol_library.hpp,
+// backed by f4_symbols.json + symbols/*.svg overrides) is consumed
+// through. There is no procedural draw path anymore: rendering goes
+// through draw_library_symbol(), and a missing key falls back to a plain
+// circle inside RenderEntityIcon so an icon can never go blank.
 
 #pragma once
 
@@ -36,13 +19,10 @@
 
 #include <cstdint>
 
-struct ImDrawList;
-struct ImVec2;
-
 namespace f4::renderer {
 
-// Forward-declare Raylib Color for the draw_symbol() signature.
-// Avoids including raylib.h in this public header.
+// POD mirror of Raylib's Color — avoids including raylib.h in this
+// public header (symbol_library.hpp's draw API takes it too).
 struct RlColor { unsigned char r, g, b, a; };
 
 // ---------------------------------------------------------------------------
@@ -163,28 +143,5 @@ struct SymbolLibraryKey {
 // against the committed f4_symbols.json corpus so the wiring can never
 // silently fall back for a kind the library actually defines.
 [[nodiscard]] SymbolLibraryKey symbol_key_for_kind(SymbolKind kind) noexcept;
-
-// Free-function ImGui variant — renders the same symbol vocabulary into an
-// ImGui draw list for use in panels/legends. Defined in symbols.cpp.
-//   dl          — target draw list (e.g. ImGui::GetWindowDrawList())
-//   kind        — which symbol to draw
-//   center      — screen-space center of the symbol
-//   size_px     — overall symbol extent (width = height = size_px)
-//   fill_col    — ImGui-packed fill color (use IM_COL32(r,g,b,a))
-//   outline_col — ImGui-packed outline color
-//   filled      — if false, draws outline only (for hover/selection)
-void draw_symbol_imgui(ImDrawList* dl, SymbolKind kind, ImVec2 center,
-                       float size_px, unsigned int fill_col,
-                       unsigned int outline_col, bool filled = true);
-
-// Draw a symbol using raylib primitives directly.
-//   center      — screen-space center of the symbol
-//   size_px     — overall symbol extent (width = height = size_px)
-//   fill_color  — fill color (typically team color)
-//   outline_col — outline color
-//   filled      — if false, draws outline only (for hover/selection)
-void draw_symbol(SymbolKind kind, float center_x, float center_y,
-                 float size_px, RlColor fill_color, RlColor outline_color,
-                 bool filled = true);
 
 } // namespace f4::renderer

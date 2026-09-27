@@ -11,8 +11,6 @@
 // moves the Impl struct + per-concern implementations into:
 //   viewer_state.hpp    — this file (Impl struct + color helpers)
 //   viewer_app.cpp      — lifecycle (ctor/dtor/run) + small helpers
-//   symbols.cpp         — procedural symbol drawing (replaces the old
-//                         PNG-icon system — see symbols.hpp)
 //   camera.cpp          — Impl world<->screen transforms + fit_to_world
 //   file_ops.cpp        — ViewerApp::load_*_json / import_*
 //   install_flow.cpp    — ViewerApp::set_install_path* / open_campaign_dialog
@@ -113,7 +111,7 @@
 #include <vector>
 
 #include <f4/renderer/symbol_library.hpp>    // SymbolLibrary (data-driven symbols)
-#include <f4/renderer/symbols.hpp>           // SymbolKind, RlColor, draw_symbol
+#include <f4/renderer/symbols.hpp>           // SymbolKind, RlColor, the key seam
 #include <f4/renderer/ground_layout_models.hpp>  // AirfieldGeometry3D + builder (shared)
 using f4::renderer::AirfieldGeometry3D;
 
@@ -192,9 +190,9 @@ struct ModelsImportJob {
 // toggles, status, install-aware state, modals, hex inspector, screenshots)
 // so a reader can find what they need without scanning the whole struct.
 //
-// Member-function definitions that need to touch this struct (draw_symbol,
-// world_to_screen, screen_to_world, fit_to_world, rebuild_objective_index)
-// live in symbols.cpp and camera.cpp — declared here, defined there. The
+// Member-function definitions that need to touch this struct
+// (world_to_screen, screen_to_world, fit_to_world, rebuild_objective_index)
+// live in camera.cpp — declared here, defined there. The
 // free functions in diagnostics.cpp take a const Installation& and don't
 // need Impl access.
 // ---------------------------------------------------------------------------
@@ -940,16 +938,15 @@ struct ViewerApp::Impl {
     // VU_ID.num → EntityId lookups are now in pop.objective_id_map and
     // pop.unit_id_map (populated by populate_world). No separate rebuild needed.
 
-    // --- Map symbols (data-driven library + procedural fallback) ---
+    // --- Map symbols (data-driven library) ---
     //
     // symbol_library is loaded at startup (reload_symbol_library):
     // f4_symbols.json (the committed corpus) merged with every
     // symbols/*.svg override (filename stem = key — edit a symbol in
-    // Inkscape, drop it there, reload). use_symbol_library routes
-    // RenderEntityIcon library-first; a missing key falls back to the
-    // procedural vocabulary, so an icon can never go blank.
+    // Inkscape, drop it there, reload). Every icon renders through the
+    // library; a missing key falls back to a plain circle, so an icon
+    // can never go blank.
     f4::renderer::SymbolLibrary symbol_library;
-    bool use_symbol_library = true;
     std::vector<std::string> symbol_load_errors;
     std::filesystem::path symbols_dir;   // empty = the default search
     void reload_symbol_library();

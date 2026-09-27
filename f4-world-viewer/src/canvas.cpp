@@ -617,9 +617,7 @@ void ViewerApp::draw_canvas() {
             if (defended) {
                 f4::renderer::RenderEntityIcon(h, p.x, p.y, base_size, c,
                                                outline, /*filled=*/true,
-                                               impl_->use_symbol_library
-                                                   ? &impl_->symbol_library
-                                                   : nullptr);
+                                               &impl_->symbol_library);
             } else {
                 const f4::renderer::RlColor dim{static_cast<unsigned char>(c.r * 0.5f),
                                   static_cast<unsigned char>(c.g * 0.5f),
@@ -627,9 +625,7 @@ void ViewerApp::draw_canvas() {
                                   70};
                 f4::renderer::RenderEntityIcon(h, p.x, p.y, base_size, dim,
                                                outline, /*filled=*/false,
-                                               impl_->use_symbol_library
-                                                   ? &impl_->symbol_library
-                                                   : nullptr);
+                                               &impl_->symbol_library);
             }
             if (pri && pri->priority >= 40) {
                 const float ring_r = base_size * 0.5f + 3.0f;
@@ -826,9 +822,7 @@ void ViewerApp::draw_canvas() {
                 255};
             f4::renderer::RenderEntityIcon(h, p.x, p.y, s, c, outline,
                                            /*filled=*/true,
-                                           impl_->use_symbol_library
-                                               ? &impl_->symbol_library
-                                               : nullptr);
+                                           &impl_->symbol_library);
 
             // Selection state for the per-unit detail lines below:
             // destinations and waypoints are drawn ONLY for the selected
@@ -1010,8 +1004,11 @@ void ViewerApp::draw_canvas() {
                 static_cast<unsigned char>(c.g * 0.4f),
                 static_cast<unsigned char>(c.b * 0.4f),
                 c.a};
-            f4::renderer::draw_symbol(
-                f4::renderer::SymbolKind::UnitFighter,
+            f4::renderer::draw_library_symbol(
+                impl_->symbol_library,
+                f4::renderer::symbol_key_for_kind(
+                    f4::renderer::SymbolKind::UnitFighter)
+                    .primary,
                 p.x, p.y, s, c, agg_outline);
             if (sel_vu != 0 && sel_vu == t.vu) {
                 DrawCircleLines(static_cast<int>(p.x),
@@ -1115,8 +1112,11 @@ void ViewerApp::draw_canvas() {
                 c.g = static_cast<unsigned char>(c.g * 0.55f + 64);
                 c.b = static_cast<unsigned char>(c.b * 0.55f + 64);
             }
-            f4::renderer::draw_symbol(
-                f4::renderer::SymbolKind::UnitFighter,
+            f4::renderer::draw_library_symbol(
+                impl_->symbol_library,
+                f4::renderer::symbol_key_for_kind(
+                    f4::renderer::SymbolKind::UnitFighter)
+                    .primary,
                 p.x, p.y, s, c, outline);
 
             if (selected_is_live && impl_->sel_entity == eid) {
@@ -1256,8 +1256,11 @@ void ViewerApp::draw_canvas() {
                 c.g = static_cast<unsigned char>(c.g * 0.55f + 64);
                 c.b = static_cast<unsigned char>(c.b * 0.55f + 64);
             }
-            f4::renderer::draw_symbol(
-                f4::renderer::SymbolKind::UnitFighter,
+            f4::renderer::draw_library_symbol(
+                impl_->symbol_library,
+                f4::renderer::symbol_key_for_kind(
+                    f4::renderer::SymbolKind::UnitFighter)
+                    .primary,
                 p.x, p.y, s, c, outline);
 
             if (route_selected) {

@@ -63,7 +63,6 @@ void for_each_layer_group(ImplT* impl, Fn&& fn) {
         {"Objectives", &impl->show_objectives},
         {"Units",      &impl->show_units},
         {"Grid",       &impl->show_grid},
-        {"SVG map symbols", &impl->use_symbol_library},
     });
     fn("Overlays", 1, {
         {"Radar arcs (static)",      &impl->show_radar_arcs},

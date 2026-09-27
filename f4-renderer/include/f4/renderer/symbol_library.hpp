@@ -4,19 +4,18 @@
 //
 // Design
 // ------
-// The existing f4::renderer::symbols.hpp defines a fixed enum (SymbolKind)
-// with hard-coded procedural drawing in symbols.cpp. That works for the
-// existing objective + unit glyphs but doesn't scale to user-defined
-// symbols or rapid iteration on symbol geometry.
+// f4::renderer::symbols.hpp defines the fixed SymbolKind address space
+// (entity component bytes → kind → library key). But a fixed enum with
+// geometry baked in C++ doesn't scale to user-defined symbols or rapid
+// iteration on symbol geometry — and since SYMBOL-SVG-2 it doesn't exist:
+// this library is the ONLY render source.
 //
-// This header introduces a data-driven alternative: a SymbolLibrary is a
+// A SymbolLibrary is a
 // flat collection of SymbolDefinitions keyed by string. Each definition
 // is a list of polylines + polygons expressed in normalized [-1, +1]
 // coordinates where (0, 0) is the symbol center and ±1 is the half-extent
-// of the symbol's bounding box. This matches the existing convention in
-// symbols.cpp where `r = size_px * 0.5f` and every shape is computed as a
-// fraction of r — so a stored point of (0.5, -0.25) renders at
-// (sx + 0.5 * r, sy - 0.25 * r) on screen.
+// of the symbol's bounding box — so a stored point of (0.5, -0.25)
+// renders at (sx + 0.5 * r, sy - 0.25 * r) on screen for r = size_px/2.
 //
 // Persistence
 // -----------
@@ -49,22 +48,15 @@
 //
 // Rendering
 // ---------
-// Two render paths mirror the existing symbols.hpp API:
+// Two render paths:
 //   draw_library_symbol(ImDrawList*, ...) — ImGui draw list (panels, legends)
 //   draw_library_symbol(...)              — raylib direct (canvas)
 // Both take the library + key + center + size_px + fill/outline colors,
-// look up the definition, and walk its polylines + polygons. Polylines
-// use DrawLineEx / AddPolyline; filled polygons use DrawTriangleFan /
-// AddConvexPolyFilled when convex and hole-free, else their earcut
-// triangle cache (AddTriangleFilled / DrawTriangle); outline polygons
+// look up the definition, and walk its polylines + polygons. Filled
+// polygons draw as an explicit centroid fan of DrawTriangle calls /
+// AddTriangleFilled (DrawTriangleFan rasterizes nothing for these vertex
+// lists — the SYMBOL-SVG-2 fill bug); outline polygons
 // use AddPolyline with closed=true.
-//
-// FUTURE: the eventual refactor of symbols.cpp will replace the hard-coded
-// switch in draw_symbol() with a lookup into a loaded SymbolLibrary,
-// falling back to the existing procedural shapes when a key isn't found.
-// This header is the seam for that refactor — the data model + render
-// helpers are designed to be consumable directly by symbols.cpp without
-// further changes.
 
 #pragma once
 

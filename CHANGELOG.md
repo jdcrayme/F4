@@ -5,6 +5,28 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## SYMBOL-SVG-3 — the procedural vocabulary deletes (the library is the only render source)
+
+- **`draw_symbol` and `draw_symbol_imgui` are gone** — the parity eyeball
+  passed, so symbols.cpp keeps only the SymbolKind address space: the
+  ObjectiveType/UnitClass mappers and the `symbol_key_for_kind` seam
+  table (~960 → ~210 lines). Every icon on the canvas renders through
+  `draw_library_symbol` now.
+- **The fallback is a circle, not a vocabulary** — `RenderEntityIcon`
+  draws a plain filled circle + outline when the library is null or a
+  key is missing (broken corpus load, wild override). "An icon can never
+  go blank" survives without 700 lines of bespoke shapes behind it.
+- **The parity toggle deletes with it** — Layers loses `SVG map symbols`
+  (`use_symbol_library` is gone); the canvas's three aggregate-fighter
+  sites address their symbol through the same
+  `symbol_key_for_kind(UnitFighter).primary` seam instead of the
+  procedural switch.
+- The planned legend follow-on turned out moot: the old Legend window is
+  already gone (`draw_symbol_imgui` had zero callers) — it deleted with
+  the vocabulary.
+- Headless screenshot confirmed filled team-colored icons across the
+  theater; f4-renderer 15/15 + f4-world-viewer 88/88 ctest green.
+
 ## SYMBOL-SVG-2 — the Inkscape authoring path (the Creator is removed)
 
 - **The map symbols fill again** — the first live run of the library path

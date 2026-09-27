@@ -244,16 +244,15 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity);
 //   - UnitCoreComponent → draws a unit symbol (frame + glyph, where
 //     the frame encodes UnitClass and the glyph encodes unit_subtype)
 //
-// This is a convenience wrapper: it calls entity_icon_info() and then
-// draw_symbol(). If the entity has no icon components, this is a no-op.
+// This is a convenience wrapper: it calls entity_icon_info() and draws
+// the resolved kind. If the entity has no icon components, this is a
+// no-op.
 //
-// Library-first rendering: when `library` is non-null, the kind's
-// library key (symbol_key_for_kind) is resolved first and drawn via
-// draw_library_symbol(); a missing key falls back to the procedural
-// path, so the corpus and any SVG overrides can never blank an icon.
-// Pass the viewer's loaded library to get the data-driven symbols
-// (f4_symbols.json + symbols/*.svg overrides); nullptr keeps the
-// purely procedural vocabulary.
+// Data-driven rendering: the kind's library key (symbol_key_for_kind)
+// is resolved and drawn via draw_library_symbol(). A null library or a
+// missing key falls back to a plain circle — the corpus and any SVG
+// overrides can never blank an icon. Pass the viewer's loaded library
+// (f4_symbols.json + symbols/*.svg overrides).
 //
 // @param entity        Entity handle to render (must be valid)
 // @param center_x      Screen-space X center of the symbol
@@ -262,7 +261,7 @@ EntityIconInfo entity_icon_info(f4::entities::EntityHandle& entity);
 // @param fill_color    Fill color (typically team color)
 // @param outline_color Outline color
 // @param filled        If false, draws outline only (for hover/selection)
-// @param library       Optional data-driven symbol library (library-first)
+// @param library       The data-driven symbol library
 // ---------------------------------------------------------------------------
 
 void RenderEntityIcon(f4::entities::EntityHandle& entity,

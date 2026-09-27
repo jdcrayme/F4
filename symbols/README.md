@@ -27,7 +27,7 @@ team's palette. Use the color-role convention:
 
 - `currentColor` fill  → the team fill color (opaque)
 - `fill-opacity="0.85"` → the team fill at 85% (fill_blend; overlaps read
-  as translucency, matching the procedural vocabulary)
+  as translucency)
 - plain black/white stroke or fill → the contrast outline
 
 The exporter writes these as `currentColor` plus `data-color-role`

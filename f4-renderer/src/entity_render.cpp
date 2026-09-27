@@ -336,10 +336,10 @@ void RenderEntityIcon(f4::entities::EntityHandle& entity,
     const auto info = entity_icon_info(entity);
     if (!info.valid) return;
 
-    // Library-first: the data-driven definition replaces the procedural
-    // switch whenever the kind's key resolves; a missing key falls back
-    // so an icon can never go blank (the corpus is coverage-tested, but
-    // SVG overrides come from the wild).
+    // Data-driven: the kind's library key resolves to the drawn shape.
+    // A null library or a missing key (broken corpus load, wild override)
+    // still may not blank the icon — fall back to the generic circle
+    // (the vocabulary's documented unknown-shape).
     if (library != nullptr) {
         const auto key = symbol_key_for_kind(info.kind);
         if (library->find(key.primary) != nullptr) {
@@ -349,8 +349,13 @@ void RenderEntityIcon(f4::entities::EntityHandle& entity,
         }
     }
 
-    draw_symbol(info.kind, center_x, center_y, size_px,
-                fill_color, outline_color, filled);
+    const Color fc = {fill_color.r, fill_color.g, fill_color.b,
+                      static_cast<unsigned char>(fill_color.a * 0.85f)};
+    const Color oc = {outline_color.r, outline_color.g, outline_color.b,
+                      outline_color.a};
+    DrawCircleV({center_x, center_y}, size_px * 0.5f, fc);
+    DrawCircleLines(static_cast<int>(center_x), static_cast<int>(center_y),
+                    size_px * 0.5f, oc);
 }
 
 } // namespace f4::renderer
