@@ -7,6 +7,16 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 
 ## SYMBOL-SVG-2 — the Inkscape authoring path (the Creator is removed)
 
+- **The map symbols fill again** — the first live run of the library path
+  rendered every icon as unfilled strokes in the dark outline color:
+  `draw_library_symbol`'s convex-fill used raylib's `DrawTriangleFan`,
+  which silently rasterized NOTHING for these vertex lists (the path was
+  never exercised on a canvas — the Creator previewed through ImGui).
+  The fill now draws as an explicit centroid fan of `DrawTriangle`
+  calls, proven by the new GPU pixel-count tests (`test_symbol_draw`:
+  corpus / viewer-merged / unit-kind each must produce > 400 fill
+  pixels at 64 px — a fill-less render leaves ~0) and by a headless
+  screenshot showing filled team-colored icons across the theater.
 - **Scope change (review direction)**: the in-app Symbol Creator is
   REMOVED — its planned SVG Import/Export buttons were the old plan, and
   an on-disk editor plus file convention beats 1,026 lines of bespoke
