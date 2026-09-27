@@ -122,3 +122,19 @@ target_include_directories(test_event_log PRIVATE
 target_link_libraries(test_event_log PRIVATE
     GTest::gtest_main f4-campaign-api f4-json f4-world-types)
 gtest_discover_tests(test_event_log PROPERTIES LABELS "f4-world-viewer" TIMEOUT 60)
+
+# --- The theater name table loader --------------------------------------
+# theater_names.cpp parses the f4.theater.names/1 document
+# (scripts/export_names.py's rewrite of the install's .idx/.wch pair);
+# the lookup bounds-check is the save-vs-install safety net.
+add_executable(test_theater_names
+    test_theater_names.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/theater_names.cpp
+)
+target_include_directories(test_theater_names PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+target_link_libraries(test_theater_names PRIVATE
+    GTest::gtest_main f4-json)
+gtest_discover_tests(test_theater_names PROPERTIES LABELS "f4-world-viewer" TIMEOUT 60)

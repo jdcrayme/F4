@@ -21,6 +21,7 @@
 // restore-from-settings logic and the run() render loop.
 
 #include "viewer_state.hpp"
+#include "theater_names.hpp"
 
 #include <f4/install/installation.hpp>
 #include <f4/renderer/symbol_library.hpp>
@@ -34,7 +35,9 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 namespace f4::viewer {
@@ -83,6 +86,9 @@ ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {
     // Map symbols first: the corpus + any SVG overrides are independent
     // of the install, and every later frame reads them.
     impl_->reload_symbol_library();
+    // The theater name table (nameid → display name) — same startup
+    // contract: load what exists now; absences fall back to raw ids.
+    impl_->reload_theater_names();
 
     // Restore the last install path from persisted settings. If the user
     // has already pointed at a Falcon install, we don't make them do it
@@ -713,6 +719,45 @@ void ViewerApp::Impl::reload_symbol_library() {
                (symbol_load_errors.size() > 1 ? "s" : "") + ")";
     }
     status_msg = msg;
+}
+
+// The theater name table: Data/Theater/<theater>/names.json —
+// scripts/export_names.py's rewrite of the install's <theater>.idx +
+// <theater>.wch pair. korea is the repo's one theater; absence is the
+// normal cold path (the asset simply hasn't been exported) and every
+// nameid lookup then falls back to the raw id.
+void ViewerApp::Impl::reload_theater_names() {
+    namespace fs = std::filesystem;
+    theater_names.clear();
+
+    // Repo-root resolution, identical to reload_symbol_library's: the
+    // viewer may run from the checkout root, from Build/, or deeper.
+    const auto resolve = [](const fs::path& name) {
+        std::error_code ec;
+        fs::path p = name;
+        if (fs::exists(p, ec)) return p;
+        p = fs::path("..") / name;
+        if (fs::exists(p, ec)) return p;
+        p = fs::path("..") / ".." / name;
+        if (fs::exists(p, ec)) return p;
+        return fs::path(name);
+    };
+    const fs::path path =
+        resolve(fs::path("Data") / "Theater" / "korea" / "names.json");
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return;
+
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return;
+    std::stringstream buf;
+    buf << f.rdbuf();
+
+    try {
+        theater_names = load_theater_names(buf.str());
+    } catch (const std::exception& e) {
+        theater_names.clear();
+        symbol_load_errors.push_back(std::string("names.json: ") + e.what());
+    }
 }
 
 bool ViewerApp::Impl::export_symbols(const std::filesystem::path& dir,

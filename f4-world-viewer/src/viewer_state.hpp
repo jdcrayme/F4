@@ -116,6 +116,7 @@
 using f4::renderer::AirfieldGeometry3D;
 
 #include "event_log.hpp"                     // EventLogStore (the campaign log)
+#include "theater_names.hpp"                 // theater_name_for_id (nameid lookup)
 
 namespace f4::viewer {
 
@@ -638,16 +639,23 @@ struct ViewerApp::Impl {
     }
     /// An objective contract id's display name ("" = unknown) — the
     /// Event Log's row freezer and the session window's feed share it.
-    /// Small front objectives carry NO name in the parsed data (the
-    /// theater name table behind ObjectivePriorityComponent::nameid is
-    /// not loaded anywhere yet) — callers render the raw id for those;
-    /// the nameid table is a named data-pipeline gap, not this helper's.
+    /// Resolution order: the objective's own class_name (airbases/cities
+    /// carry one), else the theater name table at the row's nameid
+    /// (small front objectives — scripts/export_names.py's export of
+    /// the install's name pair), else "" and callers render the raw id.
     [[nodiscard]] std::string objective_display_name(std::uint32_t id) const {
         const auto [eid, in_pop] = objective_entity(id);
         if (!eid.valid()) return {};
         auto oh = in_pop ? handle(eid) : session_handle(eid);
-        auto* ot = oh.get<f4::entities::ObjectiveTypeComponent>();
-        return ot ? ot->class_name : std::string{};
+        if (auto* ot = oh.get<f4::entities::ObjectiveTypeComponent>()) {
+            if (!ot->class_name.empty()) return ot->class_name;
+        }
+        if (auto* pri = oh.get<f4::entities::ObjectivePriorityComponent>()) {
+            std::string nm = theater_name_for_id(theater_names,
+                                                 pri->nameid);
+            if (!nm.empty()) return nm;
+        }
+        return {};
     }
     /// The handle for a UNIT selection: the session's entity when a
     /// session runs and one resolves there, else the static world's.
@@ -997,6 +1005,16 @@ struct ViewerApp::Impl {
     std::filesystem::path symbols_dir;   // empty = the default search
     void reload_symbol_library();
     bool export_symbols(const std::filesystem::path& dir, std::string* err);
+
+    // --- Theater name table (nameid → display name) ---
+    //
+    // Loaded at startup from Data/Theater/korea/names.json
+    // (scripts/export_names.py's export of the install's korea.idx +
+    // korea.wch pair — the strings ObjectivePriorityComponent::nameid
+    // indexes). Empty when the asset is absent: every lookup then falls
+    // back to the raw id, exactly as before this table existed.
+    std::vector<std::string> theater_names;
+    void reload_theater_names();
 
     // --- Camera transforms (defined in camera.cpp) ---
 

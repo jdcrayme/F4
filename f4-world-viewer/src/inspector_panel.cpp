@@ -83,6 +83,17 @@ void ViewerApp::draw_inspector_window() {
             auto* ot = h.get<f4::entities::ObjectiveTypeComponent>();
             if (ot && !ot->class_name.empty()) {
                 ImGui::TextUnformatted(ot->class_name.c_str());
+            } else if (auto* pri =
+                           h.get<f4::entities::ObjectivePriorityComponent>()) {
+                // The theater name table: small objectives carry no
+                // class_name — their nameid is the display name.
+                const std::string nm = theater_name_for_id(
+                    impl_->theater_names, pri->nameid);
+                if (!nm.empty()) {
+                    ImGui::TextUnformatted(nm.c_str());
+                } else {
+                    ImGui::TextUnformatted("Objective");
+                }
             } else {
                 ImGui::TextUnformatted("Objective");
             }
@@ -163,8 +174,18 @@ void ViewerApp::draw_inspector() {
                         : std::string("Unknown");
                 ImGui::Text("Objective");
                 ImGui::Separator();
-                if (!ot->class_name.empty()) {
-                    ImGui::Text("Name:      %s", ot->class_name.c_str());
+                {
+                    // The display name: the objective's own class_name
+                    // (airbases/cities), else the theater name table at
+                    // the row's nameid (small front objectives).
+                    std::string display = ot->class_name;
+                    if (display.empty() && pri) {
+                        display = theater_name_for_id(impl_->theater_names,
+                                                      pri->nameid);
+                    }
+                    if (!display.empty()) {
+                        ImGui::Text("Name:      %s", display.c_str());
+                    }
                 }
                 ImGui::Text("Type:      %s (%d)", obj_type_name_str.c_str(), obj_type);
                 ImGui::Text("Entity:    %d", ot->type);

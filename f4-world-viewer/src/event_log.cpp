@@ -100,8 +100,11 @@ bool format_campaign_event_label(
             std::snprintf(buf, cap, "mission: %s team %u -> %s",
                           ev.mission_filed.mission_name.c_str(),
                           ev.mission_filed.team,
-                          name_or_id(
-                              ev.mission_filed.target_objective_id).c_str());
+                          ev.mission_filed.target_objective_id == 0
+                              ? "(no target)"   // CAP/HAVCAP/escort family
+                              : name_or_id(
+                                    ev.mission_filed.target_objective_id)
+                                    .c_str());
             return true;
         case K::Kill:
             std::snprintf(buf, cap,

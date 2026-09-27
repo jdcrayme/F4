@@ -1065,8 +1065,14 @@ void ViewerApp::draw_campaign_session_view() {
                             auto th = impl_->session_handle(it->second);
                             auto* ot = th.get<
                                 f4::entities::ObjectiveTypeComponent>();
-                            const std::string name =
-                                ot ? ot->class_name : std::string{};
+                            // Label: the class_name, else the theater
+                            // name table (the row freezer's resolver).
+                            std::string name = ot ? ot->class_name
+                                                  : std::string{};
+                            if (name.empty()) {
+                                name = impl_->objective_display_name(
+                                    in.target_objective_id);
+                            }
                             if (ImGui::Selectable(
                                     name.empty() ? "(objective)"
                                                  : name.c_str(),

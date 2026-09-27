@@ -127,6 +127,17 @@ TEST(EventLogFormat, ResolvesObjectiveNames) {
     EXPECT_NE(std::strstr(buf, "#8"), nullptr);
 }
 
+TEST(EventLogFormat, TargetlessMissionsSaySo) {
+    // The defensive family (BARCAP/HAVCAP/escort) files with no ground
+    // target — the row must not render the placeholder "#0".
+    auto ev = make_event(api::CampaignEvent::Kind::MissionFiled);
+    ev.mission_filed.target_objective_id = 0;
+    char buf[192];
+    ASSERT_TRUE(format_campaign_event_label(ev, kNamer, buf, sizeof(buf)));
+    EXPECT_NE(std::strstr(buf, "(no target)"), nullptr);
+    EXPECT_EQ(std::strstr(buf, "#0"), nullptr);
+}
+
 TEST(EventLogFormat, PersonnelFamiliesHaveFaces) {
     char buf[192];
     ASSERT_TRUE(format_campaign_event_label(

@@ -122,6 +122,7 @@ add_library(f4_world_viewer STATIC
     src/campaign_client_runner.cpp   # CAMP-HOST-3: the relocated host runner (contract-driven)
     src/campaign_queries.cpp         # CAMP-HOST-3: the contract-plane query walks
     src/event_log.cpp                # V-CAMP: the Event Log (the campaign running log)
+    src/theater_names.cpp            # the theater name table (nameid strings, from the install)
     src/file_dialog.cpp
     src/settings.cpp
     src/replay_mode.cpp

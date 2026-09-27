@@ -5,6 +5,33 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## NAMES-1 — the theater name table (the log names things)
+
+- **`korea.idx` + `korea.wch`, decoded at last** — the strings behind
+  `ObjectivePriorityComponent::nameid` (and `SquadronUIInfo::name_id`)
+  are a per-theater pair in `campaign/SAVE/` (FreeFalcon
+  `CAMPLIB/Name.cpp`: the `.idx` is `short count` + `short offsets[]`,
+  the `.wch` is the raw string stream; entry 0 is "Nowhere"). The repo
+  parsed the nameid BYTE everywhere but resolved it NOWHERE — the Event
+  Log's `#NNN` rows were that gap made visible. Proven against the
+  real install: nameid 744 → "Posong-ni".
+- **`scripts/export_names.py` → `Data/Theater/korea/names.json`** — the
+  pair rewritten as one `f4.theater.names/1` document (1631 names),
+  committed with the manifest regenerated over it (`--check` green).
+  The no-binary-runtime convention: the install's binary name data
+  crosses as a fingerprinted JSON asset.
+- **The viewer resolves** — `theater_names.hpp/cpp` (pure, tested) loads
+  the document at startup (same Data/ upward-walk as the symbol
+  library); `objective_display_name` gains the nameid hop:
+  class_name (airbases/cities) → name table (small front objectives) →
+  raw id. The Event Log, the session feed, the ATO target column, and
+  the inspector's objective header/Name row all share the resolver.
+  A nameid past the table (saves made under a larger install table —
+  TestCamp's squadrons carry 3817+ vs this install's 1632) bounds-check
+  to "" and render as ids, never OOB.
+- `test_theater_names` 3/3 (parse, malformed rejects, bounds-checked
+  lookup); f4-world-viewer ctest 98/98.
+
 ## EVENT-LOG-1 — the world viewer's running log (the war prints its book)
 
 - **The Event Log window** — the original game printed a scrolling
