@@ -387,7 +387,8 @@ entities::EntityId release_bomb(entities::EntityWorld& world,
                                 entities::EntityId target,
                                 const WeaponClassTable& table,
                                 std::uint32_t weapon_handle,
-                                double sim_time_s) {
+                                double sim_time_s,
+                                const f4::geo::WorldPosition* resolved_aim) {
     const auto* rec = table.get(weapon_handle);
     if (rec == nullptr) return entities::EntityId{};
     if (rec->category != WeaponCategory::Bomb) {
@@ -416,12 +417,18 @@ entities::EntityId release_bomb(entities::EntityWorld& world,
     store->expend(station_idx, 1);
 
     // --- The aim point + impact plane ---------------------------------------
-    // The aim point: the target objective's position when it resolves (and
-    // carries a transform). The aim point drives the impact plane (its z)
-    // and the reported miss distance.
+    // The aim point: the caller's RESOLVED aim when passed (the brain's
+    // feature-level aim — the CCIP gate timed the release against this
+    // exact point, so the flyout's terminal plane and the recorded miss
+    // must key on it too), else the target objective's position when it
+    // resolves (and carries a transform). The aim point drives the
+    // impact plane (its z) and the reported miss distance.
     f4::geo::WorldPosition aim_point = shooter_transform->position;
     bool have_aim = false;
-    if (target.valid()) {
+    if (resolved_aim != nullptr) {
+        aim_point = *resolved_aim;
+        have_aim = true;
+    } else if (target.valid()) {
         const entities::EntityHandle tgt(target, &world);
         if (const auto* tf = tgt.get<entities::TransformComponent>()) {
             aim_point = tf->position;

@@ -172,6 +172,16 @@ struct CombatIntent {
     /// pulse both in one tick (fired at by a MiG while dropping).
     bool   bomb_release{false};
     std::uint64_t bomb_target_id{0};
+    /// The brain's RESOLVED aim at the tick the pulse fired (EMPL-2d):
+    /// the indexed feature the planner named — or the center /
+    /// first-alive fallback. The host's release path keys the impact
+    /// plane AND the recorded miss distance on this point, not the
+    /// objective center: the CCIP gate times the release against the
+    /// feature aim, so a center-keyed miss reads the feature's whole
+    /// offset as scatter (the anchored ground_strike run's stick landed
+    /// ~20 ft from the feature and "missed" the center by 437-979 ft).
+    bool   bomb_aim_valid{false};
+    geo::WorldPosition bomb_aim{};
     /// GUNS: begin a burst at the aim target this tick (one-tick pulse —
     /// the rising edge of the trigger; the host driver converts it into
     /// GunStream::start_burst + a gun-station debit). The trigger is
@@ -749,6 +759,8 @@ public:
                     strike_.release_pulse() && !hold_fire_;
                 combat_intent_.bomb_target_id =
                     strike_.release_target_id();
+                combat_intent_.bomb_aim_valid = strike_.last_aim_valid();
+                combat_intent_.bomb_aim = strike_.last_aim();
             } else {
                 strike_.clear_target();
             }

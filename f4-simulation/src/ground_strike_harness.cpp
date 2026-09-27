@@ -207,17 +207,85 @@ void GroundStrikeHarness::inject_strike_world_(int run) {
     }
     const auto* bomb_rec = table.get(bomb_handle);
 
-    // --- 1. The objective (the injected strike target) --------------------
-    // The same shape the world loader builds from campaign data
-    // (Transform + FeatureSet + DamageBitmap + identity + team tag) —
-    // test_bomb.cpp's synthetic objective, at scenario scale. The
-    // features spread along +x centered on the objective; the impact
-    // plane is the objective's z (the trigger's dz and the flyout's
-    // terminal plane BOTH key on it, so the chain is self-consistent).
+    // --- 1. The strikers: the blue aircraft with a brain + store + an
+    // A/G delivery waypoint (the campwp.h values the brain's strike rung
+    // keys on). Delivery binding by name when the option names one, else
+    // the first waypoint carrying a delivery action. Found FIRST — the
+    // objective's placement derives from the first striker's delivery
+    // waypoint (the abort fires here too: without a striker there is
+    // nothing to inject a target for).
+    struct StrikerBinding {
+        entities::EntityId id;
+        f4::ai::MissionPlan plan;   // copy — mutated + re-issued below
+        std::size_t delivery_idx;
+    };
+    std::vector<StrikerBinding> strikers;
+    for (const auto id : sim_->aircraft_entities()) {
+        const entities::EntityHandle h(id, &world);
+        const auto team = h.get_tag(entities::tags::TEAM);
+        if (!(team && team->as_string() && *team->as_string() == "blue")) {
+            continue;
+        }
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        auto* store = h.get<weapons::WeaponStoreComponent>();
+        if (brain == nullptr || store == nullptr) continue;
+
+        auto plan = brain->mission_plan();   // copy — mutated + re-issued
+        std::size_t idx = plan.route.size();
+        if (!opts_.delivery_waypoint.empty()) {
+            for (std::size_t i = 0; i < plan.route.size(); ++i) {
+                if (plan.route[i].name == opts_.delivery_waypoint) {
+                    idx = i;
+                    break;
+                }
+            }
+        }
+        if (idx == plan.route.size()) {
+            for (std::size_t i = 0; i < plan.route.size(); ++i) {
+                if (f4::ai::modules::is_ag_delivery_action(
+                        plan.route[i].action)) {
+                    idx = i;
+                    break;
+                }
+            }
+        }
+        if (idx == plan.route.size()) continue;   // no delivery leg on this route
+        strikers.push_back(
+            StrikerBinding{id, std::move(plan), idx});
+    }
+
+    if (strikers.empty()) {
+        report_.aborted = true;
+        report_.abort_reason =
+            "no blue aircraft could be armed (run " + std::to_string(run) +
+            ") — the injection found no blue scenario aircraft with a "
+            "brain + store + an A/G delivery waypoint on its route";
+        return;
+    }
+
+    // --- 2. The objective (the injected strike target): the ground point
+    // under the FIRST armed striker's delivery waypoint. The waypoint
+    // coordinates are the plan's own — already world-ENU, because the
+    // runway-frame rotation ran inside initialize() — so the runway-
+    // anchored scenario templates (airbase_source + waypoints_frame
+    // "runway") aim exactly as well as the sandbox-frame ones. A pinned
+    // world-frame injection point would sit wherever the anchoring
+    // rotated AWAY from: miles off the route, the release gate never
+    // sees the aim, and the strike window closes with the stick
+    // unfired (the nav Done + strike_target 0 end-state the diagnostics
+    // dump exists to name). z stays opts_.target_position.z — the
+    // impact plane the features and the flyout key on.
+    const auto& aim_wp =
+        strikers.front().plan.route[strikers.front().delivery_idx].position;
+    f4::geo::WorldPosition target_pos = opts_.target_position;
+    if (!opts_.target_position_explicit) {
+        target_pos.x = aim_wp.x;
+        target_pos.y = aim_wp.y;
+    }
     {
         auto obj = world.create();
         auto& tf = obj.add<entities::TransformComponent>();
-        tf.position = opts_.target_position;
+        tf.position = target_pos;
         auto& fs = obj.add<entities::FeatureSetComponent>();
         const int n = std::clamp(opts_.target_features, 0, 255);
         fs.features_count = static_cast<std::uint8_t>(n);
@@ -246,59 +314,29 @@ void GroundStrikeHarness::inject_strike_world_(int run) {
         target_entity_id_ = obj.id().value;
     }
 
-    // --- 2. The ordnance + the fire control (every blue aircraft) ---------
+    // --- 3. The ordnance + the fire control (every armed striker) -------
     // The additive station + the StrikeModule configuration + the
     // mission-plan binding — the same wiring the campaign bridge performs
     // for a saved strike flight (arm_flight_strike), exercised at
     // scenario scale. Identical every pass (determinism).
     striker_ids_.clear();
     delivery_dz_ft_ = 0.0;
-    for (const auto id : sim_->aircraft_entities()) {
-        const entities::EntityHandle h(id, &world);
-        const auto team = h.get_tag(entities::tags::TEAM);
-        if (!(team && team->as_string() && *team->as_string() == "blue")) {
-            continue;
-        }
+    for (auto& s : strikers) {
+        const entities::EntityHandle h(s.id, &world);
         auto* brain = h.get<f4::ai::BrainComponent>();
         auto* store = h.get<weapons::WeaponStoreComponent>();
-        if (brain == nullptr || store == nullptr) continue;
-
-        // Bind the delivery waypoint: by name when the option names one,
-        // else the first waypoint carrying an A/G delivery action (the
-        // campwp.h values the brain's strike rung keys on).
-        auto plan = brain->mission_plan();   // copy — mutated + re-issued
-        int idx = -1;
-        if (!opts_.delivery_waypoint.empty()) {
-            for (std::size_t i = 0; i < plan.route.size(); ++i) {
-                if (plan.route[i].name == opts_.delivery_waypoint) {
-                    idx = static_cast<int>(i);
-                    break;
-                }
-            }
-        }
-        if (idx < 0) {
-            for (std::size_t i = 0; i < plan.route.size(); ++i) {
-                if (f4::ai::modules::is_ag_delivery_action(
-                        plan.route[i].action)) {
-                    idx = static_cast<int>(i);
-                    break;
-                }
-            }
-        }
-        if (idx < 0) continue;   // this striker's route carries no delivery
-        plan_route_z_ = plan.route[static_cast<std::size_t>(idx)].position.z;
+        const auto& wp = s.plan.route[s.delivery_idx];
+        plan_route_z_ = wp.position.z;
 
         // The delivery dz (THIS striker's delivery altitude over the
         // target) drives the drag factor — the trigger's range model must
         // agree with the flyout's ballistic fall at the condition the
         // release actually happens at.
-        const double delivery_dz =
-            plan_route_z_ - opts_.target_position.z;
+        const double delivery_dz = wp.position.z - target_pos.z;
         delivery_dz_ft_ = delivery_dz;
 
-        plan.route[static_cast<std::size_t>(idx)].target_id =
-            target_entity_id_;
-        brain->set_mission_plan(std::move(plan));
+        s.plan.route[s.delivery_idx].target_id = target_entity_id_;
+        brain->set_mission_plan(std::move(s.plan));
 
         // The store is additive: the combat loadout's A/A stations stay.
         if (opts_.bomb_rounds > 0) {
@@ -319,16 +357,7 @@ void GroundStrikeHarness::inject_strike_world_(int run) {
                 std::max(50.0, 0.5 * bomb_rec->lethal_radius_ft);
         }
 
-        striker_ids_.push_back(id.value);
-    }
-
-    if (striker_ids_.empty()) {
-        report_.aborted = true;
-        report_.abort_reason =
-            "no blue aircraft could be armed (run " + std::to_string(run) +
-            ") — the injection found no blue scenario aircraft with a "
-            "brain + store + an A/G delivery waypoint on its route";
-        return;
+        striker_ids_.push_back(s.id.value);
     }
 
     if (run == 0) {
@@ -487,6 +516,69 @@ void GroundStrikeHarness::run_pass_(int run, const ProgressFn& on_sample) {
                 sim_ = nullptr;
                 return;
             }
+        }
+    }
+
+    // Run 0's end-of-run striker dump: when the verdict ladder stalls at
+    // the trigger rung the message must NAME the rung (which waypoint
+    // the nav held, what the module counters said, how far the release
+    // geometry sat from satisfying) instead of listing candidate causes.
+    if (run == 0) {
+        striker_diagnostics_.clear();
+        const entities::EntityHandle tgt_h(
+            entities::EntityId{target_entity_id_}, &sim_->world());
+        const auto* tgt_tf = tgt_h.get<entities::TransformComponent>();
+        for (const auto sid : striker_ids_) {
+            const entities::EntityHandle h(entities::EntityId{sid},
+                                           &sim_->world());
+            const auto* brain = h.get<f4::ai::BrainComponent>();
+            if (brain == nullptr) continue;
+            const auto& nav = brain->navigation();
+            const auto& strike = brain->strike();
+            const auto* tf = h.get<entities::TransformComponent>();
+            const auto& plan = brain->mission_plan();
+            int delivery_idx = -1;
+            for (std::size_t i = 0; i < plan.route.size(); ++i) {
+                if (f4::ai::modules::is_ag_delivery_action(
+                        plan.route[i].action)) {
+                    delivery_idx = static_cast<int>(i);
+                    break;
+                }
+            }
+            double aim_dist = -1.0, dz = -1.0;
+            if (tf != nullptr && tgt_tf != nullptr) {
+                const double ax = tgt_tf->position.x - tf->position.x;
+                const double ay = tgt_tf->position.y - tf->position.y;
+                aim_dist = std::sqrt(ax * ax + ay * ay);
+                dz = tf->position.z - tgt_tf->position.z;
+            }
+            striker_diagnostics_ +=
+                "\n  striker " + std::to_string(sid) +
+                " phase=" + brain->phase_name() +
+                " safety=" + brain->safety_mode_name() +
+                " mode=" + brain->combat_mode_name() +
+                " roe_hold=" + (brain->hold_fire() ? "1" : "0") +
+                " nav=" + nav.state_name() +
+                " wp=" + std::to_string(nav.current_waypoint_index()) +
+                        "/" + std::to_string(plan.route.size()) +
+                " delivery_wp=" + std::to_string(delivery_idx) +
+                " wp_target=" + std::to_string(
+                    delivery_idx >= 0
+                        ? plan.route[static_cast<std::size_t>(delivery_idx)]
+                              .target_id
+                        : 0) +
+                " nav_done=" + (nav.is_complete() ? "1" : "0") +
+                " strike_target=" + std::to_string(strike.target_id()) +
+                " armed=" + (strike.armed() ? "1" : "0") +
+                " delivered=" + (strike.delivered() ? "1" : "0") +
+                " salvo=" + std::to_string(strike.salvo_fired()) +
+                " R_ft=" + std::to_string(
+                               strike.computed_release_range_ft()) +
+                " pipper_miss_ft=" + std::to_string(
+                                        strike.predicted_miss_ft()) +
+                " aim_dist_ft=" + std::to_string(aim_dist) +
+                " dz_ft=" + std::to_string(dz) +
+                " cfg_hold=" + (strike.config.hold_fire ? "1" : "0");
         }
     }
 
@@ -788,7 +880,8 @@ void GroundStrikeHarness::finalize_() {
                 "rung (an empty store, hold_fire, the CCIP gate never "
                 "satisfied, or the delivery waypoint never current; "
                 "strikers_armed=" +
-                std::to_string(striker_ids_.size()) + ")";
+                std::to_string(striker_ids_.size()) + ")" +
+                striker_diagnostics_;
         } else {
             report_.verdict.release_stall =
                 "a BombReleased exists but its shooter is not an armed "

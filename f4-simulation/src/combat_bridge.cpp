@@ -504,7 +504,8 @@ std::size_t execute_brain_combat_intents(
                     const auto bomb = weapons::release_bomb(
                         world, bus, shooter,
                         entities::EntityId{intent.bomb_target_id},
-                        table, bomb_handle, sim_time_s);
+                        table, bomb_handle, sim_time_s,
+                        intent.bomb_aim_valid ? &intent.bomb_aim : nullptr);
                     if (bomb.valid()) ++launches;
                 }
             }

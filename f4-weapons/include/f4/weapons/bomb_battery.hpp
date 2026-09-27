@@ -198,9 +198,11 @@ apply_battalion_damage(const entities::EntityWorld& world,
 /// Requires on the shooter: TransformComponent (position/velocity),
 /// WeaponStoreComponent (with a loaded Bomb-category station of the
 /// weapon). The impact plane is the AIM POINT's ground elevation: the
-/// target objective's transform z when the target resolves, else the
-/// shooter's current z (a same-altitude plane — the release is ballistic
-/// and falls at least that far).
+/// resolved aim when `resolved_aim` is passed (the brain's feature-level
+/// aim — the CCIP gate timed the release against it, so the impact
+/// plane AND the recorded miss distance key on the same point), else
+/// the target objective's transform z when the target resolves, else
+/// MSL 0 (a ballistic-only release falls at least to sea level).
 ///
 /// Creates on the bomb: TransformComponent, BombComponent,
 /// BombSimComponent, CampaignIdentityComponent + team tag (IFF) +
@@ -215,7 +217,8 @@ apply_battalion_damage(const entities::EntityWorld& world,
     entities::EntityId target,
     const WeaponClassTable& table,
     std::uint32_t weapon_handle,
-    double sim_time_s);
+    double sim_time_s,
+    const f4::geo::WorldPosition* resolved_aim = nullptr);
 
 /// Destroy every bomb entity whose flyout is terminal (Impact/Expired).
 /// Hosts call it between ticks (never inside world.update_all()).

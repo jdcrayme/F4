@@ -163,8 +163,20 @@ struct GroundStrikeHarnessOptions {
 
     // --- the composed strike target -------------------------------------
     /// The objective's center (ENU feet; z = the impact plane MSL — the
-    /// bomb's terminal plane and the features' datum).
+    /// bomb's terminal plane and the features' datum). x/y are OVERRIDDEN
+    /// by the derived delivery-point placement unless
+    /// target_position_explicit is set (see below).
     f4::geo::WorldPosition target_position{0.0, 30000.0, 0.0};
+    /// Place the objective at target_position verbatim. Default false:
+    /// the objective derives as the ground point under the FIRST armed
+    /// striker's delivery waypoint (z stays target_position.z — the
+    /// impact plane). The derivation is what keeps runway-frame-anchored
+    /// scenarios working: the template anchoring (6359dd1) rotates the
+    /// shipped route to the real airbase, so the scenario's STRIKE
+    /// waypoint no longer sits at the fixed world coordinates a pinned
+    /// injection assumed — the gate would never see the aim and the
+    /// strike window would close with the stick unfired.
+    bool target_position_explicit = false;
     /// Feature placements: `target_features` features spread along +x,
     /// centered on the objective (the test_bomb.cpp synthetic-objective
     /// shape — the world loader's real placements come from the .SDK
@@ -372,6 +384,11 @@ private:
     std::vector<std::uint64_t> striker_ids_;   ///< the armed blue aircraft
     double delivery_dz_ft_ = 0.0;              ///< route altitude over the target
     double plan_route_z_ = 0.0;                ///< the found delivery waypoint's z
+
+    /// Run 0's end-of-run striker dump (phase, nav rung, strike-module
+    /// counters, release geometry) — the trigger-stall verdict appends
+    /// it so a no-release run names its rung instead of listing guesses.
+    std::string striker_diagnostics_;
 
     // Cumulative combat-event counters observed THIS pass.
     int pass_bombs_released_ = 0;
