@@ -46,6 +46,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -68,6 +69,8 @@ struct PolesResult {
     int exit_code = 0;
     double worst_all = -1e300;   // max Re over all reported modes
     double worst_slow = -1e300;  // max Re over modes with Re < 1.0 (sub-1-rad/s band)
+    bool has_sigma = false;      // the verify run's phugoid envelope fit
+    double phugoid_sigma = 0.0;  // d/dt ln(amplitude) of the VS oscillation
     std::string output;
 };
 
@@ -101,6 +104,17 @@ PolesResult runDiagPoles(const std::string& args) {
     std::istringstream in(r.output);
     std::string line;
     while (std::getline(in, line)) {
+        static const std::regex sigma_re(
+            "phugoid sigma: ([+-]?[0-9.]+) 1/s");
+        std::smatch s;
+        if (std::regex_search(line, s, sigma_re)) {
+            try {
+                r.phugoid_sigma = std::stod(s[1]);
+                r.has_sigma = true;
+            } catch (const std::exception&) {
+                // unparseable field — skip the line
+            }
+        }
         std::smatch m;
         if (!std::regex_match(line, m, eigen_re)) continue;
         try {
@@ -140,34 +154,55 @@ TEST(PolesEnvelope, PlantCruiseAperiodicModeGolden) {
 // ---------------------------------------------------------------------------
 // AI-closed, NAV cruise tune (what NavigationModule actually flies):
 // STAB-P1 (alt_integral_gain 0.6) is load-bearing against the P4.1 inner
-// loop — measured 15k/250: +0.0166 (gain 0.6) vs +0.2196 (pre-STAB-P1 1.2).
+// loop. The GOLDEN is the phugoid envelope's exponential rate measured in
+// the TIME DOMAIN — the platform-robust slow-mode measurement. The retired
+// FD-Jacobian golden (+0.01656) was slow-band noise, not physics: the
+// phugoid moves the state ~0.4% per major frame, at the finite-difference
+// noise floor of the stiff filter rows, and lambda_c = ln(lambda_d)/dt
+// amplifies that noise differently per toolchain (GCC read +0.0166, MSVC
+// read +0.377 and +0.009 in the same code). The 900 s verify run shows 12
+// phugoid cycles of FLAT envelope — a +0.0166 mode would double amplitude
+// every ~42 s and cannot hide in that fit.
 // ---------------------------------------------------------------------------
-TEST(PolesEnvelope, AiCruiseNavTuneSlowModeGolden) {
+TEST(PolesEnvelope, AiCruiseNavTunePhugoidSigmaGolden) {
+    const auto csv = std::filesystem::temp_directory_path() /
+                     "f4_phugoid_sigma_golden.csv";
     const PolesResult r = runDiagPoles(
-        "--alt 15000 --kcas 250 --config clean --ai --tune nav");
-    ASSERT_GT(r.worst_slow, -1e299) << "no eigenvalues parsed:\n" << r.output;
-    // Golden: +0.01656 (5% rule + 5e-3 absolute floor for near-zero poles).
-    // A move beyond this band must update the golden AND explain why in the
-    // worklog (plan §8.4).
-    EXPECT_NEAR(r.worst_slow, 0.01656, std::max(0.05 * 0.01656, 5e-3))
-        << "AI-cruise (nav tune) worst slow pole moved — update the golden "
+        "--alt 15000 --kcas 250 --config clean --ai --tune nav "
+        "--verify \"" + csv.generic_string() + "\" --verify-sec 900");
+    ASSERT_TRUE(r.has_sigma) << "no phugoid sigma parsed:\n" << r.output;
+    // Golden: -0.0021 — the measured envelope rate (stable, essentially
+    // neutral: the AI loops hold the phugoid at ~zero growth). Band is the
+    // 5e-3 absolute floor (5% of the value is below the fit's own noise);
+    // anything past +0.003 — a mode that doubles in under 230 s — must
+    // justify itself with a worklog entry.
+    EXPECT_NEAR(r.phugoid_sigma, -0.0021, std::max(0.05 * 0.0021, 5e-3))
+        << "AI-cruise (nav tune) phugoid sigma moved — update the golden "
            "value in test_poles_envelope.cpp AND add a worklog entry "
            "explaining why.\n"
         << r.output;
+    std::remove(csv.string().c_str());
 }
 
 TEST(PolesEnvelope, AiCruiseNavTuneSlowModeGate) {
+    // Regression gate, measured the platform-robust way (the time-domain
+    // envelope rate — the FD Jacobian's slow band reads trim/FD noise that
+    // differs per toolchain and tripped this gate falsely on MSVC). The
+    // measured envelope under the nav tune is -0.0021; pre-STAB-P1 the
+    // loop re-grew to +0.2196 — this gate trips an order of magnitude
+    // below that, tight enough to catch a re-grown L1/L3 loop.
+    const auto csv = std::filesystem::temp_directory_path() /
+                     "f4_phugoid_sigma_gate.csv";
     const PolesResult r = runDiagPoles(
-        "--alt 15000 --kcas 250 --config clean --ai --tune nav");
-    ASSERT_GT(r.worst_slow, -1e299) << "no eigenvalues parsed:\n" << r.output;
-    // Regression gate: measured envelope under the nav tune at this point
-    // is +0.0166; the gate trips at 3x — big enough to ignore trim/FD noise,
-    // tight enough to catch a re-grown L1/L3 loop.
-    EXPECT_LE(r.worst_slow, 0.05)
-        << "AI-cruise (nav tune) slow mode regressed past +0.05 (measured "
-           "+0.0166 at the PHUG merge; pre-STAB-P1 was +0.2196): "
-        << r.worst_slow << "\n"
+        "--alt 15000 --kcas 250 --config clean --ai --tune nav "
+        "--verify \"" + csv.generic_string() + "\" --verify-sec 900");
+    ASSERT_TRUE(r.has_sigma) << "no phugoid sigma parsed:\n" << r.output;
+    EXPECT_LE(r.phugoid_sigma, 0.01)
+        << "AI-cruise (nav tune) phugoid re-grew past +0.01/s (measured "
+           "-0.0021 at the PHUG merge; pre-STAB-P1 was +0.2196): "
+        << r.phugoid_sigma << "\n"
         << r.output;
+    std::remove(csv.string().c_str());
 }
 
 // ---------------------------------------------------------------------------

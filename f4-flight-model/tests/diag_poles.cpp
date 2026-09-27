@@ -181,38 +181,55 @@ struct Session {
     double ai_alt_ft = 0.0;
     double ai_spd_kts = 0.0;
 
+    // The AI-closed pilot input: the steering core's commands for the
+    // CURRENT fm state. The trim map (step) and the trim relax (the
+    // Newton's AI settle) share this one path — the AI integrators
+    // advance only inside ai->steer.
+    PilotInput aiPilotInput() const {
+        const auto& st = fm->state();
+        AirSteering::Input in;
+        in.position = f4::geo::WorldPosition(st.kin.y, st.kin.x, -st.kin.z);
+        in.heading_rad = to_radians(st.kin.psi);
+        in.pitch_rad = to_radians(st.kin.theta);
+        in.roll_rad = to_radians(st.kin.phi);
+        in.roll_rate_radps = st.kin.p;
+        in.pitch_rate_radps = st.kin.q;
+        in.vs_fpm = -st.kin.zdot * 60.0;
+        in.vcas_kts = st.vcas;
+        in.alt_msl_ft = -st.kin.z;
+        const auto out = ai->steer(ai_hdg_rad, ai_alt_ft, ai_spd_kts, in);
+        PilotInput pi;
+        pi.pstick = out.pitch_cmd;
+        pi.rstick = out.roll_cmd;
+        pi.ypedal = out.yaw_cmd;
+        pi.throttle = out.throttle_cmd;
+        pi.speedBrake = out.speed_brake_cmd;
+        // Gear / surfaces stay on the configured condition, not on the
+        // AI cruise law (which commands gear up / clean by default).
+        pi.gearHandle = gear_down ? 1.0 : -1.0;
+        pi.tefCmd = tef_cmd;
+        pi.lefCmd = lef_cmd;
+        pi.maxRollDeg = out.max_roll_deg;
+        pi.maxRollDeltaDeg = out.max_roll_delta_deg;
+        pi.validate();
+        return pi;
+    }
+
     std::vector<double> step(const std::vector<double>& x) const {
         AircraftState& s = fm->state();
         packer.scatter(s, x);
+        // The AI integrator coordinates ARE part of x: without applying
+        // them here the map's AI rows read whatever the PREVIOUS
+        // evaluation left in the steering core — F is path-dependent, the
+        // Jacobian's AI columns measure fiction, and the line search
+        // compares incomparable states (the trim's bouncing-residual
+        // signature). With them applied, F is a genuine function of x.
+        setAiStates(x);
         applyDerivedConsistency(s, psi0);
 
         PilotInput pi;
         if (ai) {
-            const auto& st = fm->state();
-            AirSteering::Input in;
-            in.position = f4::geo::WorldPosition(st.kin.y, st.kin.x, -st.kin.z);
-            in.heading_rad = to_radians(st.kin.psi);
-            in.pitch_rad = to_radians(st.kin.theta);
-            in.roll_rad = to_radians(st.kin.phi);
-            in.roll_rate_radps = st.kin.p;
-            in.pitch_rate_radps = st.kin.q;
-            in.vs_fpm = -st.kin.zdot * 60.0;
-            in.vcas_kts = st.vcas;
-            in.alt_msl_ft = -st.kin.z;
-            const auto out = ai->steer(ai_hdg_rad, ai_alt_ft, ai_spd_kts, in);
-            pi.pstick = out.pitch_cmd;
-            pi.rstick = out.roll_cmd;
-            pi.ypedal = out.yaw_cmd;
-            pi.throttle = out.throttle_cmd;
-            pi.speedBrake = out.speed_brake_cmd;
-            // Gear / surfaces stay on the configured condition, not on the
-            // AI cruise law (which commands gear up / clean by default).
-            pi.gearHandle = gear_down ? 1.0 : -1.0;
-            pi.tefCmd = tef_cmd;
-            pi.lefCmd = lef_cmd;
-            pi.maxRollDeg = out.max_roll_deg;
-            pi.maxRollDeltaDeg = out.max_roll_delta_deg;
-            pi.validate();
+            pi = aiPilotInput();
         } else {
             pi.throttle = base_throttle;
             pi.gearHandle = gear_down ? 1.0 : -1.0;
@@ -485,7 +502,7 @@ struct TrimResult {
 };
 
 TrimResult newtonFixedPoint(const Session& ses, std::vector<double> x0,
-                            int max_iter = 12, double tol = 1e-7) {
+                            int max_iter = 24, double tol = 1e-7) {
     // Structure: the map F(x; delta_t) has a one-parameter family of
     // equilibria indexed by the (synthetic) throttle input. We solve
     //   inner: square Newton on the STATE-only stationarity (J_ss - I), the
@@ -511,10 +528,23 @@ TrimResult newtonFixedPoint(const Session& ses, std::vector<double> x0,
     std::vector<std::size_t> sidx;   // state indices (non-synthetic)
     std::size_t t_idx = n;
     std::size_t vt_idx = n;
+    // The AI slew-limiter state (ai_vsTgt) and the one-frame alpha memory
+    // (ai_prevA) are NOT Newton coordinates: near trim the slew state is
+    // algebraic (vs_target = the raw command — its limiter column is 0 in
+    // the unbinding regime and exactly 1 in the marcher regime, either way
+    // singularizing A), and prevA is overwritten by steer() from the
+    // current frame on every evaluation (a zero column, always). Both are
+    // still APPLIED to the steering core each evaluation (step()'s
+    // setAiStates) and their fixed points are enforced through the
+    // coordinates they follow (alt_err, theta) — the Newton plateau with
+    // both as coordinates was the solver chasing a singular system. The
+    // eigen report keeps all four AI rows: the golden was measured there.
     for (std::size_t i = 0; i < n; ++i) {
         const bool is_synth = (i < n_packer) && ses.packer.entries[i].synthetic;
+        const bool is_carried = ses.ai && i >= n_packer &&
+                                (i == n_packer + 2 || i == n_packer + 3);
         if (is_synth) t_idx = i;
-        else sidx.push_back(i);
+        else if (!is_carried) sidx.push_back(i);
         if (xnames[i] == "vt") vt_idx = i;
     }
     const bool has_synth = (t_idx < n);
@@ -584,7 +614,6 @@ TrimResult newtonFixedPoint(const Session& ses, std::vector<double> x0,
         return tr;
     }
 
-    // --- outer: secant on the throttle ---
     // Template state: the quasi-trimmed snapshot. Each outer pass restarts
     // the inner Newton from a re-settled template at the trial throttle so a
     // diverged pass cannot poison the next one.
@@ -592,6 +621,65 @@ TrimResult newtonFixedPoint(const Session& ses, std::vector<double> x0,
     // The trim procedure owns `ses` for its duration; the map reads the
     // trial throttle from ses.base_throttle (the synthetic input channel).
     auto& ses_m = const_cast<Session&>(ses);
+
+    // --- AI-closed trims: NO outer variable -------------------------------
+    // Session::step takes the AI's own throttle output, so the synthetic
+    // throttle knob is INERT (a zero Jacobian column — secanting it was
+    // pure theater: one oversized assumed-sensitivity step railed it to 0
+    // and every later vt* reading was inner-solve noise, not throttle
+    // response). The vt handle in AI mode is ai_speedI, an ordinary packed
+    // state the inner Newton moves through its own Jacobian column.
+    //
+    // The plant path's fixed-throttle settle also cannot seed the AI
+    // integrators: stranding them at the session seed puts the Newton
+    // outside its basin (the MSVC divergence signature: ai_vsTgt /
+    // ai_altI / ai_speedI residuals bouncing at 1e2-1e3 while the line
+    // search churns, never descending). So the relax runs the AI IN the
+    // loop from the template's seeded integrators — they walk to their own
+    // quasi-trim while the vt/alt blend holds the energy state — and one
+    // inner solve finishes from inside the basin.
+    if (ses.ai) {
+        const std::size_t n_packer_local = ses_m.packer.size();
+        auto ai_settle = [&]() {
+            ses_m.packer.scatter(ses_m.fm->state(), x_template);
+            AirSteering::DebugIntegrators seed{};
+            seed.speed_integral = x_template[n_packer_local + 0];
+            seed.alt_integral = x_template[n_packer_local + 1];
+            seed.vs_target = x_template[n_packer_local + 2];
+            seed.prev_alpha_est = x_template[n_packer_local + 3];
+            seed.approach_alt_integral = 0.0;
+            ses_m.ai->debug_set_integrators(seed);
+            for (int i = 0; i < 240; ++i) {
+                ses_m.fm->update(ses_m.dt, ses_m.aiPilotInput(),
+                                 ses_m.groundZ, kFlatNormal);
+                ses_m.fm->state().kin.vt +=
+                    (vt_target - ses_m.fm->state().kin.vt) * 0.2;
+                ses_m.fm->state().kin.z +=
+                    (-ses_m.alt_target_ft - ses_m.fm->state().kin.z) * 0.2;
+            }
+            std::vector<double> xs = ses_m.packer.gather(ses_m.fm->state());
+            ses_m.appendAiStates(xs);
+            return xs;
+        };
+        // The plant path's outer discipline, applied here: each pass
+        // re-settles from the TEMPLATE (the settle's vt/z blend actively
+        // cures the wander a diverged inner pass left behind — without it
+        // the Newton's z drift poisons the eigen at a state hundreds of
+        // feet off the target), then re-runs the inner from the relaxed
+        // point. Best residual across passes wins.
+        tr.residual = 1e300;
+        for (int pass = 0; pass < 4; ++pass) {
+            auto [x1, r1] = inner(ai_settle());
+            if (r1 < tr.residual) {
+                tr.x = x1;
+                tr.residual = r1;
+                tr.converged = r1 < tol * 100.0;
+            }
+            if (tr.residual < tol * 100.0) break;
+        }
+        tr.iterations = max_iter;
+        return tr;
+    }
     auto resetAndSettle = [&](double thr) {
         ses_m.packer.scatter(ses_m.fm->state(), x_template);
         ses_m.base_throttle = thr;
@@ -616,7 +704,7 @@ TrimResult newtonFixedPoint(const Session& ses, std::vector<double> x0,
     double e_prev = 0.0, thr_prev = 0.0;
     bool have_prev = false;
     std::vector<double> x = x0;
-    for (int outer = 0; outer < 14; ++outer) {
+    for (int outer = 0; outer < 40; ++outer) {
         x = resetAndSettle(thr);
         auto [xs, r_in] = inner(x);
         x = xs;
@@ -633,7 +721,13 @@ TrimResult newtonFixedPoint(const Session& ses, std::vector<double> x0,
         // thrust map breaks the secant badly.
         double step;
         if (!have_prev || std::fabs(e - e_prev) < 1e-12) {
-            step = e / 1.7;
+            // The 1.7 ft/s-per-unit-throttle sensitivity is a rule of
+            // thumb; near the seed the real one differs several fold. Bound
+            // the first probe to half the current throttle — a 0.13 seed
+            // must not walk to the 0.0 rail on one step (from the second
+            // pass the secant uses its own measured slope).
+            const double bound = 0.5 * std::max(thr, 0.1);
+            step = std::clamp(e / 1.7, -bound, bound);
         } else {
             const double d = (e - e_prev) / (thr - thr_prev);
             step = (std::fabs(d) > 1e-3) ? e / d : e / 1.7;
@@ -1078,24 +1172,7 @@ void verifyRun(const Session& ses, const std::vector<double>& x0,
         applyDerivedConsistency(s, ses.psi0);
         PilotInput pi;
         if (ses.ai) {
-            AirSteering::Input in;
-            in.heading_rad = to_radians(s.kin.psi);
-            in.pitch_rad = to_radians(s.kin.theta);
-            in.roll_rad = to_radians(s.kin.phi);
-            in.roll_rate_radps = s.kin.p;
-            in.pitch_rate_radps = s.kin.q;
-            in.vs_fpm = -s.kin.zdot * 60.0;
-            in.vcas_kts = s.vcas;
-            in.alt_msl_ft = -s.kin.z;
-            const auto out = ses.ai->steer(ses.ai_hdg_rad, ses.ai_alt_ft, ses.ai_spd_kts, in);
-            pi.pstick = out.pitch_cmd;
-            pi.rstick = out.roll_cmd;
-            pi.ypedal = out.yaw_cmd;
-            pi.throttle = out.throttle_cmd;
-            pi.speedBrake = out.speed_brake_cmd;
-            pi.gearHandle = ses.gear_down ? 1.0 : -1.0;
-            pi.tefCmd = ses.tef_cmd;
-            pi.lefCmd = ses.lef_cmd;
+            pi = ses.aiPilotInput();
             pstick = pi.pstick; thr = pi.throttle;
         } else {
             pi.throttle = ses.base_throttle;
@@ -1132,6 +1209,45 @@ void verifyRun(const Session& ses, const std::vector<double>& x0,
         ? 2.0 * seconds / (double)(crossings / 2) : 0.0;
     std::printf("  verify: VS mean %.1f fpm, max |dVS| %.1f fpm, est period %.1f s (%d half-crossings)\n",
                 mean, amp, period, crossings);
+
+    // The phugoid envelope's exponential rate, fit over the per-half-cycle
+    // |VS| peaks: the PLATFORM-ROBUST slow-mode measurement. The FD
+    // Jacobian cannot resolve this mode — the phugoid moves the state
+    // ~0.4% per major frame, at the FD noise floor of the stiff filter
+    // rows, and lambda_c = ln(lambda_d)/dt amplifies that noise straight
+    // into the slow band (MSVC vs GCC disagreed by an order of magnitude
+    // there). A time-domain amplitude fit integrates the same physics and
+    // agrees across toolchains to integration-precision, not codegen luck.
+    // The first peak rides the +vt kick transient; the fit uses the rest.
+    {
+        std::vector<std::pair<double, double>> peaks;   // (t, ln |VS-mean|)
+        double seg_max = std::fabs(vs.empty() ? 0.0 : vs[0] - mean);
+        double seg_t = 0.0;
+        for (std::size_t i = 1; i < vs.size(); ++i) {
+            const double a = vs[i - 1] - mean, b = vs[i] - mean;
+            const double mag = std::fabs(b);
+            if (mag > seg_max) { seg_max = mag; seg_t = (double)i * dt; }
+            if (a * b < 0.0) {
+                if (seg_max > 1.0) peaks.push_back({seg_t, std::log(seg_max)});
+                seg_max = mag; seg_t = (double)i * dt;
+            }
+        }
+        if (seg_max > 1.0) peaks.push_back({seg_t, std::log(seg_max)});
+        double sigma = 0.0;
+        if (peaks.size() >= 4) {
+            double st = 0.0, sl = 0.0, stt = 0.0, stl = 0.0;
+            for (std::size_t k = 1; k < peaks.size(); ++k) {
+                st += peaks[k].first; sl += peaks[k].second;
+                stt += peaks[k].first * peaks[k].first;
+                stl += peaks[k].first * peaks[k].second;
+            }
+            const double np = (double)(peaks.size() - 1);
+            const double denom = np * stt - st * st;
+            if (std::fabs(denom) > 1e-9) sigma = (np * stl - st * sl) / denom;
+        }
+        std::printf("  phugoid sigma: %+.4f 1/s (%zu half-cycle peaks)\n",
+                    sigma, peaks.size());
+    }
 }
 
 void usage() {
@@ -1157,6 +1273,8 @@ void usage() {
         "  --ai-gain-scale <x>       scale vs_gain and throttle_gain\n"
         "  --verify [csv]            180 s time-domain run from trim with +25 ft/s\n"
         "  --verify-amp <ft/s>       verify perturbation amplitude (default 25)\n"
+        "  --verify-sec <s>          verify run length (default 180; the phugoid\n"
+        "                            sigma fit wants >= 600)\n"
         "  --sweep <csv>             sweep kcas x config, CSV out\n"
         "  --help\n");
 }
@@ -1172,6 +1290,7 @@ int main(int argc, char** argv) {
     std::string sweep_csv, verify_csv;
     bool verify = false;
     double verify_amp = 25.0;
+    double verify_sec = 180.0;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -1199,6 +1318,7 @@ int main(int argc, char** argv) {
         else if (a == "--ai-gain-scale") cs.ai_gain_scale = std::stod(next());
         else if (a == "--verify") { verify = true; verify_csv = next(); }
         else if (a == "--verify-amp") verify_amp = std::stod(next());
+        else if (a == "--verify-sec") verify_sec = std::stod(next());
         else if (a == "--sweep") sweep_csv = next();
         else if (a == "--help") { usage(); return 0; }
         else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); usage(); return 2; }
@@ -1342,8 +1462,8 @@ int main(int argc, char** argv) {
 
     if (verify) {
         if (verify_csv.empty()) verify_csv = "diag_poles_verify.csv";
-        std::printf("verify run (%.0f s) -> %s\n", 180.0, verify_csv.c_str());
-        verifyRun(*ses, tr.x, 180.0, verify_csv, verify_amp);
+        std::printf("verify run (%.0f s) -> %s\n", verify_sec, verify_csv.c_str());
+        verifyRun(*ses, tr.x, verify_sec, verify_csv, verify_amp);
     }
     return tr.converged ? 0 : 1;
 }
