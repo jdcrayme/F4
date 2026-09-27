@@ -75,3 +75,7 @@ build*.log
 
 # Tier 1 speedup: repo-local FetchContent cache
 .fetchcache/
+
+# Python byte-cache (the qc/analysis scripts' incidental imports)
+__pycache__/
+*.pyc

@@ -51,8 +51,6 @@
 namespace f4::simulation {
 
 namespace {
-namespace {
-
 // The digest, RSS telemetry, and combat-event kinds are single-sourced in
 // harness_shared.hpp (this file's copies were the four-way duplication).
 using harness_shared::md5_hex;
@@ -69,22 +67,11 @@ using harness_shared::kGunFired;
 using harness_shared::kBombReleased;
 using harness_shared::kBombImpact;
 using harness_shared::kEndCauseTargetHit;
-} // namespace
-
-// ===========================================================================
-// MD5 (RFC 1321) — copied verbatim from wvr_merge_harness.cpp.
-
-/// The CombatEventKind values as plain ints (mirror combat_event.hpp —
-/// the header keeps f4-recorder out of its include surface).
-constexpr int kWvrEngaged        = 11;
-constexpr int kWvrDisengaged     = 12;
 
 /// The bomb terminal causes (weapons::bomb_end_cause_name's strings —
-/// messages.hpp). Only "impact" is a strike; "expired" is a named
-/// failure (a bomb that ran out of time-of-flight never threatened the
-/// target).
+/// messages.hpp). Only "impact" is a strike; an expired bomb is a named
+/// miss in the diary, not a separate terminal cause.
 constexpr const char* kEndCauseImpact  = "impact";
-constexpr const char* kEndCauseExpired = "expired";
 
 /// The doctrine stick cap (campaign_bridge.cpp kDoctrineSalvoMax — a QC
 /// run wants a representative stick, not the whole loadout).

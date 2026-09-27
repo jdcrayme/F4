@@ -854,7 +854,7 @@ public:
                              "%.0f,%.0f,%.0f,%.1f,%.0f,%.3f,%.0f,"
                              "%.3f,%.3f,%.3f\n",
                              (unsigned long long)aar_trace_row_,
-                             refuel_.state_name(),
+                             refuel_.state_name().c_str(),
                              refuel_.along_err_ft(), refuel_.lat_err_ft(),
                              refuel_.vert_err_ft(), tp.speed_kts,
                              tp.heading_rad, tp.position.x, tp.position.y,
