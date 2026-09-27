@@ -835,24 +835,19 @@ void draw_library_symbol(const SymbolLibrary& lib, const std::string& key,
                                  to_screen_raylib(sx, sy, half, t[2]), pc);
                 }
             } else {
-                // DrawTriangleFan takes a center vertex + the ring vertices.
-                // For a convex polygon, the centroid is a safe center.
+                // Convex fill as an explicit centroid fan. (DrawTriangleFan
+                // was the first cut here and silently drew NOTHING on the
+                // canvas — its RL_QUADS path never rasterized for these
+                // vertices; explicit triangles are boring and visible.)
                 Vector2 centroid = { 0, 0 };
                 for (const auto& p : pts) { centroid.x += p.x; centroid.y += p.y; }
                 centroid.x /= static_cast<float>(pts.size());
                 centroid.y /= static_cast<float>(pts.size());
-                // DrawTriangleFan signature: (Vector2 center, Vector2* points,
-                //   int pointCount, Color color). The first point is the center,
-                //   followed by the ring vertices (the function implicitly closes
-                //   the fan back to the first ring vertex).
-                // raylib 5.0 expects the points array to include the center as
-                // the first element. We build a temporary array with center
-                // prepended.
-                std::vector<Vector2> fan;
-                fan.reserve(pts.size() + 1);
-                fan.push_back(centroid);
-                fan.insert(fan.end(), pts.begin(), pts.end());
-                DrawTriangleFan(fan.data(), static_cast<int>(fan.size()), pc);
+                for (std::size_t i = 0; i < pts.size(); ++i) {
+                    const Vector2& a = pts[i];
+                    const Vector2& b = pts[(i + 1) % pts.size()];
+                    DrawTriangle(centroid, b, a, pc);
+                }
             }
         }
         // Outline on top.

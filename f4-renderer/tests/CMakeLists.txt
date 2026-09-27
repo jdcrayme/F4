@@ -79,6 +79,18 @@ target_link_libraries(test_texture_cache PRIVATE f4-renderer GTest::gtest_main)
 add_test(NAME texture_cache COMMAND test_texture_cache)
 set_tests_properties(texture_cache PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
 
+# test_symbol_draw — PIXEL tests: both symbol draw paths must rasterize
+# their FILLS (the library raylib path drew outlines only before the
+# SYMBOL-SVG-2 fix — nothing exercised it on a canvas once the Creator
+# went away). Needs the corpus define for the library fixtures.
+add_executable(test_symbol_draw test_symbol_draw.cpp ${IMGUI_SOURCES})
+target_include_directories(test_symbol_draw PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_compile_definitions(test_symbol_draw PRIVATE
+    F4_SYMBOLS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../f4_symbols.json")
+target_link_libraries(test_symbol_draw PRIVATE f4-renderer GTest::gtest_main)
+add_test(NAME symbol_draw COMMAND test_symbol_draw)
+set_tests_properties(symbol_draw PROPERTIES LABELS "f4-renderer" TIMEOUT 60)
+
 add_executable(test_draw_3d test_draw_3d.cpp ${IMGUI_SOURCES})
 target_include_directories(test_draw_3d PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(test_draw_3d PRIVATE f4-renderer GTest::gtest_main)
