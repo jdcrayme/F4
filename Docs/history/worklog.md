@@ -1,4 +1,63 @@
 ---
+Task ID: SYMBOL-SVG-1-PREP
+Agent: main
+Task: Cleanup in preparation for the SYMBOL-SVG-1 wiring (load
+f4_symbols.json at startup, RenderEntityIcon library-first with
+procedural fallback, parity flag, delete symbols.cpp's vocabulary).
+
+Work Log:
+- Surveyed the seam: RenderEntityIcon -> entity_icon_info ->
+  draw_symbol(SymbolKind) is the procedural path; SymbolLibrary +
+  draw_library_symbol(key) is the data-driven path; f4_symbols.json
+  (v2, 75 symbols at the repo root) is test-only today. The wiring's
+  missing piece between them is a CANONICAL KIND-TO-KEY mapping, so
+  that is what the prep landed:
+  - symbol_key_for_kind(SymbolKind) -> SymbolLibraryKey in
+    f4-renderer's symbols.hpp/.cpp — a static table, static_asserted
+    against SymbolCount. Objectives map 1:1 to their obj_* keys (31);
+    the six frames map to frame_*; composed unit kinds carry BOTH the
+    standalone composed symbol (unit_armor — frame+glyph baked) and
+    the frame-agnostic glyph (glyph_armor) so the wiring can pick the
+    compositional render path later. UnitUnknown falls back AT
+    frame_squadron — the corpus deliberately has no unit_unknown and
+    the circle frame IS the procedural fallback's shape (the one
+    documented duplicate).
+  - test_symbol_mapping gains SymbolKeySeam: EveryKindNamesCorpusKeys
+    (load the committed corpus via the F4_SYMBOLS_JSON_PATH define;
+    every kind's primary + glyph must resolve) and
+    PrimaryKeysAreUnique (1:1 except the documented fallback). A
+    missing key now fails HERE, not as a silent procedural fallback
+    after the wiring flips.
+- Deleted f4-world-viewer/src/symbols.hpp: the backward-compat alias
+  wrapper (f4::viewer namespace) had exactly one includer
+  (viewer_state.hpp) and zero unqualified consumers left —
+  imgui_panels.cpp stopped using draw_symbol_imgui via the alias some
+  time ago (the stale comment claiming otherwise removed),
+  canvas.cpp's six symbol call sites were already fully qualified.
+  viewer_state.hpp includes <f4/renderer/symbols.hpp> directly; the
+  18 bare RlColor uses in canvas.cpp + two in viewer_state.hpp now
+  qualify f4::renderer::. One indirection layer gone before the
+  wiring refactor.
+- Removed the stale untracked root build.log (Sep 7; the repo
+  convention keeps the root to README/CHANGELOG/configs).
+
+Deliberately NOT done: moving f4_symbols.json into Data/ (it would
+touch the test's CMake path definition and the Symbol Creator's
+defaults — decide when the creator's SVG buttons land); actually
+loading the library at startup / the parity flag / the vocabulary
+deletion (the SYMBOL-SVG-1 wiring itself).
+
+Tests: test_symbol_mapping 55/55 (the seam coverage included);
+f4-renderer 14 + f4-world-viewer 88 ctest green after the wrapper
+deletion; full Debug rebuild clean.
+
+QUEUE: the SYMBOL-SVG-1 wiring in the documented order — startup
+load + RenderEntityIcon library-first w/ fallback + parity flag ->
+delete the ~850-line procedural vocabulary -> campaign_icon through
+world_json -> Symbol Creator SVG Import/Export buttons -> symbols/
+directory scan.
+
+---
 Task ID: QC-SUITE-2
 Agent: main
 Task: The two named follow-ups from QC-SUITE-1 — the poles golden (the

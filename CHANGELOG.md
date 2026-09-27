@@ -5,6 +5,23 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## SYMBOL-SVG-1 prep — the key seam
+
+- **`symbol_key_for_kind(SymbolKind)` → `SymbolLibraryKey`** — the
+  canonical SymbolKind → library-key table (static, `static_assert`ed
+  against `SymbolCount`): objectives → `obj_*`, frames → `frame_*`,
+  composed unit kinds carry both the standalone symbol (`unit_armor`) and
+  the frame-agnostic glyph (`glyph_armor`); `UnitUnknown` falls back AT
+  `frame_squadron` (the one documented duplicate — the corpus has no
+  unit_unknown). `test_symbol_mapping` gains the `SymbolKeySeam` coverage:
+  every kind's keys must exist in the committed `f4_symbols.json` corpus
+  and primaries stay unique, so the coming wiring can never silently fall
+  back for a kind the library actually defines. The vestigial
+  `f4-world-viewer/src/symbols.hpp` alias wrapper is deleted (one
+  includer, zero unqualified consumers left — canvas.cpp's 18 bare
+  `RlColor` uses now explicit). Behavior unchanged; renderer 14 +
+  world-viewer 88 ctest green.
+
 ## QC-SUITE-2 — the poles golden, honestly (1 red → 0)
 
 - **The trim map is a function of x again** — the AI-closed Newton could
