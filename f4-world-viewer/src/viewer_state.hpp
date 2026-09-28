@@ -65,6 +65,7 @@
 // viewer — the KoreaObj binary path is gone. The glTF models come from
 // `f4import models` / `f4import textures` exports.
 #include <f4/world_types/class_table.hpp>
+#include <f4/world/theater_tables.hpp>       // TheaterTables (UCD/VCD names)
 #include <f4/world_types/campaign_names.hpp>
 
 // Scenario mode (consolidated f4-scenario-player) — ScenarioPlayerState.
@@ -1015,6 +1016,23 @@ struct ViewerApp::Impl {
     // back to the raw id, exactly as before this table existed.
     std::vector<std::string> theater_names;
     void reload_theater_names();
+
+    // --- Theater tables (the UCD/VCD rows the class table indexes) ---
+    //
+    // class_table maps entity_type → data row; theater_tables carries
+    // the UCD/VCD/WCD rows with their NAMES (the emitter's
+    // f4.theater.tables/1, cam2json --emit-tables). Loaded at startup
+    // from the committed Data/ exports; empty when absent — the type-
+    // name lookup then returns "" and the inspector keeps its raw ids.
+    // CAMP-SCALE-1's runtime reader; resolve_entity_type_name is the
+    // shared display chain.
+    f4::world_types::ClassTable class_table;
+    f4::world::TheaterTables theater_tables;
+    void reload_theater_tables();
+    /// A session unit's type name ("F-16C") — its class-table entity
+    /// type resolved through the UCD/VCD tables. "" when the session/
+    /// unit/tables don't resolve.
+    [[nodiscard]] std::string unit_type_name(std::uint32_t unit_vu) const;
 
     // --- Camera transforms (defined in camera.cpp) ---
 

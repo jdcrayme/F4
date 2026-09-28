@@ -177,4 +177,18 @@ resolve_countermeasures(const TheaterTables& tables,
                         const f4::world_types::ClassTable& ct,
                         std::uint16_t vehicle_entity_type) noexcept;
 
+/// Resolve a class-table entity type's DISPLAY name — the VCD vehicle
+/// name ("F-16C") or the UCD unit-class name ("Attack"), whichever row
+/// the CT entry points into. A UNIT entity type resolves through its
+/// FIRST vehicle group when it has one (a squadron of F-16Cs displays
+/// "F-16C", not the UCD's generic role word); the unit-class name is
+/// the fallback.
+///
+/// Returns "" — callers keep their raw-id rendering — when the tables
+/// are absent or any link fails. Never throws.
+[[nodiscard]] std::string
+resolve_entity_type_name(const TheaterTables& tables,
+                         const f4::world_types::ClassTable& ct,
+                         std::uint16_t entity_type) noexcept;
+
 } // namespace f4::world

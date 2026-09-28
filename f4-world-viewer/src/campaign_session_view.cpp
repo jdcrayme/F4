@@ -842,7 +842,7 @@ void ViewerApp::draw_campaign_session_view() {
 
         ImGui::TextUnformatted(
             "Flights (click to select; D deaggregates, R folds):");
-        if (ImGui::BeginTable("session_flights", 9, table_flags,
+        if (ImGui::BeginTable("session_flights", 10, table_flags,
                               ImVec2(0.0f, 0.0f))) {
             ImGui::TableSetupScrollFreeze(0, 1);
             ImGui::TableSetupColumn("VU", ImGuiTableColumnFlags_WidthFixed,
@@ -852,6 +852,8 @@ void ViewerApp::draw_campaign_session_view() {
             ImGui::TableSetupColumn("mission",
                                     ImGuiTableColumnFlags_WidthFixed,
                                     96.0f, 2);
+            ImGui::TableSetupColumn("type", ImGuiTableColumnFlags_WidthFixed,
+                                    56.0f, 10);
             ImGui::TableSetupColumn("grid",
                                     ImGuiTableColumnFlags_WidthStretch,
                                     90.0f, 3);
@@ -907,6 +909,17 @@ void ViewerApp::draw_campaign_session_view() {
                         const std::string mname(f4::campaign::mission_type_name(
                             static_cast<std::uint8_t>(t.mission)));
                         ImGui::TextUnformatted(mname.c_str());
+                    }
+                    ImGui::TableNextColumn();
+                    {
+                        // The aircraft type ("F-16C") — the flight's
+                        // class-table row through the UCD/VCD tables;
+                        // blank when the tables aren't loaded.
+                        const std::string tname =
+                            impl_->unit_type_name(t.vu);
+                        if (!tname.empty()) {
+                            ImGui::TextUnformatted(tname.c_str());
+                        }
                     }
                     ImGui::TableNextColumn();
                     ImGui::Text("%.0f,%.0f", t.x_grid, t.y_grid);

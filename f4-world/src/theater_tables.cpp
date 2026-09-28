@@ -291,4 +291,39 @@ resolve_countermeasures(const TheaterTables& tables,
     return out;
 }
 
+std::string
+resolve_entity_type_name(const TheaterTables& tables,
+                         const f4::world_types::ClassTable& ct,
+                         std::uint16_t entity_type) noexcept {
+    uint8_t data_type = 0;
+    uint32_t data_ptr = 0;
+    if (!ct.data_ptr_for(entity_type, data_type, data_ptr)) {
+        return {};
+    }
+
+    // A VEHICLE entity type names itself: CT row → VCD row.
+    if (data_type == static_cast<uint8_t>(f4::world_types::DTYPE_VEHICLE)) {
+        const auto* v = tables.vehicle_at(data_ptr);
+        return v != nullptr ? v->name : std::string{};
+    }
+
+    // A UNIT entity type names its FIRST vehicle when it has one — a
+    // squadron of F-16Cs displays "F-16C", not the UCD's generic role
+    // word ("Attack", "Airlift") — and falls back to the unit-class
+    // name when the group chain fails.
+    if (data_type == static_cast<uint8_t>(f4::world_types::DTYPE_UNIT)) {
+        if (const auto* u = tables.unit_at(data_ptr)) {
+            if (!u->vehicle_type.empty() && u->vehicle_type[0] >= 0) {
+                if (const auto* v =
+                        tables.vehicle_at(
+                            static_cast<std::size_t>(u->vehicle_type[0]))) {
+                    if (!v->name.empty()) return v->name;
+                }
+            }
+            return u->name;
+        }
+    }
+    return {};
+}
+
 } // namespace f4::world

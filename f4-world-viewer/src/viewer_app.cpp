@@ -89,6 +89,8 @@ ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {
     // The theater name table (nameid → display name) — same startup
     // contract: load what exists now; absences fall back to raw ids.
     impl_->reload_theater_names();
+    // The class table + UCD/VCD rows the type-name lookup reads.
+    impl_->reload_theater_tables();
 
     // Restore the last install path from persisted settings. If the user
     // has already pointed at a Falcon install, we don't make them do it
@@ -758,6 +760,61 @@ void ViewerApp::Impl::reload_theater_names() {
         theater_names.clear();
         symbol_load_errors.push_back(std::string("names.json: ") + e.what());
     }
+}
+
+// The class table + converted theater tables (UCD/VCD rows with their
+// names) — cam2json --emit-tables' f4.theater.tables/1, committed under
+// Data/Theater/korea/. Both fail soft: an absent/malformed asset leaves
+// the lookups empty and the inspector keeps its raw ids.
+void ViewerApp::Impl::reload_theater_tables() {
+    namespace fs = std::filesystem;
+    const auto resolve = [](const fs::path& name) {
+        std::error_code ec;
+        fs::path p = name;
+        if (fs::exists(p, ec)) return p;
+        p = fs::path("..") / name;
+        if (fs::exists(p, ec)) return p;
+        p = fs::path("..") / ".." / name;
+        if (fs::exists(p, ec)) return p;
+        return fs::path(name);
+    };
+
+    std::error_code ec;
+    const fs::path ct_path =
+        resolve(fs::path("Data") / "Classes" / "falcon4.ct.json");
+    if (fs::exists(ct_path, ec)) {
+        try {
+            class_table.load_auto(ct_path.string());
+        } catch (const std::exception& e) {
+            symbol_load_errors.push_back(
+                std::string("falcon4.ct.json: ") + e.what());
+        }
+    }
+
+    const fs::path tables_path =
+        resolve(fs::path("Data") / "Theater" / "korea" / "tables.json");
+    if (!fs::exists(tables_path, ec)) return;
+    try {
+        theater_tables = f4::world::TheaterTables::load(tables_path);
+    } catch (const std::exception& e) {
+        theater_tables = f4::world::TheaterTables{};
+        symbol_load_errors.push_back(std::string("tables.json: ") + e.what());
+    }
+}
+
+std::string ViewerApp::Impl::unit_type_name(std::uint32_t unit_vu) const {
+    if (!session || unit_vu == 0) return {};
+    if (!class_table.loaded() || !theater_tables.loaded()) return {};
+
+    const auto& um = session->engine().unit_id_map();
+    const auto it = um.find(unit_vu);
+    if (it == um.end() || !it->second.valid()) return {};
+    auto sh = session_handle(it->second);
+    auto* uc = sh.get<f4::entities::UnitCoreComponent>();
+    if (!uc || uc->class_table_index <= 0) return {};
+    return f4::world::resolve_entity_type_name(
+        theater_tables, class_table,
+        static_cast<std::uint16_t>(uc->class_table_index));
 }
 
 bool ViewerApp::Impl::export_symbols(const std::filesystem::path& dir,

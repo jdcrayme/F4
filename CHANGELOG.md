@@ -5,6 +5,26 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CT-NAMES-1 — the class table names things (the flights table + inspector speak "F-16C")
+
+- **`Data/Theater/korea/tables.json`** — CAMP-SCALE-1's
+  `cam2json --emit-tables` output (f4.theater.tables/1: 296 UCD + 285
+  VCD + 203 WCD rows with their NAMES), exported from the install and
+  committed with the manifest regenerated over it. The runtime reader
+  (`f4-world`'s TheaterTables) existed and was tested; nobody loaded it
+  for display until now.
+- **`resolve_entity_type_name`** (f4-world, next to
+  `resolve_countermeasures`): a CT entity type → its display name. A
+  VEHICLE row names itself; a UNIT row names its FIRST vehicle when the
+  group chain resolves (a squadron of F-16Cs displays "F-16C", not the
+  UCD's generic role word "Attack"/"Airlift"), falling back to the
+  unit-class name. The live-aircraft inspector gains a `Type:` row
+  (flight's own row first, else its squadron's) and a header line; the
+  Campaign Session's flights table gains a `type` column. The viewer
+  loads the CT + tables at startup (same Data/ walk, fail-soft).
+- `test_theater_tables` gains ResolveEntityTypeNameChain (5/5);
+  f4-world 405/405, f4-world-viewer 99/99.
+
 ## NAMES-1 — the theater name table (the log names things)
 
 - **`korea.idx` + `korea.wch`, decoded at last** — the strings behind

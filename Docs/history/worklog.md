@@ -156,3 +156,47 @@ inspector is a small, separate follow-on.
 Tests: test_theater_names 3/3; f4-world-viewer ctest 98/98; headless
 330 s session screenshot shows the Event Log naming captured
 objectives.
+
+---
+Task ID: CT-NAMES-1
+Agent: main
+Task: The class-table work the user green-lit after NAMES-1 — aircraft
+TYPE names ("F-16C") in the inspector and the flights table.
+
+Work Log:
+- Traced the naming data sources to their forks: the nameid table
+  (NAMES-1) carries OBJECTIVE and squadron-name strings; aircraft TYPE
+  names live in the class-table chain — CT entity_type row → UCD/VCD
+  data row → name. The runtime ClassTable (falcon4.ct.json) parses no
+  names; the names ride CAMP-SCALE-1's f4.theater.tables/1 document
+  (cam2json --emit-tables), whose runtime reader (f4-world's
+  TheaterTables) existed tested but loaded for nothing display-side.
+- Exported Data/Theater/korea/tables.json from the install (cam2json
+  TestCamp.cam --theater-data <install>/terrdata/objects --emit-tables;
+  296 UCD + 285 VCD + 203 WCD rows); committed with the manifest
+  regenerated over it (--check green).
+- resolve_entity_type_name (f4-world/theater_tables, the
+  resolve_countermeasures pattern): VEHICLE rows name themselves; UNIT
+  rows resolve their FIRST vehicle_type → VCD name ("F-16C") and fall
+  back to the unit-class name ("Airlift") when the group link fails.
+  Empirically pinned against the exported tables: squadron CT row 481 →
+  UCD 381 "Attack" → vehicle 183 "M-9 ACE" — a ground unit, but the
+  chain closes end to end.
+- Viewer: Impl gains class_table (loaded from the committed
+  Data/Classes/falcon4.ct.json — the session's own ct_ is private) +
+  theater_tables, both loaded at startup fail-soft; unit_type_name(vu)
+  = session unit_id_map → UnitCoreComponent.class_table_index →
+  resolve_entity_type_name. The live-aircraft inspector's Type: row
+  prefers the flight's own row (org->flight_vu) then the squadron's;
+  the selection header names live aircraft; the Campaign Session
+  window's flights table gains a type column (renders in headless
+  screenshots — that's the acceptance proof).
+
+Deliberately NOT done: wiring the session's theater_tables OPTION (the
+CAMP-SCALE-1 supply chain stays as-is — this tranche is display-only);
+squadron UI names via SquadronUIInfo::name_id (TestCamp's save is OOB
+for the vanilla table — NAMES-1's bounds check covers it if ever).
+
+Tests: test_theater_tables 5/5 (the new ResolveEntityTypeNameChain
+covers vehicle-self-name, unit→vehicle, unit-class fallback, OOR,
+empty); f4-world 405/405; f4-world-viewer 99/99.

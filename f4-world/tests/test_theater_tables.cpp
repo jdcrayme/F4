@@ -21,13 +21,15 @@ using namespace f4::world;
 
 namespace {
 
-// A minimal falcon4.ct.json (the ct2json vocabulary) with three entries:
-//   100 — a UNIT row (DTYPE_UNIT → UCD; the resolver must decline)
+// A minimal falcon4.ct.json (the ct2json vocabulary) with four entries:
+//   100 — a UNIT row (DTYPE_UNIT → UCD; the countermeasure resolver
+//         declines, the NAME resolver falls back to the unit-class name)
 //   101 — a VEHICLE row (DTYPE_VEHICLE → VCD row 1)
 //   102 — a VEHICLE row (DTYPE_VEHICLE → VCD row 2, no dispensers)
+//   103 — a UNIT row (DTYPE_UNIT → UCD row 2, vehicle_type[0] = 1)
 const char* kClassTableJson =
     "{\n"
-    "  \"count\": 3,\n"
+    "  \"count\": 4,\n"
     "  \"entries\": [\n"
     "    {\"entity_type\": 100, \"domain\": 2, \"cls\": 4, \"type\": 0,"
     " \"stype\": 3, \"vis_type\": [0, 0, 0, 0, 0, 0, 0],"
@@ -37,7 +39,10 @@ const char* kClassTableJson =
     " \"data_type\": 5, \"data_ptr_index\": 1},\n"
     "    {\"entity_type\": 102, \"domain\": 2, \"cls\": 4, \"type\": 0,"
     " \"stype\": 3, \"vis_type\": [0, 0, 0, 0, 0, 0, 0],"
-    " \"data_type\": 5, \"data_ptr_index\": 2}\n"
+    " \"data_type\": 5, \"data_ptr_index\": 2},\n"
+    "    {\"entity_type\": 103, \"domain\": 2, \"cls\": 4, \"type\": 0,"
+    " \"stype\": 3, \"vis_type\": [0, 0, 0, 0, 0, 0, 0],"
+    " \"data_type\": 4, \"data_ptr_index\": 2}\n"
     "  ]\n"
     "}\n";
 
@@ -54,7 +59,7 @@ const char* kClassTableJson =
 std::string tables_json() {
     std::string s = "{\n";
     s += "  \"format\": \"f4.theater.tables/1\",\n";
-    s += "  \"counts\": {\"units\": 2, \"vehicles\": 3, \"weapons\": 3},\n";
+    s += "  \"counts\": {\"units\": 3, \"vehicles\": 3, \"weapons\": 3},\n";
 
     s += "  \"units\": [\n";
     s += "    {\"index\": 332, \"name\": \"Airlift\", \"flags\": 8,"
@@ -84,7 +89,21 @@ std::string tables_json() {
          " \"range\": [0, 0, 0, 0, 0, 0, 0, 0],"
          " \"detection\": [0, 0, 0, 0, 0, 0, 0, 0],"
          " \"damage_mod\": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
-         " \"radar_vehicle\": 0, \"special_index\": 0, \"icon_index\": 9}\n";
+         " \"radar_vehicle\": 0, \"special_index\": 0, \"icon_index\": 9},\n";
+    s += "    {\"index\": 402, \"name\": \"Fighter sqn\", \"flags\": 0,"
+         " \"movement_type\": 5, \"movement_type_name\": \"Air\","
+         " \"movement_speed\": 900, \"max_range\": 350, \"fuel\": 40,"
+         " \"rate\": 90, \"pt_data_index\": 0,"
+         " \"num_elements\": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"vehicle_type\": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"scores\": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"role\": 0,"
+         " \"hit_chance\": [0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"strength\": [0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"range\": [0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"detection\": [0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"damage_mod\": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"radar_vehicle\": 0, \"special_index\": 0, \"icon_index\": 14}\n";
     s += "  ],\n";
 
     s += "  \"vehicles\": [\n";
@@ -188,7 +207,7 @@ std::string tables_json() {
 
 TEST(TheaterTables, ParsesFullFieldVocabulary) {
     const auto t = TheaterTables::parse(tables_json());
-    ASSERT_EQ(t.units.size(), 2u);
+    ASSERT_EQ(t.units.size(), 3u);
     ASSERT_EQ(t.vehicles.size(), 3u);
     ASSERT_EQ(t.weapons.size(), 21u);  // positional: rows 7/8/20 named
 
@@ -312,4 +331,40 @@ TEST(TheaterTables, ResolveCountermeasuresChain) {
         "{ \"format\": \"f4.theater.tables/1\", \"units\": [],"
         " \"vehicles\": [], \"weapons\": [] }");
     EXPECT_FALSE(resolve_countermeasures(empty, ct, 101).has_value());
+}
+
+TEST(TheaterTables, ResolveEntityTypeNameChain) {
+    const auto t = TheaterTables::parse(tables_json());
+    f4::world_types::ClassTable ct;
+    const auto ct_path = std::filesystem::temp_directory_path() /
+                         "f4_theater_tables_ct_name.json";
+    {
+        std::ofstream f(ct_path);
+        f << kClassTableJson;
+    }
+    ct.load_json(ct_path);
+    std::filesystem::remove(ct_path);
+
+    // A VEHICLE entity type names itself: CT 101 → VCD row 1 "F-16X",
+    // CT 102 → VCD row 2 "Truck".
+    EXPECT_EQ(resolve_entity_type_name(t, ct, 101), "F-16X");
+    EXPECT_EQ(resolve_entity_type_name(t, ct, 102), "Truck");
+
+    // A UNIT entity type names its FIRST vehicle when the group chain
+    // resolves: CT 103 → UCD row 2 ("Fighter sqn") → vehicle 1 →
+    // "F-16X" — the squadron displays its aircraft, not its role word.
+    EXPECT_EQ(resolve_entity_type_name(t, ct, 103), "F-16X");
+
+    // When the unit's own first-vehicle link fails (CT 100 → UCD row 0
+    // → vehicle 101, past the table) the unit-class name stands in.
+    EXPECT_EQ(resolve_entity_type_name(t, ct, 100), "Airlift");
+
+    // Out-of-range entity types render "" (the caller keeps its raw id).
+    EXPECT_EQ(resolve_entity_type_name(t, ct, 9999), "");
+
+    // Empty tables never name anything (and never throw).
+    const auto empty = TheaterTables::parse(
+        "{ \"format\": \"f4.theater.tables/1\", \"units\": [],"
+        " \"vehicles\": [], \"weapons\": [] }");
+    EXPECT_EQ(resolve_entity_type_name(empty, ct, 101), "");
 }

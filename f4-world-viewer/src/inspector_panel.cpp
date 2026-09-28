@@ -104,6 +104,21 @@ void ViewerApp::draw_inspector_window() {
             } else {
                 ImGui::TextUnformatted("Unit");
             }
+        } else if (impl_->sel_kind == Impl::SelectionKind::LiveAircraft &&
+                   impl_->session) {
+            // A live aircraft: its type name from the class-table row
+            // (the tables lookup), else the generic.
+            auto sh = impl_->session_handle(impl_->sel_entity);
+            if (auto* org =
+                    sh.get<f4::simulation::CampaignOriginComponent>()) {
+                const std::string nm = impl_->unit_type_name(
+                    org->flight_vu != 0 ? org->flight_vu
+                                        : org->squadron_vu);
+                ImGui::TextUnformatted(
+                    !nm.empty() ? nm.c_str() : "Aircraft");
+            } else {
+                ImGui::TextUnformatted("Aircraft");
+            }
         }
         ImGui::Separator();
     }
@@ -894,6 +909,17 @@ void ViewerApp::draw_inspector() {
                                         org->team_slot));
                         ImGui::Text("Squadron:  VU #%u",
                                     static_cast<unsigned>(org->squadron_vu));
+                        // The aircraft type: the flight's (else the
+                        // squadron's) class-table row resolved through
+                        // the UCD/VCD tables ("F-16C"). Absent tables
+                        // keep the raw VU row.
+                        const std::string type_name =
+                            impl_->unit_type_name(
+                                org->flight_vu != 0 ? org->flight_vu
+                                                    : org->squadron_vu);
+                        if (!type_name.empty()) {
+                            ImGui::Text("Type:      %s", type_name.c_str());
+                        }
                     } else {
                         ImGui::TextDisabled("(no campaign origin — scenario "
                                             "aircraft)");
