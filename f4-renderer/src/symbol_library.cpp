@@ -781,12 +781,10 @@ void draw_library_symbol(ImDrawList* dl, const SymbolLibrary& lib,
                 dl->AddConvexPolyFilled(pts.data(), static_cast<int>(pts.size()), col);
             }
         }
-        // Always draw the outline on top so the shape stays legible at
-        // small sizes (matches the existing symbols.cpp convention).
-        if (pts.size() >= 2) {
-            // AddPolyline with closed=true connects last point back to first.
-            // We pass a thickness of 1.0 here since the polygon doesn't
-            // carry its own width; the caller's outline_col provides contrast.
+        // Outline-only rendering (the caller's filled=false, or an
+        // unfilled polygon) draws the line loop; filled shapes get no
+        // invented stroke — fills and strokes come from the file.
+        if ((!filled || !pg.filled) && pts.size() >= 2) {
             dl->AddPolyline(pts.data(), static_cast<int>(pts.size()), outline_col,
                             pg.points.size() >= 3 ? ImDrawFlags_Closed : 0, 1.0f);
         }
@@ -850,8 +848,11 @@ void draw_library_symbol(const SymbolLibrary& lib, const std::string& key,
                 }
             }
         }
-        // Outline on top.
-        if (pts.size() >= 2) {
+        // Outline-only rendering: the caller's filled=false (hover /
+        // selection) and unfilled polygons render as line loops. FILLED
+        // shapes draw no invented stroke — fills and strokes come from
+        // the file, nothing added.
+        if ((!filled || !pg.filled) && pts.size() >= 2) {
             for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
                 DrawLineEx(pts[i], pts[i + 1], 1.0f, oc);
             }

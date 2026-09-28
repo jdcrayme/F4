@@ -246,3 +246,57 @@ Tests: f4-renderer 15/15 (svg 20/20), f4-world 405/405,
 f4-world-viewer 99/99; headless 330 s session from the exe directory
 shows the Event Log naming captures (Iksan, Weondang, Chigung-ni...)
 and the flights table type column filled.
+
+---
+Task ID: ATO-START-1
+Agent: main
+Task: "Running the campaign from save0-2 doesn't ever generate any ATO
+missions" + two symbol-rendering bugs in the Inkscape re-saves (the
+bridge's filled path not drawn; the intersection's fill-only paths
+drawn with a stroke).
+
+Work Log:
+- ATO: reproduced headlessly from the install's stock save1 — sim
+  1681s, "cycles 0 missions 0, next tasking cycle in 1:59". Root
+  cause: Campaign::tick fires the air tasking when
+  next_cycle_ + air_task_cycle_sec <= clock_ with next_cycle_ starting
+  at 0 — the first cycle lands at 1800 WAR seconds (the ground war's
+  own orders cycle fires at clock 0; the air ladder's didn't). A
+  loaded stock save carries no ATO in this engine (the wire's
+  pre-planned missions are not decoded), so every install-loaded
+  session opened with an empty ATO for ~30 war-minutes — longer than
+  most runs. TestCamp runs that showed missions had simply crossed
+  the boundary (testcamp.world.json is save0 lineage — same epoch,
+  same ladder).
+- Fix: Campaign::run_initial_tasking_cycle() — one cycle at the
+  current clock, counted in cycles_fired_, next_cycle_ untouched (the
+  scheduled cadence is unchanged). Gated behind
+  CampaignSessionOptions::initial_tasking_cycle (default false — the
+  byte-pinned QC ledgers never see it); the viewer sets it. save1
+  verification: 30 wall-seconds in, "cycles 1 missions 100 routes 20",
+  flights table populated, the initial cycle's tasking_cycle event in
+  the log at D375 00:00:01.
+- Symbols: the user's diagnosis was exactly right — "overwrite the
+  fill on every object that has a fill with the background, the
+  stroke on every object that has a stroke with the foreground, and
+  don't add or remove either". Two violations found: (1)
+  draw_library_symbol (raylib AND ImGui paths) drew an unconditional
+  1px outline_col outline on every polygon — the intersection bars'
+  phantom stroke; now outlines render only for outline-only shapes
+  (filled=false hover/selection, unfilled polygons). (2) The path
+  emitter's if/else dropped the STROKE of any filled+stroked path
+  (the bridge road), and paint_role mapped its #333333 fill to the
+  contrast color (≈invisible on the map); now a shape with both
+  emits both, fill_role() maps ANY fill to the background (explicit
+  data-color-role still wins — the corpus's contrast glyphs carry
+  it), stroke_role() keeps currentColor strokes team-colored (the
+  dashed-border convention) and editor colors contrast.
+- Audited the corpus first: every black/white fill in symbols/*.svg
+  carries explicit data-color-role="outline" (16 of them), and 8
+  symbols use stroke="currentColor" for team-colored dashes — the new
+  rule regresses nothing.
+
+Tests: InitialCyclePlansAtClockZero (tick tests 10/10); GrayPaints
+updated to the both-emit rule (svg 20/20); f4-campaign 372,
+f4-simulation 387, f4-renderer 15, f4-world 405, f4-world-viewer 99 —
+all green.

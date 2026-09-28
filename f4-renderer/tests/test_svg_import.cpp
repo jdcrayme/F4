@@ -287,18 +287,19 @@ TEST(SvgImport, StyleAttributeOverridesPresentation) {
 }
 
 TEST(SvgImport, GrayPaintsMapByLuminance) {
-    // Inkscape's default palette (#333333 fill / #b3b3b3 stroke) maps to
-    // the contrast paints instead of failing the import.
+    // Inkscape's default palette (#333333 fill / #b3b3b3 stroke): the
+    // fill paints the BACKGROUND (team color), the stroke the contrast
+    // foreground — and a filled+stroked shape emits BOTH.
     const SymbolDefinition def = import_symbol_from_svg_string(
         svg_doc("<rect x=\"0\" y=\"0\" width=\"1\" height=\"1\" "
                 "style=\"fill:#333333;fill-opacity:1;"
                 "stroke:#b3b3b3;stroke-width:1\"/>"),
         "grays");
     ASSERT_EQ(def.polygons.size(), 1u);
-    EXPECT_EQ(def.polygons[0].color_role, SymbolColorRole::Outline);
-    // A stroked FILLED shape keeps the model's built-in contrast outline
-    // (stroke-width on filled shapes is not honored — no polyline).
-    EXPECT_TRUE(def.polylines.empty());
+    EXPECT_EQ(def.polygons[0].color_role, SymbolColorRole::Fill);
+    ASSERT_EQ(def.polylines.size(), 1u);
+    EXPECT_TRUE(def.polylines[0].closed);
+    EXPECT_EQ(def.polylines[0].color_role, SymbolColorRole::Outline);
     // A MID-gray is ambiguous and fails by name.
     try {
         (void)import_symbol_from_svg_string(

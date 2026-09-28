@@ -37,8 +37,10 @@
   <desc
      id="desc1">Truss bridge: two bars with vertical supports</desc>
   <path
-     style="vector-effect:non-scaling-stroke;fill:#333333;fill-opacity:1;stroke:#b3b3b3;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none"
      d="m 0.75,-0.4 -0.2,0.2 h -1.1 l -0.2,-0.2 v 0.8 l 0.2,-0.2 h 1.1 l 0.2,0.2"
+	 fill="currentColor"
+     data-color-role="fill_blend"
      id="path9"
      sodipodi:nodetypes="cccccccc" />
   <path

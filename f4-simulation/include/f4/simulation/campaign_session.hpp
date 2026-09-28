@@ -130,6 +130,13 @@ struct CampaignSessionOptions {
 
     /// Tasking cycle period (CampaignConfig::air_task_cycle_sec).
     int tasking_cycle_sec = 1800;
+    /// Fire ONE tasking cycle at create — "the war starts by planning"
+    /// (the ground war's own first-cycle rule). A loaded save carries no
+    /// ATO in this engine, so without it the air war sits empty for a
+    /// full tasking_cycle_sec. Default false: the documented "first
+    /// generated missions land a full cycle in" behavior, and the QC
+    /// ledgers keep their byte identity.
+    bool initial_tasking_cycle = false;
     /// Reinforcement cadence; 43200 = the QC's armed 12 h.
     int reinforce_period_sec = 43200;
     /// DOM-2: the strategic reserve flow (CampaignConfig::

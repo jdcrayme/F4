@@ -349,9 +349,22 @@ Style inherit_style(const Style& parent, const f4::xml::xml_node& n) {
     return s;
 }
 
-SymbolColorRole paint_role(Paint p, const Style& st) {
+// Role mapping — the author's fills and strokes are kept as-is; nothing
+// is invented. A fill paints the BACKGROUND (the team color) whatever
+// paint it carried (currentColor, an editor gray, black); a stroke
+// paints with its paint's role — currentColor is a team-colored stroke
+// (the corpus's dashes and waves), any editor color is the contrast
+// foreground. An explicit data-color-role overrides both (the exporter
+// writes it on every contrast fill).
+SymbolColorRole fill_role(const Style& st) {
     if (st.role_override) return *st.role_override;
-    return p == Paint::Current ? SymbolColorRole::Fill : SymbolColorRole::Outline;
+    return SymbolColorRole::Fill;
+}
+
+SymbolColorRole stroke_role(const Style& st) {
+    if (st.role_override) return *st.role_override;
+    return st.stroke == Paint::Current ? SymbolColorRole::Fill
+                                       : SymbolColorRole::Outline;
 }
 
 // ===========================================================================
@@ -492,7 +505,7 @@ struct Sink {
             pg.points = std::move(fp.outer);
             pg.holes = std::move(fp.holes);
             pg.filled = true;
-            pg.color_role = paint_role(st.fill, st);
+            pg.color_role = fill_role(st);
             def.polygons.push_back(std::move(pg));
         }
     }
@@ -504,7 +517,7 @@ struct Sink {
         pl.closed = closed && pts.size() >= 3;
         pl.width = st.stroke_width * vb_scale * (kSymbolReferenceSizePx * 0.5f);
         if (pl.width <= 0.0f) pl.width = 1.0f;
-        pl.color_role = paint_role(st.stroke, st);
+        pl.color_role = stroke_role(st);
         def.polylines.push_back(std::move(pl));
     }
 };
@@ -796,13 +809,17 @@ void parse_path_data(const char* d, const Xform& xf, const Style& stl, Sink& sin
     }
     st.flush(false);
 
-    // Emit: filled shapes take ALL loops (open ones close, per SVG);
-    // otherwise stroked shapes emit one polyline per loop.
+    // Emit: a filled shape takes ALL loops (open ones close, per SVG);
+    // a stroked shape emits one polyline per loop — open loops stroke
+    // open (SVG does not stroke the closing segment). A path with BOTH
+    // emits both: fills and strokes come from the file, nothing added
+    // or dropped.
     if (stl.fill != Paint::None) {
         std::vector<std::vector<SymbolPoint>> rings;
         for (auto& lp : st.loops) rings.push_back(std::move(lp.pts));
         sink.add_fill(std::move(rings), stl);
-    } else {
+    }
+    if (stl.stroke != Paint::None) {
         for (auto& lp : st.loops) {
             sink.add_stroke(lp.pts, lp.closed, stl);
         }
@@ -859,7 +876,8 @@ void emit_shape(Sink& sink, const Style& st,
         rings.reserve(rings_user.size());
         for (auto& r : rings_user) rings.push_back(ring_to_model(r, xf));
         sink.add_fill(std::move(rings), st);
-    } else {
+    }
+    if (st.stroke != Paint::None) {
         for (const auto& r : rings_user) {
             sink.add_stroke(ring_to_model(r, xf), true, st);
         }

@@ -40,12 +40,14 @@
      d="M -0.25 -0.85 L 0.25 -0.85 L 0.25 0.85 L -0.25 0.85 Z"
      fill="currentColor"
      data-color-role="fill_blend"
-     id="path1" />
+     id="path1"
+     style="fill:#000000;stroke:none" />
   <path
      d="M -0.85 -0.25 L 0.85 -0.25 L 0.85 0.25 L -0.85 0.25 Z"
      fill="currentColor"
      data-color-role="fill_blend"
-     id="path3" />
+     id="path3"
+     style="fill:#000000;stroke:none" />
   <path
      style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
      d="m -0.85,-0.25 h 0.6 v -0.6 m 0.5,1.7 v -0.6 h 0.6"

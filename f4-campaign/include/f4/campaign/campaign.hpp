@@ -318,6 +318,17 @@ public:
     /// same history always yields the same intents.
     void tick(CampaignTime delta_sec);
 
+    /// Fire ONE tasking cycle immediately, at the current clock — the
+    /// war starts by planning (the ground war's own first-cycle rule).
+    /// A loaded save has no ATO of its own in this engine (the wire's
+    /// pre-planned missions are not decoded), so without this the air
+    /// war sits empty for a full air_task_cycle_sec. A host that wants
+    /// the documented "first wave lands a full cycle in" behavior
+    /// simply never calls this. Counts in cycles_fired(); the SCHEDULED
+    /// boundaries (next_cycle_) are untouched — the next cycle still
+    /// fires a full air_task_cycle_sec after the last scheduled slot.
+    void run_initial_tasking_cycle();
+
     /// Campaign-relative clock (seconds).
     [[nodiscard]] CampaignTime clock() const noexcept { return clock_; }
 

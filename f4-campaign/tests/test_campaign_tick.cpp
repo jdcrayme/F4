@@ -98,6 +98,29 @@ TEST(CampaignTick, ThirtyMinuteRunIsByteStableAcrossTwoExecutions) {
     EXPECT_EQ(d->campaign->to_summary_json(), a->campaign->to_summary_json());
 }
 
+TEST(CampaignTick, InitialCyclePlansAtClockZero) {
+    // "The war starts by planning" (the ground war's own first-cycle
+    // rule) — a host that calls run_initial_tasking_cycle() gets a
+    // populated ATO at clock 0, and the SCHEDULED boundaries are
+    // untouched: the next cycle still fires a full cycle period in.
+    auto rig = Rig::make();
+    EXPECT_EQ(rig->campaign->cycles_fired(), 0);
+    EXPECT_TRUE(rig->campaign->intents().empty());
+
+    rig->campaign->run_initial_tasking_cycle();
+    EXPECT_EQ(rig->campaign->cycles_fired(), 1);
+    EXPECT_FALSE(rig->campaign->intents().empty());
+    EXPECT_EQ(rig->campaign->clock(), 0);
+
+    // The scheduled ladder is unaffected: the next fire lands at the
+    // first full-cycle boundary, not right after the initial one.
+    EXPECT_EQ(rig->campaign->seconds_to_next_cycle(), 1800);
+    const auto intents_after_initial = rig->campaign->intents().size();
+    rig->campaign->tick(1800);
+    EXPECT_EQ(rig->campaign->cycles_fired(), 2);
+    EXPECT_GE(rig->campaign->intents().size(), intents_after_initial);
+}
+
 TEST(CampaignTick, MissionsGeneratePerProfileCadenceAndComposition) {
     auto rig = Rig::make();
     Collector collect(*rig->bus);

@@ -5,6 +5,39 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## ATO-START-1 — the war starts by planning (and the symbol color rule is mechanical)
+
+- **Why save0-2 never generated ATO missions** — the ground war fires
+  its first orders cycle at clock 0 ("the war starts by planning"),
+  but the air tasking ladder's first cycle waited a full
+  air_task_cycle_sec (1800 war-seconds ≈ 5-8 real minutes at the 10x
+  preset). A loaded stock save carries no ATO in this engine (the
+  wire's pre-planned missions are not decoded), so every session
+  opened with an empty ATO that most runs never outlived.
+  `Campaign::run_initial_tasking_cycle()` fires ONE cycle at the
+  current clock — counted in cycles_fired_, scheduled boundaries
+  untouched — gated behind `CampaignSessionOptions::
+  initial_tasking_cycle` (default false: the QC ledgers keep their
+  byte identity); the viewer turns it on. save1 now opens at
+  `cycles 1 missions 100 routes 20`, flights table full from frame
+  one. `InitialCyclePlansAtClockZero` pins it (tick tests 10/10).
+- **The symbol color rule is now mechanical** — "a fill paints the
+  background, a stroke paints the foreground, nothing is added or
+  removed." Fixes two rendering bugs the Inkscape re-saves exposed:
+  (1) the renderer drew an INVENTED 1px outline on every filled
+  polygon (the intersection bars grew a stroke their file never had) —
+  outlines now render only for outline-only shapes (hover/selection,
+  unfilled polygons); (2) a filled+stroked path emitted ONLY the fill
+  (the bridge road's author stroke was dropped, and its #333333 fill
+  rendered in the contrast color ≈ invisible on the map) — a shape
+  with both now emits both, and any fill paints the team color unless
+  `data-color-role` says otherwise (the corpus's contrast glyphs carry
+  explicit roles, so nothing regresses). `currentColor` strokes stay
+  team-colored (the dashed-border convention). README + header
+  contract rewritten to the mechanical rule.
+- Suites: f4-campaign 372, f4-simulation 387, f4-renderer 15,
+  f4-world 405, f4-world-viewer 99 — all green.
+
 ## SVG-TOLERANCE-1 — Inkscape re-saves import, and the name tables load from anywhere
 
 - **Inkscape re-saves killed the symbols** — a round-trip through

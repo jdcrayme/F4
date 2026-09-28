@@ -743,6 +743,17 @@ CampaignSession::create(const CampaignSessionOptions& opts,
                     });
     }
 
+    // 15. The initial tasking cycle (opt-in): the war starts by
+    //     planning — a loaded save carries no ATO in this engine, so
+    //     without it the air war sits empty for a full
+    //     tasking_cycle_sec. Runs with the ladder fully wired (the same
+    //     state a first tick would see); the cadence emitter's cycle
+    //     diff publishes it as a tasking_cycle event on the first
+    //     advance.
+    if (opts.initial_tasking_cycle) {
+        session->ladder_->run_initial_tasking_cycle();
+    }
+
     session->refresh_stats_();
     return session;
 }

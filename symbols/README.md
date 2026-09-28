@@ -23,15 +23,31 @@ that key — the campaign-icon wiring is the follow-on).
 ## Color rules
 
 Symbols must not carry absolute colors — they render in the owning
-team's palette. Use the color-role convention:
+team's palette. The rule is mechanical: **a fill paints the background
+(the team color); a stroke paints the foreground (the contrast
+color)**. Fills and strokes come from the file exactly as drawn —
+nothing is added or removed by the importer or the renderer.
 
-- `currentColor` fill  → the team fill color (opaque)
-- `fill-opacity="0.85"` → the team fill at 85% (fill_blend; overlaps read
-  as translucency)
-- plain black/white stroke or fill → the contrast outline
+- Any fill (including `currentColor` and editor grays) → the team fill
+  color. `fill="none"` → no fill.
+- `stroke="currentColor"` → a team-colored stroke (the dashed-border
+  convention); any other stroke paint → the contrast foreground.
+  `stroke="none"` or no stroke → no stroke.
+- Contrast GLYPHS inside a team-colored frame (the artillery dot, the
+  helo silhouette) use near-black/near-white fills and carry an
+  explicit `data-color-role="outline"` — the exporter writes it; keep
+  it when editing by hand. `data-color-role="fill|fill_blend|outline"`
+  overrides the mapping on any shape.
+- A mid-gray (neither near-black nor near-white) fails the import as
+  ambiguous.
+- `fill-opacity="0.85"` → the team fill at 85% (fill_blend; overlaps
+  read as translucency).
 
 The exporter writes these as `currentColor` plus `data-color-role`
-attributes; Inkscape preserves unknown `data-*` attributes on round-trip.
+attributes; Inkscape preserves unknown `data-*` attributes on
+round-trip — and Inkscape re-saves import: `style=""` attributes, gray
+paints, and editor blocks (`<defs>`, `<sodipodi:namedview>`) are all
+tolerated.
 
 ## Geometry conventions
 

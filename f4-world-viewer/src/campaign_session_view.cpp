@@ -179,6 +179,12 @@ void ViewerApp::start_campaign_session() {
     opts.mission = -1;              // the whole tasking picture
     opts.max_flights = impl_->campaign_start_max_flights;
     opts.tasking_cycle_sec = 1800;  // FreeFalcon's own ATM cadence
+    // The war starts by planning: fire one tasking cycle at create so
+    // the ATO is populated from the first frame (a loaded save carries
+    // no ATO in this engine — without it the air war sits empty for a
+    // full 30-minute cycle, which read as "the campaign never
+    // generates missions").
+    opts.initial_tasking_cycle = true;
     opts.reinforce_period_sec = 43200;  // the QC's armed 12 h
     // G1/DOM-2: the ground war runs in viewer sessions — the supply
     // picture (objective stocks, battalion cut-off), the FLOT, and the

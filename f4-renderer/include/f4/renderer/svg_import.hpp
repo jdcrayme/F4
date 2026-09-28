@@ -17,27 +17,28 @@
 //   shapes:    path (commands M m L l H h V v C c S s Q q T t A a Z z),
 //              rect (incl. rounded rx/ry), circle, ellipse, line,
 //              polyline, polygon.
-//   fill:      "currentColor" -> SymbolColorRole::Fill (also the default
-//              when the attribute is absent — a deliberate deviation from
-//              SVG's black default, for team-colored tactical symbols),
-//              "none" -> outline-only,
-//              "#000000"/"#ffffff"/"black"/"white" -> Outline role.
-//              Editor grays map by luminance: near-black (Inkscape's
-//              #333333 default fill) -> black, near-light (#b3b3b3) ->
-//              white; a mid-gray fails (ambiguous intent).
-//              data-color-role="fill|fill_blend|outline" overrides the
-//              paint-to-role mapping (this is how the exporter round-trips
-//              all three roles).
+//   fill:      ANY paint fills the BACKGROUND (SymbolColorRole::Fill —
+//              the team color): currentColor, an editor gray, black.
+//              The default when the attribute is absent is also Fill —
+//              a deliberate deviation from SVG's black default, for
+//              team-colored tactical symbols. "none" -> no fill.
+//              Contrast GLYPHS carry an explicit
+//              data-color-role="fill|fill_blend|outline" — the exporter
+//              writes it on every contrast fill, and it overrides the
+//              mapping on any shape. Near-black/near-white hexes parse
+//              (and honor their explicit role); a MID-gray fails as
+//              ambiguous.
 //   style:     the CSS `style` ATTRIBUTE parses (editors write fills/
 //              strokes there on re-save): fill/stroke/stroke-width/
 //              fill-rule/fill-opacity/stroke-opacity/stroke-dasharray/
 //              vector-effect with CSS precedence over the presentation
 //              attributes. non-scaling-stroke widths are screen px at
 //              the 64 px reference. Unknown properties fail by name.
-//   stroke:    "none" or any fill value above; stroked outlines become
-//              polylines. Stroked FILLED shapes keep the model's built-in
-//              1px contrast outline (stroke-width on filled shapes is not
-//              honored).
+//   stroke:    "none" or any fill value; strokes become polylines with
+//              their own width and role (currentColor -> the team color,
+//              any editor color -> the contrast foreground). A shape
+//              with BOTH fill and stroke emits both. No stroke is ever
+//              added to a fill-only shape.
 //   fill-rule: "nonzero" (default) and "evenodd" — for either rule, a
 //              subpath contained inside another becomes a hole.
 //   editor extras: <defs>, <metadata>, and any NAMESPACED element

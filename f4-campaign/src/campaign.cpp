@@ -299,6 +299,11 @@ std::uint32_t Campaign::select_target_(std::uint8_t team) const {
     return best;
 }
 
+void Campaign::run_initial_tasking_cycle() {
+    ++cycles_fired_;
+    run_tasking_cycle_();
+}
+
 void Campaign::run_tasking_cycle_() {
     if (atm_ != nullptr) {
         run_tasking_cycle_atm_();
