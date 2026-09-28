@@ -583,12 +583,19 @@ follow-up refinement, documented here.
   only when it destroys (the sync diffs destroyed-state; damaged-only
   gun hits on non-impacted objectives ride the fstatus diff — covered
   when they change the bitmap).
-- **World JSON re-emission**: `apply_to` mutates the in-memory typed
+- ~~**World JSON re-emission**: `apply_to` mutates the in-memory typed
   WorldState; writing that back out as a world JSON file needs a
   WorldState→JSON emitter (f4-world currently only reads; the emitter
   lives in f4-world-convert over decode structs). The .cam save-side
   re-encoder does not exist for ANY subsystem yet — both land together
-  with the campaign save-write tranche.
+  with the campaign save-write tranche.~~ — LANDED with the
+  **save-write tranche** (SAVE_WRITE_PLAN.md): `WorldState::
+  to_json_string()` is the round-trip emitter (f4-world's
+  test_world_emit pins field-for-field float-exact equality), and the
+  .cam save side diffs that document against the original, overwriting
+  only the campaign loop's owned fields
+  (f4-world-convert's `derive_save_mutations`, pinned in
+  test_save_writeback.cpp).
 - ~~**Reinforcement depth** (C2): the team-level `replacements_avail`
   strategic stock is decoded and exposed (ITeamSource) but not
   CONSUMED — the squadron-level wire budgets are the operative source
@@ -621,20 +628,32 @@ follow-up refinement, documented here.
   objectives, AWACS/tanker/ECM share-or-file with racetrack station
   routes, the defender BARCAP filed for the enemy's next cycle, and
   the RoE carry). GetPriority's PO/package/distance/random terms still
-  need strategy-layer data; the ACTION tables' contextual filings
+  need strategy-layer data (atm.cpp `request_priority_` documents the
+  skip). ~~The ACTION tables' contextual filings
   (objective-damage-driven CAS/BARCAP/SEAD) are the next strategy
-  tranche.
+  tranche.~~ — LANDED with **CAMP-ATM-1** (the ACTION tables scan the
+  objectives' fstatus bitmaps: destroyed features file CAS, ≥25%
+  damage adds the garrison BARCAP station, a war enemy objective files
+  SEADSTRIKE — see CAMP_HOST_PLAN.md §8).
 - **Threat-map coverage** (C3): only AD battalions whose entity
-  types resolve into the theater DB's UCD paint — the fixture UCD is
-  an 8-entry sample (3 of 247 AD battalions on TestCamp); the full
-  theater's UCD (game data) paints the rest with no code change.
-- **Per-action altitude shaping, tanker waypoints** (C3): each lands
-  with its consumer (the fuel tranche) — documented in
-  route_builder.hpp. (Package-shared ingress and TOT slotting landed
-  with C4's package composition — escorts share the main flight's
-  route; takeoffs snap to the airbase schedules. The loiter racetracks
-  landed with P7 — the station circuits the strategy layer's CAP and
-  support flights fly.)
+  types resolve into the theater DB's UCD paint. The full theater's
+  UCD (296 rows) exported with **CAMP-SCALE-1**
+  (`Data/Theater/korea/tables.json` + the runtime `TheaterTables`
+  reader), but the map still feeds from the world JSON's per-unit
+  `unit_hit_chance`/`unit_weapon_range` enrichment — which the
+  committed campaign worlds do not carry (showcase.world.json has no
+  enrichment block). Wiring `TheaterTables` into the threat map's
+  unit source (the campaign bridge already holds the tables) is the
+  remaining small step.
+- **Per-action altitude shaping** (C3): lands with its consumer (the
+  fuel tranche) — documented in route_builder.hpp. (Package-shared
+  ingress and TOT slotting landed with C4's package composition —
+  escorts share the main flight's route; takeoffs snap to the airbase
+  schedules. The loiter racetracks landed with P7 — the station
+  circuits the strategy layer's CAP and support flights fly. ~~The
+  tanker waypoints~~ — LANDED with **CAMP-ATM-1**: AMIS_TANKER
+  stations gain the WP_REFUEL turnpoint before the racetrack
+  anchor.)
 
 ## 8. Implementation order (C4 onward)
 

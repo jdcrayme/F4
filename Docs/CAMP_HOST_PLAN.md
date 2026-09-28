@@ -1342,8 +1342,10 @@ two-run query determinism).
 
 ## 13. Paperwork
 
-- Docs/README.md index row (Active plans):
-  `| Campaign host (the engine contract) | CAMP_HOST_PLAN.md | Draft v1 — HOST-1 not started. |`
+- Docs/README.md index row (Active plans): updated per landing — its
+  status column currently names every shipped tranche (HOST-1/2/3,
+  CMD-1/2, ATM-1, INIT-1, SCALE-1, DOM-1..6). That row is the single
+  source of the plan's current state.
 - `CHANGELOG.md` line on landing (one line, per convention):
   `CAMP-HOST-1 — the engine contract + campaignd: f4-campaign-api (session iface, v1 query DTOs), the CampaignSession adapter, stdio host, scripted golden client; golden identity holds.`
 - Task IDs are namespaced `CAMP-*` and unique (the §Conventions rule).
