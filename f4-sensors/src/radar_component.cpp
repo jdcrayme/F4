@@ -12,6 +12,7 @@
 #include <cstdio>
 
 #include <f4/geo/relative.hpp>
+#include <f4/sensors/ecm.hpp>
 
 namespace f4::sensors {
 
@@ -122,6 +123,44 @@ void RadarSimComponent::perform_scan(messaging::MessageBus& bus) {
     // --- Roll each candidate against the detection model --------------------
     std::uniform_real_distribution<double> uniform01{0.0, 1.0};
 
+    // --- ECM burn-through (the jamming tranche) ------------------------------
+    // The live ENEMY jammers, once per scan: bearing from this radar and
+    // their weight AT THIS RADAR — one-way noise power falls with 1/r²,
+    // saturating inside the jammer's burn-through range. A corpse stops
+    // jamming; a friendly pod never degrades an own-team radar. No
+    // EcmComponent in the world (the fidelity gate's off state) → the
+    // bucket walk is one index probe and the per-candidate block below is
+    // arithmetic-free: every pre-ECM scan is byte-identical.
+    struct JammerRead {
+        double bearing_rad;   // CW from north, this radar -> jammer
+        double weight_scale;  // strength * min(1, (R_bt / d)²)
+    };
+    std::vector<JammerRead> jammers;
+    for (const auto& [jid, ecm] :
+         world->with_component_ref<EcmComponent>()) {
+        if (!ecm->enabled) continue;
+        if (ecm->own_team == own_team) continue;  // friendly pod
+        entities::EntityHandle jh(jid,
+                                  const_cast<entities::EntityWorld*>(world));
+        const auto* jtf = jh.get<entities::TransformComponent>();
+        if (jtf == nullptr) continue;
+        if (const auto* dmg = jh.get<entities::DamageStateComponent>();
+            dmg != nullptr && dmg->killed) {
+            continue;  // corpses don't jam
+        }
+        const double dxj = jtf->position.x - own_pos.x;
+        const double dyj = jtf->position.y - own_pos.y;
+        const double dzj = jtf->position.z - own_pos.z;
+        const double d_nm =
+            std::sqrt(dxj * dxj + dyj * dyj + dzj * dzj) / 6076.11548;
+        const double square =
+            (ecm->burn_through_range_nm * ecm->burn_through_range_nm) /
+            std::max(d_nm * d_nm, 1e-6);
+        jammers.push_back(JammerRead{
+            std::atan2(dxj, dyj),  // CW from north (ENU convention)
+            ecm->jamming_strength * std::min(1.0, square)});
+    }
+
     for (const auto eid : candidates) {
         entities::EntityHandle h(eid, const_cast<entities::EntityWorld*>(world));
         const auto* tf = h.get<entities::TransformComponent>();
@@ -222,8 +261,34 @@ void RadarSimComponent::perform_scan(messaging::MessageBus& bus) {
             continue;
         }
 
-        // The detection roll.
-        const double pd = detection_probability(params, sig, bra.range_nm());
+        // The detection roll — degraded by the enemy jammers in the
+        // antenna's receiving corridor toward this candidate (the ECM
+        // burn-through model): each jammer inside the beam toward the
+        // candidate raises the noise floor, the effective detection
+        // range shrinks by (1 - W), and the ramp reads the STRETCHED
+        // range. W caps at 0.95 (a blanket never fully blinds — closing
+        // the range is how the echo wins through). No jammers → W = 0 →
+        // the roll is exactly the pre-ECM arithmetic and the RNG stream
+        // is untouched.
+        double pd = 0.0;
+        {
+            double jamming = 0.0;
+            if (!jammers.empty()) {
+                const double bearing_to_tgt =
+                    std::atan2(tgt_pos.x - own_pos.x, tgt_pos.y - own_pos.y);
+                for (const auto& j : jammers) {
+                    if (std::abs(angle_diff(bearing_to_tgt, j.bearing_rad)) <=
+                        scan.azimuth_half_width_rad) {
+                        jamming += j.weight_scale;
+                    }
+                }
+                jamming = std::min(jamming, 0.95);
+            }
+            const double range_for_ramp =
+                jamming > 0.0 ? bra.range_nm() / (1.0 - jamming)
+                              : bra.range_nm();
+            pd = detection_probability(params, sig, range_for_ramp);
+        }
         if (pd <= 0.0) continue;
         if (uniform01(rng_) >= pd) continue;
 

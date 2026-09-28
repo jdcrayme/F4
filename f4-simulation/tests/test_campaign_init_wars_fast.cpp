@@ -45,6 +45,54 @@ TEST(CampaignInitWarsFast, SmallWarAt60xAccelIsGreen) {
     EXPECT_EQ(r.verdict.ledger_md5_run0, r.verdict.ledger_md5_run1);
 }
 
+// ── The fusion tranche's perf certificate: the armed war with the
+//    passive sensors on (Docs/SENSORS_COUNTERMEASURES_PLAN.md §8) ────────
+//
+// The passive legs (IRST + visual contact books answering the detection
+// policy's visual verdict) + the throttle ir_power stamp ride the armed
+// war's tick — the machinery FID-OPT tuned. The certificate: the same
+// 60x preset the unarmed war holds stays UNDILATED with the fidelity on
+// (zero_dilation IS the throughput verdict — if the passive scans or the
+// stamp collapsed the tick, the gate fires), the war stays green, and it
+// stays a deterministic object (the contacts change the FIGHT, not the
+// reproducibility).
+
+TEST(CampaignInitWarsFast, ArmedWarWithPassiveSensorsHoldsThe60xPreset) {
+    if (!fixtures_ready()) {
+        GTEST_SKIP() << "campinit/f16 fixtures not generated";
+    }
+    std::string err;
+    // Tier 3.1 horizon compression again: 3600 s (two 30-min samples)
+    // — enough tasking cycles for the armed war to generate, commit,
+    // and fight, at ~1/8 the wall clock of the 7200 s variants (the
+    // armed war's per-tick cost is what the certificate measures).
+    // The war starts by planning (ATO-START-1): the initial cycle at
+    // clock 0 is what gets flights ARMED inside the short horizon —
+    // without it the first cycle waits a full tasking_cycle_sec and
+    // the 3600 s war ends before anything is armed.
+    auto opts = make_opts("small", 3600, 1800.0, 60.0);
+    opts.session.initial_tasking_cycle = true;
+    opts.session.aa_combat = true;        // the armed war (C6)
+    opts.session.passive_sensors = true;  // the fusion tranche
+    auto harness = CampaignWarHarness::create(opts, &err);
+    ASSERT_NE(harness, nullptr) << err;
+
+    const WarReport r = harness->execute();
+    ASSERT_FALSE(r.aborted) << r.abort_reason;
+    EXPECT_TRUE(r.aa_combat);
+    EXPECT_GT(r.armed_aircraft, 0)
+        << "the war never armed — the certificate would prove nothing";
+    expect_green(r);
+
+    // The perf certificate itself.
+    EXPECT_TRUE(r.verdict.zero_dilation)
+        << "the passive legs diluted the 60x preset: "
+        << r.verdict.dilation_report;
+    EXPECT_GT(r.verdict.sustained_rate, 0.0);
+    EXPECT_TRUE(r.verdict.deterministic);
+    EXPECT_EQ(r.verdict.ledger_md5_run0, r.verdict.ledger_md5_run1);
+}
+
 // ── Medium / large / twinwars at 60x accel — the determinism pins ───────
 
 TEST(CampaignInitWarsFast, MediumWarAt60xAccelIsDeterministic) {

@@ -327,6 +327,12 @@ struct CampaignSessionOptions {
     /// skill cadence. Default false: every pre-SCALE fight flies its
     /// Veteran cadence byte-identically.
     bool pilot_skill_flow = false;
+    /// The passive-sensor fusion (SENSORS_COUNTERMEASURES_PLAN §8): the
+    /// armed campaign's aircraft carry the IRST + visual components and
+    /// the detection policy answers the passive optical legs from their
+    /// contact books. Only read when aa_combat. Default false: no
+    /// passive component attaches — the golden identity.
+    bool passive_sensors = false;
 
     /// FID-1: the fidelity policy (see FidelityPolicy above). Default
     /// FullFidelity — the session is byte-identical to the pre-FID

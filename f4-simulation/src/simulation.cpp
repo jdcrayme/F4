@@ -552,7 +552,9 @@ bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
         brain_data_loaded_ ? &brain_data_ : nullptr,
         &policy,
         sig_ctx ? &*sig_ctx : nullptr,
-        scenario_.combat.countermeasures);
+        scenario_.combat.countermeasures,
+        scenario_.combat.passive_sensors,
+        /*ecm=*/false);
     if (!result.armed) {
         // Not a candidate (no origin/brain/store) or already armed —
         // EXCEPT the doctrine-failure shapes, which are misconfigurations
@@ -881,7 +883,9 @@ void Simulation::spawn_from_scenario_list() {
                                   ac_index,
                                   scenario_.combat.fighter_hit_points,
                                   &sig_ctx,
-                                  scenario_.combat.countermeasures);
+                                  scenario_.combat.countermeasures,
+                                  scenario_.combat.passive_sensors,
+                                  scenario_.combat.ecm && sc.ecm);
 
             // The gun's ammo ledger: the store's gun station (attached
             // just above; 511 for a standard M61A1 load). The brain's
@@ -2383,6 +2387,8 @@ void Simulation::tick(double dt) {
     const double t_now = sim_time_s_ + dt;
     if (combat_on) {
         sensors::RadarSimComponent::set_sim_time(t_now);
+        sensors::IrstComponent::set_sim_time(t_now);
+        sensors::VisualComponent::set_sim_time(t_now);
         weapons::MissileSimComponent::set_sim_time(t_now);
         weapons::BombSimComponent::set_sim_time(t_now);
     }
@@ -2446,6 +2452,31 @@ void Simulation::tick(double dt) {
     bus_.flush_pending();  // drain deferred ATC messages (TaxiClearance, etc.)
     const auto prof_t3 = g_prof.on ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
+
+    // Throttle-driven IR band (the ir_power tranche): the FM's
+    // last-flown throttle selects each active aircraft's IR signature
+    // band — full AB the ir2 detent, mil/high dry the ir1 band the
+    // sensors were authored against, cruise/idle the ir0 baseline. The
+    // IRST scanned this tick with LAST tick's stamp (the sensors run at
+    // priority 45, inside update_all, before this pass) — one 16 ms
+    // tick of latency on a throttle change, deterministic and
+    // physically invisible. Gate: the fidelity ON (the golden identity
+    // rule — the Afterburner default every pre-tranche target reads is
+    // untouched).
+    if (combat_on && scenario_.combat.throttle_ir_power) {
+        for (const auto eid : aircraft_entities_) {
+            entities::EntityHandle h(eid, &world_);
+            auto* sig = h.get<sensors::SignatureComponent>();
+            const auto* fm = h.get<flight::FlightModelComponent>();
+            if (sig == nullptr || fm == nullptr) continue;
+            const double throttle = fm->last_consumed_input().throttle;
+            sig->ir_power = throttle >= 1.05
+                ? sensors::IrPowerMode::Max
+                : throttle >= 0.6
+                    ? sensors::IrPowerMode::Afterburner
+                    : sensors::IrPowerMode::Baseline;
+        }
+    }
 
     // Combat chain (M3 tactics): execute the combat brains' intents
     // (radar locks + weapon releases) NOW — after update_all (the brains

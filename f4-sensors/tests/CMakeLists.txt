@@ -23,6 +23,8 @@ f4_sensors_add_test(test_simdata_sensors test_simdata_sensors.cpp)
 target_link_libraries(test_simdata_sensors PRIVATE f4-data)
 f4_sensors_add_test(test_irst_component  test_irst_component.cpp)
 f4_sensors_add_test(test_visual_component test_visual_component.cpp)
+# The ECM tranche: the burn-through model + the RWR's Jamming warning.
+f4_sensors_add_test(test_ecm             test_ecm.cpp)
 # Both sensor tests construct f4::data::SignatureGrid values (the DATA
 # side of the SimData pipeline) — the same sanctioned f4-data link the
 # simdata test carries.

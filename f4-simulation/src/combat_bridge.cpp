@@ -26,8 +26,11 @@
 #include <f4/weapons/weapon_types.hpp>
 #include <f4/weapons/wcd_weapon_data.hpp>
 #include <f4/data/signature_data.hpp>
+#include <f4/sensors/ecm.hpp>
+#include <f4/sensors/irst_component.hpp>
 #include <f4/sensors/signature.hpp>
 #include <f4/sensors/track_store.hpp>
+#include <f4/sensors/visual_component.hpp>
 #include "f4/simulation/campaign_origin.hpp"
 
 namespace f4::simulation {
@@ -234,7 +237,9 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
                            std::size_t aircraft_index,
                            double hit_points,
                            const SignatureContext* signatures,
-                           bool countermeasures) {
+                           bool countermeasures,
+                           bool passive_sensors,
+                           bool ecm) {
     // Identity first: the TEAM tag drives IFF (TrackStore), RWR emitter
     // role checks, and launch_missile's team copy. CampaignIdentity
     // carries the callsign the radar's NCTR resolves after a few scans.
@@ -304,6 +309,29 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
     // The RWR (passive — Simulation::tick's update_rwr sweep fills it).
     aircraft.add<sensors::RwrComponent>();
 
+    // The passive sensors (the fusion tranche): the airframe IRST + the
+    // eyeball, seeded/stamped like the radar. They publish NOTHING — their
+    // contact books are queryable state — so attaching them is inert until
+    // a DetectionPolicy reads them. Gate: the passive-sensor fidelity ON
+    // (the golden identity rule — the same discipline the dispenser
+    // flies under).
+    if (passive_sensors) {
+        auto& irst = aircraft.add<sensors::IrstComponent>();
+        irst.rng_seed = seed_base +
+            static_cast<std::uint32_t>(0x2000 + aircraft_index);
+        irst.own_team = ac.team;
+        auto& visual = aircraft.add<sensors::VisualComponent>();
+        visual.own_team = ac.team;
+    }
+
+    // The ECM pod (the jamming tranche): per-aircraft fit AND the combat
+    // gate must both agree. The component is pure state — the radar scan
+    // and the RWR sweep consume it (burn-through + the Jamming strobe).
+    if (ecm) {
+        auto& pod = aircraft.add<sensors::EcmComponent>();
+        pod.own_team = ac.team;
+    }
+
     // Damage endpoint: hit points, not yet killed.
     auto& dmg = aircraft.add<entities::DamageStateComponent>();
     dmg.hit_points = hit_points;
@@ -314,6 +342,8 @@ void RadarBackedDetectionPolicy::prepare_batch() {
     entities::EntityHandle ownship(entities::EntityId{ownship_id_}, world_);
     batch_radar_ = ownship.get<sensors::RadarSimComponent>();
     batch_rwr_   = ownship.get<sensors::RwrComponent>();
+    batch_irst_   = ownship.get<sensors::IrstComponent>();
+    batch_visual_ = ownship.get<sensors::VisualComponent>();
 }
 
 RadarBackedDetectionPolicy::Verdict
@@ -390,7 +420,34 @@ RadarBackedDetectionPolicy::classify(const f4::ai::TargetInfo& t) {
         }
     }
 
-    // visual + gci stay false: the flip off GCI-omniscience is the point.
+    // The passive optical legs (the fusion tranche): the ownship's IRST
+    // or eyeball holding a live contact on the candidate answers
+    // "seen without emitting" — the TargetInfo source vocabulary's one
+    // passive slot. A fighter with a dead radar still sees (and fights)
+    // what its passive sensors hold. No passive component attached (the
+    // fidelity gate's off state) → both lookups miss and visual stays
+    // false — the pre-fusion verdict, byte for byte.
+    const sensors::IrstComponent* irst = batch_irst_;
+    if (irst == nullptr) {
+        irst = entities::EntityHandle(entities::EntityId{ownship_id_}, world_)
+                   .get<sensors::IrstComponent>();
+    }
+    if (irst != nullptr && irst->find(t.entity_id) != nullptr) {
+        v.visual = true;
+    }
+    if (!v.visual) {
+        const sensors::VisualComponent* vis = batch_visual_;
+        if (vis == nullptr) {
+            vis = entities::EntityHandle(entities::EntityId{ownship_id_},
+                                         world_)
+                      .get<sensors::VisualComponent>();
+        }
+        if (vis != nullptr && vis->find(t.entity_id) != nullptr) {
+            v.visual = true;
+        }
+    }
+
+    // gci stays false: the flip off GCI-omniscience is the point.
     return v;
 }
 
@@ -947,7 +1004,9 @@ CampaignCombatArmament arm_campaign_combat(
     const f4::data::BrainData* brain_data,
     std::unique_ptr<RadarBackedDetectionPolicy>* out_policy,
     const SignatureContext* signatures,
-    bool countermeasures) {
+    bool countermeasures,
+    bool passive_sensors,
+    bool ecm) {
     CampaignCombatArmament out;
 
     // 0. The candidate contract: a campaign aircraft (origin stamped) with
@@ -1042,6 +1101,38 @@ CampaignCombatArmament arm_campaign_combat(
     }
     if (aircraft.get<sensors::RwrComponent>() == nullptr) {
         aircraft.add<sensors::RwrComponent>();
+        out.components_attached = true;
+    }
+    // The passive sensors (the fusion tranche): the same inert-until-
+    // consumed attach the scenario path flies. The team reads off the
+    // entity's own TEAM tag (the campaign spawn path set it — the radar
+    // above uses the same source).
+    if (passive_sensors) {
+        const auto team_tag = aircraft.get_tag(entities::tags::TEAM);
+        const std::string team = (team_tag && team_tag->as_string())
+            ? *team_tag->as_string() : "blue";
+        if (aircraft.get<sensors::IrstComponent>() == nullptr) {
+            auto& irst = aircraft.add<sensors::IrstComponent>();
+            irst.rng_seed = seed_base +
+                static_cast<std::uint32_t>(0x2000 + arm_index);
+            irst.own_team = team;
+            out.components_attached = true;
+        }
+        if (aircraft.get<sensors::VisualComponent>() == nullptr) {
+            auto& visual = aircraft.add<sensors::VisualComponent>();
+            visual.own_team = team;
+            out.components_attached = true;
+        }
+    }
+    // The ECM pod: campaign aircraft carry no per-unit ECM data, so the
+    // campaign arm's `ecm` flag stays false from its caller — nobody
+    // jams in a campaign world until a data source lands. (The parameter
+    // exists so both arm paths shape identically.)
+    if (ecm && aircraft.get<sensors::EcmComponent>() == nullptr) {
+        auto& pod = aircraft.add<sensors::EcmComponent>();
+        const auto team_tag = aircraft.get_tag(entities::tags::TEAM);
+        pod.own_team = (team_tag && team_tag->as_string())
+            ? *team_tag->as_string() : "blue";
         out.components_attached = true;
     }
     // The dispenser (fighters and defensive roles alike — the SHIPPED

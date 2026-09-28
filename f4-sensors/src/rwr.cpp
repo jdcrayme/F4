@@ -1,6 +1,7 @@
 // f4-sensors/src/rwr.cpp — RWR pure model + world-level sweep. See rwr.hpp.
 
 #include <f4/sensors/rwr.hpp>
+#include <f4/sensors/ecm.hpp>
 #include <f4/geo/constants.hpp>
 
 #include <algorithm>
@@ -18,11 +19,12 @@ constexpr double kFeetPerNm = f4::geo::FEET_PER_NM;  // single-sourced (was a li
 
 inline int warning_rank(RwrWarningType t) noexcept {
     switch (t) {
-        case RwrWarningType::Launch: return 0;
-        case RwrWarningType::Lock:   return 1;
-        case RwrWarningType::Search: return 2;
+        case RwrWarningType::Launch:  return 0;
+        case RwrWarningType::Lock:    return 1;
+        case RwrWarningType::Jamming: return 2;
+        case RwrWarningType::Search:  return 3;
     }
-    return 3;
+    return 4;
 }
 
 } // namespace
@@ -67,13 +69,17 @@ std::vector<RwrWarning> RwrModel::evaluate(
         }
 
         // One emitter reads as its most severe class: missile beats lock
-        // beats search (the same radar can be strobing and locked — lock
-        // wins because it is the actionable threat).
+        // beats jamming beats search (the same radar can be strobing and
+        // locked — lock wins because it is the actionable threat; an
+        // entity that both radars and jams reads as whichever of its
+        // readings is most severe).
         RwrWarningType type;
         if (r.is_missile) {
             type = RwrWarningType::Launch;
         } else if (r.is_locked_on_self) {
             type = RwrWarningType::Lock;
+        } else if (r.is_jamming_self) {
+            type = RwrWarningType::Jamming;
         } else if (r.is_illuminating_self) {
             type = RwrWarningType::Search;
         } else {
@@ -110,6 +116,7 @@ std::size_t update_rwr(entities::EntityWorld& world,
         std::uint64_t locked_target;  // valid when is_locked_on_any
         bool is_searching;            // Search mode (sweeping)
         const RadarSimComponent* radar;  // for scan-volume tests, nullptr for missiles
+        bool is_jamming;              // live EcmComponent (nullptr radar path)
     };
 
     std::vector<EmitterRecord> emitters;
@@ -124,7 +131,8 @@ std::size_t update_rwr(entities::EntityWorld& world,
             radar->mode() == RadarMode::Track,
             radar->locked_target(),
             radar->mode() == RadarMode::Search,
-            radar});
+            radar,
+            /*is_jamming=*/false});
     }
     // Missile emitters: the ROLE="missile" tag bucket — O(1) through the
     // Phase-D tag index (with_tag_ref), NOT a walk over every
@@ -142,7 +150,39 @@ std::size_t update_rwr(entities::EntityWorld& world,
         emitters.push_back(EmitterRecord{
             eid.value, tf->position,
             /*is_missile=*/true,
-            false, 0, false, nullptr});
+            false, 0, false, nullptr,
+            /*is_jamming=*/false});
+    }
+    // Jammers (the ECM tranche): every live EcmComponent is an emitter —
+    // the noise its pod puts out reaches receivers inside RWR range. A
+    // corpse stops jamming (the corpse rule every emitter obeys). An
+    // entity that BOTH radars and jams keeps its radar record and gains
+    // the flag (one record per emitter; the model reads the most severe
+    // class). No EcmComponent in the world (the fidelity gate's off
+    // state) → the bucket is empty and this loop costs one index probe.
+    for (const auto& [eid, ecm] :
+         world.with_component_ref<EcmComponent>()) {
+        if (!ecm->enabled) continue;
+        bool seen = false;
+        for (auto& e : emitters) {
+            if (e.id != eid.value) continue;
+            e.is_jamming = true;   // the radar/jammer hybrid
+            seen = true;
+            break;
+        }
+        if (seen) continue;
+        entities::EntityHandle h(eid, &world);
+        const auto* tf = h.get<entities::TransformComponent>();
+        if (tf == nullptr) continue;
+        if (const auto* dmg = h.get<entities::DamageStateComponent>();
+            dmg != nullptr && dmg->killed) {
+            continue;  // corpses don't emit
+        }
+        emitters.push_back(EmitterRecord{
+            eid.value, tf->position,
+            /*is_missile=*/false,
+            false, 0, false, nullptr,
+            /*is_jamming=*/true});
     }
 
     // --- Update every victim's RWR -------------------------------------------
@@ -160,6 +200,7 @@ std::size_t update_rwr(entities::EntityWorld& world,
             r.emitter_id = e.id;
             r.position = e.position;
             r.is_missile = e.is_missile;
+            r.is_jamming_self = e.is_jamming;
 
             if (e.is_locked_on_any && e.locked_target == vid.value) {
                 r.is_locked_on_self = true;   // parked on us: LOCK
@@ -176,7 +217,8 @@ std::size_t update_rwr(entities::EntityWorld& world,
                     r.is_illuminating_self = true;
                 }
             }
-            if (r.is_missile || r.is_locked_on_self || r.is_illuminating_self) {
+            if (r.is_missile || r.is_locked_on_self || r.is_illuminating_self ||
+                r.is_jamming_self) {
                 readings.push_back(r);
             }
         }
@@ -205,8 +247,9 @@ std::size_t update_rwr(entities::EntityWorld& world,
         rwr->new_lock = rwr->lock_active && !lock_was;
         rwr->new_launch = rwr->launch_active && !launch_was;
 
-        // Publish transitions: every Lock/Launch emitter not in the previous
-        // picture of the same type. Search strobes stay component-state.
+        // Publish transitions: every Lock/Launch/Jamming emitter not in the
+        // previous picture of the same type. Search strobes stay
+        // component-state.
         for (const auto& w : rwr->warnings) {
             if (w.type == RwrWarningType::Search) continue;
             const bool known = std::any_of(previous.begin(), previous.end(),

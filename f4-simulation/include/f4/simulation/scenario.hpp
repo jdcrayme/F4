@@ -117,6 +117,11 @@ struct ScenarioAircraft {
     /// own per-aircraft `route` (below); the receiver's route carries a
     /// WP_REFUEL waypoint that arms the receiver's refuel rung.
     bool tanker{false};
+    /// ECM POD (the ECM tranche): this aircraft carries a jammer. Only
+    /// takes effect when the combat block's "ecm" gate is also on (both
+    /// must agree — the gate is the fidelity switch, this field is the
+    /// per-aircraft fit). Default false — the pre-ECM shape.
+    bool ecm{false};
     /// Per-aircraft route (AAR redesign). Empty = use the shared
     /// scenario_.waypoints (the legacy behavior — one route for all
     /// aircraft). When non-empty, this aircraft flies its own route.
@@ -263,6 +268,30 @@ struct CombatConfig {
     /// countermeasures gate's own lesson: data that re-prices fights
     /// lands behind a switch).
     bool pilot_skill_flow{false};
+    /// The passive-sensor fusion (SENSORS_COUNTERMEASURES_PLAN §8): IRST
+    /// + visual components attach to every armed aircraft and the
+    /// detection policy's passive legs answer from their contact books —
+    /// the radar-backed policy gains the passive optical legs (a fighter
+    /// with a dead radar still sees, and fights, what its eye and IRST
+    /// hold). Default FALSE — no passive component attaches, the policy's
+    /// visual verdict never fires, every pre-tranche fight is
+    /// byte-identical.
+    bool passive_sensors{false};
+    /// The ECM tranche (SENSORS_COUNTERMEASURES_PLAN §8): armed aircraft
+    /// flagged "ecm" in the scenario carry an EcmComponent — the radar
+    /// burn-through model degrades every enemy radar's detection range in
+    /// the jammer's beam, and the victim RWRs hear the noise (the
+    /// Jamming warning). Default FALSE — no EcmComponent attaches, no
+    /// scan arithmetic changes, byte-identical. (The campaign arm path
+    /// carries no per-unit ECM data — nobody jams there until a data
+    /// source lands.)
+    bool ecm{false};
+    /// Throttle-driven IR band: the FM's last-flown throttle selects the
+    /// target signature's IR band each tick (AB detent = ir2, mil/high
+    /// dry = ir1, cruise/idle = ir0) instead of the Afterburner default.
+    /// Default FALSE — every target reads the ir1 band the passive
+    /// sensors were authored against, byte-identical.
+    bool throttle_ir_power{false};
     /// Real-data tier (Task 64): path to a SignatureDataLibrary JSON
     /// (sig2json output / the shipped Data/SimData/sigdata.json). Empty
     /// (default) = no library — every aircraft keeps the placeholder

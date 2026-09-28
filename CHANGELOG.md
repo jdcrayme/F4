@@ -5,6 +5,49 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## SENSOR-FUSION-1 — the passive legs answer, the jammer degrades, the throttle picks the band
+
+- **The radar-backed policy gains the passive optical legs** — the
+  SensorFusion DetectionPolicy hook's remaining seats filled:
+  `combat.passive_sensors` attaches an IrstComponent + VisualComponent
+  to every armed aircraft (scenario path AND the campaign arm; the
+  session carries `CampaignSessionOptions::passive_sensors`), and
+  `RadarBackedDetectionPolicy` batch-caches them alongside the radar +
+  RWR (the PERF-1 shape) — the `visual` verdict answers from their
+  contact books. A fighter with a dead radar still sees, and fights,
+  what its eye and IRST hold; the radar verdict stays radar-only (the
+  IRST book cannot fabricate a radar track — a radar missile still
+  needs the radar). No passive component attached = the lookups miss =
+  the pre-fusion verdict, byte for byte. The perf certificate is the
+  ARMED generated small war at the 60x preset with the gate on:
+  `ArmedWarWithPassiveSensorsHoldsThe60xPreset` — zero dilation (the
+  FID-OPT machinery un-collapsed), green, deterministic.
+- **The ECM burn-through** — `combat.ecm` + the per-aircraft `"ecm"`
+  fit (both must agree; no unit-data source exists, so the campaign
+  arm fits nobody) attach an `EcmComponent` (f4-sensors: strength /
+  burn-through range / IFF team / enabled). `RadarSimComponent::
+  perform_scan` resolves the live enemy pods once per scan (friendly
+  never, corpses never, disabled never) to bearing + weight (one-way
+  noise, 1/r², saturating inside the pod's burn-through range); pods
+  in the scan bar toward a candidate sum (capped 0.95) and the
+  detection ramp reads the STRETCHED range `range/(1-W)` — the
+  effective detection range degrades, and closing the range wins
+  through. `update_rwr` hears the jammers: `RwrWarningType::Jamming`
+  (rank Launch < Lock < Jamming < Search; own pod never warns itself;
+  corpses stop; the lock/launch brain flags stay silent for noise;
+  new strobes transition-publish). No `EcmComponent` in the world = an
+  empty-bucket probe and untouched RNG — every pre-ECM fight byte
+  identical.
+- **Throttle-driven ir_power** — `combat.throttle_ir_power` stamps
+  each active aircraft's IR band after update_all from the FM's
+  last-flown throttle (≥1.05 → ir2 Max, ≥0.6 → ir1 Afterburner,
+  below → ir0 Baseline; one tick of latency, deterministic). Gate off
+  = the Afterburner default stands.
+- Suites: f4-sensors (new `test_ecm` 9: the burn-through pins + the
+  Jamming warning), f4-simulation (new `test_sensor_fidelity` 7: the
+  policy legs, the attach gates, the ir_power stamp), the fast war
+  harness +1 certificate — all green.
+
 ## ATO-START-1 — the war starts by planning (and the symbol color rule is mechanical)
 
 - **Why save0-2 never generated ATO missions** — the ground war fires

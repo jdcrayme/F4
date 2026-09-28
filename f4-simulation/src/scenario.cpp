@@ -105,6 +105,7 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
         else if (key == "brain_profile")    a.brain_profile = r.read_string();
         else if (key == "formation")        a.formation = r.read_string();
         else if (key == "tanker")           a.tanker = r.read_bool();
+        else if (key == "ecm")              a.ecm = r.read_bool();
         else if (key == "route") {
             // Per-aircraft route (AAR redesign). Empty = use shared waypoints.
             r.expect('[');
@@ -361,6 +362,13 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 else if (k == "missiles_hold") s.combat.missiles_hold = r.read_bool();
                 else if (k == "guns_hold")     s.combat.guns_hold = r.read_bool();
                 else if (k == "campaign_armed") s.combat.campaign_armed = r.read_bool();
+                // The sensor-fidelity gates (SENSORS_COUNTERMEASURES_PLAN
+                // §8): passive-sensor fusion, ECM, and the throttle-driven
+                // IR band. Unset keys keep the defaults (the golden
+                // identity).
+                else if (k == "passive_sensors") s.combat.passive_sensors = r.read_bool();
+                else if (k == "ecm")             s.combat.ecm = r.read_bool();
+                else if (k == "throttle_ir_power") s.combat.throttle_ir_power = r.read_bool();
                 // Real-data tier (Task 64): the wcd2json weapon export
                 // and the sig2json signature library, plus the
                 // name->stem bindings. Unset keys keep the placeholder

@@ -53,6 +53,7 @@ enum class RwrWarningType {
     Search,
     Lock,
     Launch,
+    Jamming,
 };
 
 struct RwrWarning {
@@ -71,6 +72,7 @@ struct EmitterReading {
     bool is_missile = false;           // missile in flight => Launch
     bool is_locked_on_self = false;    // radar in Track mode on this victim
     bool is_illuminating_self = false; // search beam currently covers victim
+    bool is_jamming_self = false;      // live ECM noise reaching us => Jamming
 };
 
 // ============================================================================
@@ -104,8 +106,8 @@ public:
     /// (world frame); azimuth is tested against `receiver_heading_rad`
     /// when it is finite (relative bearing), and skipped for NaN — the
     /// omni default that matches generic.rwr's 180-degree coverage.
-    /// Sorting: Launch first, then Lock, then Search; ties broken
-    /// by emitter id ascending.
+    /// Sorting: Launch first, then Lock, then Jamming, then Search; ties
+    /// broken by emitter id ascending.
     [[nodiscard]] std::vector<RwrWarning> evaluate(
         const std::vector<EmitterReading>& readings,
         const f4::geo::WorldPosition& own_pos,
@@ -155,10 +157,14 @@ struct RwrWarningMessage {
 ///     produce a Lock reading;
 ///   - radar emitters whose scan volume currently contains the victim and
 ///     whose detection range reaches it produce a Search reading;
-///   - entities tagged ROLE="missile" within RWR range produce Launch.
+///   - entities tagged ROLE="missile" within RWR range produce Launch;
+///   - live EcmComponents within RWR range produce Jamming (the ECM
+///     tranche — the receiver hears the noise; no EcmComponent in the
+///     world = no Jamming readings, the pre-ECM behavior).
 ///
-/// Publishes RwrWarningMessage for NEW lock/launch emitters (not present in
-/// the previous warning list). Returns the number of victims updated.
+/// Publishes RwrWarningMessage for NEW lock/launch/jamming emitters (not
+/// present in the previous warning list). Returns the number of victims
+/// updated.
 std::size_t update_rwr(entities::EntityWorld& world,
                        messaging::MessageBus& bus,
                        double time_s,

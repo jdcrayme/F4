@@ -50,6 +50,8 @@
 #include <f4/sensors/radar_component.hpp>
 #include <f4/sensors/rwr.hpp>
 #include <f4/sensors/signature.hpp>
+#include <f4/sensors/irst_component.hpp>
+#include <f4/sensors/visual_component.hpp>
 
 #include "f4/simulation/scenario.hpp"
 
@@ -114,7 +116,17 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
                            /// identity rule): the dispenser only
                            /// attaches when the scenario turned the
                            /// fidelity on (combat.countermeasures).
-                           bool countermeasures = false);
+                           bool countermeasures = false,
+                           /// The passive-sensor gate (the fusion
+                           /// tranche): the IRST + visual components
+                           /// attach only when the scenario turned the
+                           /// fidelity on (combat.passive_sensors).
+                           bool passive_sensors = false,
+                           /// The ECM gate: the jammer pod attaches only
+                           /// when the scenario turned the fidelity on
+                           /// AND this aircraft opted in (the per-aircraft
+                           /// "ecm" field, ANDed by the caller).
+                           bool ecm = false);
 
 /// SensorFusion::DetectionPolicy backed by the ownship's radar tracks and
 /// RWR picture. This is the M2 integration point (SensorFusion::
@@ -125,8 +137,13 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
 ///   rwr    -> true when the ownship's RWR picture carries any warning
 ///             whose emitter IS the candidate (lock or search strobe —
 ///             both mean "that emitter is painting me").
-///   visual -> false (no eyeball model yet — arrives with the WVR
-///             skill/visual-detection layer).
+///   visual -> the PASSIVE OPTICAL legs (the fusion tranche): true when
+///             the ownship's VisualComponent or IrstComponent holds a
+///             live contact on the candidate — the one TargetInfo source
+///             slot for "seen without emitting", and both passive
+///             sensors fill it. No passive component attached (the
+///             fidelity gate's off state) = the pre-fusion behavior
+///             (visual stays false).
 ///   gci    -> false. THE FLIP: unlike the legacy rules, GCI-omniscience
 ///             is OFF under this policy. The AI sees what its radar and
 ///             RWR see, nothing else. Installing this policy on every
@@ -189,6 +206,8 @@ private:
     // to per-call resolution then.
     sensors::RadarSimComponent* batch_radar_{nullptr};
     sensors::RwrComponent* batch_rwr_{nullptr};
+    sensors::IrstComponent* batch_irst_{nullptr};
+    sensors::VisualComponent* batch_visual_{nullptr};
 };
 
 /// Execute every combat brain's intents against the real hardware, one
@@ -493,6 +512,12 @@ struct CampaignCombatArmament {
     const SignatureContext* signatures = nullptr,
     /// The countermeasure gate (the golden identity rule — see
     /// attach_combat_loadout).
-    bool countermeasures = false);
+    bool countermeasures = false,
+    /// The passive-sensor gate (see attach_combat_loadout).
+    bool passive_sensors = false,
+    /// The ECM gate (see attach_combat_loadout). The campaign arm's
+    /// caller keeps this false — no per-unit ECM data exists; the
+    /// parameter shapes both arm paths identically.
+    bool ecm = false);
 
 } // namespace f4::simulation

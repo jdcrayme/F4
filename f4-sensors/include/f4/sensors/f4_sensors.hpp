@@ -6,7 +6,11 @@
 //   radar_types.hpp    — RadarParameters, ScanVolume, RadarMode, TargetSignature
 //   detection.hpp      — pure detection model (range + probability)
 //   signature.hpp      — SignatureComponent (target RCS)
+//   ecm.hpp            — EcmComponent (the jammer pod, pure state)
 //   track_store.hpp    — TrackFile / TrackStore (quality, decay, IFF, NCTR)
+//   passive_track.hpp  — PassiveTrackStore (the passive sensors' contact book)
+//   irst_component.hpp — IrstComponent (ECS behavioral, priority 45)
+//   visual_component.hpp — VisualComponent (ECS behavioral, priority 45)
 //   radar_component.hpp— RadarSimComponent (ECS behavioral, priority 45)
 //   rwr.hpp            — RWR model + component + world sweep + message
 //   messages.hpp       — radar track acquired/dropped messages
@@ -19,12 +23,16 @@
 #pragma once
 
 #include <f4/sensors/detection.hpp>
+#include <f4/sensors/ecm.hpp>
+#include <f4/sensors/irst_component.hpp>
 #include <f4/sensors/messages.hpp>
+#include <f4/sensors/passive_track.hpp>
 #include <f4/sensors/radar_component.hpp>
 #include <f4/sensors/radar_types.hpp>
 #include <f4/sensors/rwr.hpp>
 #include <f4/sensors/signature.hpp>
 #include <f4/sensors/track_store.hpp>
+#include <f4/sensors/visual_component.hpp>
 
 namespace f4::sensors {
 

@@ -1,8 +1,9 @@
 # IR / VISUAL SENSORS + COUNTERMEASURES PLAN
 
 Status: **As-built** (landed with this patch — every section describes
-shipped code; the open items named at the bottom are the queue, not
-promises).
+shipped code; §8 is the fusion tranche, landed with its gates and its
+perf certificate. §9's queue is empty — the deeper ECM tranche is named
+inline and waits on a data source).
 
 The AI_IMPLEMENTATION_PLAN's named queue item "IR/visual sensor models +
 countermeasures (the data is already in Data/SimData; radar is the
@@ -202,7 +203,7 @@ flying against flares — working as designed, landing as WRONG: a
 fidelity tranche may not silently re-price every existing
 deterministic fight). The gate is the correction.
 
-## 6. Tests (all green; full suite 2,617/2,617)
+## 6. Tests (all green)
 
 - `test_irst_component` — the sqrt law, the ground factor, the knee,
   gimbal gates (az/el), clutter rejection + the A/G switch, hot-vs-cold
@@ -225,6 +226,29 @@ deterministic fight). The gate is the correction.
   does NOT dispense — the intents are threat-driven, not lock-driven),
   the shipped irstdata.json flows through
   `ir_seeker_data_path`, the loud-failure discipline holds.
+- `test_ecm` (the fusion tranche) — the burn-through model (a live
+  enemy pod in the beam blinds the radar; closing the range wins
+  through — the same pod that blinds at 5 NM cannot blind at 1 NM;
+  friendly/corpse/disabled pods and stern-aspect jammers degrade
+  nothing, each pinning the exact pre-ECM track state) and the RWR's
+  Jamming warning (rank order Launch < Lock < Jamming < Search,
+  transition-published exactly once, corpses stop jamming, a victim's
+  own pod never warns itself, the brain-facing lock/launch flags stay
+  silent for noise).
+- `test_sensor_fidelity` (f4-simulation) — the policy's passive legs
+  (a radar-less ownship still classifies its IRST contact visual; the
+  radar-only policy keeps visual false — the pre-fusion identity; the
+  passive books cannot fabricate a radar track), the attach gates
+  (passive components only under `passive_sensors`; the ECM pod needs
+  the gate AND the per-aircraft fit), and the ir_power stamp (gate off
+  = the Afterburner default stands; gate on = the band matches the
+  FM's last-flown throttle through the documented mapping).
+- `CampaignInitWarsFast.ArmedWarWithPassiveSensorsHoldsThe60xPreset` —
+  the fusion tranche's perf certificate: the generated small war,
+  armed (aa_combat), passive sensors on, at the 60x preset — zero
+  dilation (the throughput verdict: if the passive scans or the stamp
+  collapsed the tick, the gate fires), green, deterministic (two runs,
+  identical ledger bytes).
 
 ## 7. Cost shape
 
@@ -235,19 +259,87 @@ missile per tick (decoys are few and short-lived); the sweeps walk
 their component sets between ticks. Nothing rides the hot radar/air-
 picture walks.
 
-## 8. Queue (named, not started)
+## 8. The fusion tranche (the §9 queue, landed)
 
-- **SensorFusion fusion**: fold IRST/visual contacts into the AI's
+Three legs, each behind its own `combat.*` scenario gate (default FALSE
+— the §5 golden-identity discipline; every pinned fight runs the
+defaults and passed byte-identically):
+
+### Passive-sensor fusion — `combat.passive_sensors`
+
+- **The attach**: `attach_combat_loadout` / `arm_campaign_combat` give
+  every armed aircraft an `IrstComponent` + `VisualComponent` (seeded
+  and team-stamped like the radar; inert until consumed — the passive
+  sensors publish nothing). The campaign session carries the gate
+  through `CampaignSessionOptions::passive_sensors`.
+- **The policy legs**: `RadarBackedDetectionPolicy` batch-caches the
+  ownship's passive components alongside the radar + RWR (the PERF-1
+  shape — resolved once per rebuild) and answers the `visual` verdict
+  from their contact books. TargetInfo's source vocabulary has one
+  passive slot; both sensors fill it. No passive component = the
+  lookups miss = the pre-fusion verdict, byte for byte. The radar
+  verdict stays radar-only — the IRST book cannot fabricate a radar
+  track, so a radar missile still needs the radar.
+- **What it buys**: a fighter with a dead radar still sees, and fights,
+  what its eye and IRST hold. The FID-OPT-tuned machinery is untouched
+  — the policy consumes per-ownship state the shared air picture never
+  carries — and the armed war holds the 60x preset with the gate on
+  (the perf certificate).
+
+### ECM / jamming — `combat.ecm` + the per-aircraft `"ecm"` fit
+
+- **`EcmComponent`** (f4-sensors, pure state): `jamming_strength` (1.0
+  = the reference pod), `burn_through_range_nm` (20), `own_team` (IFF),
+  `enabled`. Both must agree — the scenario gate AND the aircraft fit
+  (no unit-data source exists to decide who jams; the campaign arm
+  passes ecm=false, nobody jams in a campaign world until a data source
+  lands).
+- **The burn-through model** (`RadarSimComponent::perform_scan`): per
+  scan, the live ENEMY pods (friendly team never, corpses never,
+  disabled never) resolve to a bearing + weight — one-way noise falls
+  with 1/r², saturating inside the pod's burn-through range. Per
+  candidate, pods within the scan bar's azimuth half-width of the
+  candidate's bearing sum their weights (capped 0.95 — a blanket never
+  fully blinds) and the ramp reads the STRETCHED range
+  `range / (1 - W)`: the effective detection range degrades; closing
+  the range is how the echo wins through. No `EcmComponent` in the
+  world = one empty-bucket probe per scan and zero per-candidate
+  arithmetic — the pre-ECM RNG stream byte for byte.
+- **The RWR hears jammers**: `update_rwr`'s emitter gather gains the
+  live pods (a radar/jammer hybrid keeps one record with both flags) and
+  `RwrWarningType::Jamming` rides the classification (rank Launch <
+  Lock < Jamming < Search; a victim's own pod never warns itself; the
+  brain-facing lock/launch flags stay silent for noise — the strobe is
+  informational). New Jamming emitters transition-publish on the bus,
+  like locks.
+
+### Throttle-driven ir_power — `combat.throttle_ir_power`
+
+- The FM's last-flown throttle selects each active aircraft's IR band
+  after update_all (the IRST scanned this tick with last tick's stamp —
+  one 16 ms tick of latency, deterministic): `>= 1.05` (the AB detent)
+  → ir2 `Max`; `>= 0.6` (mil/high dry) → ir1 `Afterburner`; below →
+  ir0 `Baseline`. Gate off = the Afterburner default every pre-tranche
+  target reads stands untouched.
+
+## 9. Queue (named, not started)
+
+- ~~**SensorFusion fusion**: fold IRST/visual contacts into the AI's
   target list (the radar-backed policy gains passive legs — a fighter
   with a dead radar still fights). Deliberately deferred: the fusion
   + air-picture machinery is FID-OPT-tuned; it gets its own tranche
-  with its own perf certificate.
-- **ECM/jamming**: the radar burn-through model (the RWR hears
-  jammers; the radar's detection range degrades) — the sensor_source
-  hook takes it without API change.
-- **Throttle-driven ir_power**: the FM's power state drives the target's
-  IR band (AB = ir1/ir2, idle = ir0) — the signature component is
-  already shaped for it.
-- **VCD countermeasure counts**: the per-unit chaff/flare counts
+  with its own perf certificate.~~ — LANDED (§8,
+  `combat.passive_sensors`; the perf certificate is the armed 60x
+  war).
+- ~~**ECM/jamming**: the radar burn-through model (the RWR hears
+  jammers; the radar's detection range degrades).~~ — LANDED (§8,
+  `combat.ecm` + the per-aircraft fit). The deeper tranche (per-unit
+  jammer data, the AI's notching response to a Jamming strobe) needs
+  an ECM data source first.
+- ~~**Throttle-driven ir_power**: the FM's power state drives the
+  target's IR band (AB = ir1/ir2, idle = ir0).~~ — LANDED (§8,
+  `combat.throttle_ir_power`).
+- ~~**VCD countermeasure counts**: the per-unit chaff/flare counts
   replace the documented defaults when the unit-data conversion runs
-  (the Tier-3 full-data pass).
+  (the Tier-3 full-data pass).~~ — LANDED with **CAMP-SCALE-1** (the
+  `theater_tables_path` flow — see CAMP_HOST_PLAN.md).

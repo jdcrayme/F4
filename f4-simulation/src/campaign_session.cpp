@@ -82,7 +82,8 @@ std::string session_scenario_json(
         bool tiered,
         const std::filesystem::path& brain_data,
         const std::filesystem::path& theater_tables,
-        bool pilot_skill_flow) {
+        bool pilot_skill_flow,
+        bool passive_sensors) {
     std::ostringstream out;
     out << "{\n";
     out << "  \"name\": \"f4_viewer_campaign_session\",\n";
@@ -127,7 +128,7 @@ std::string session_scenario_json(
         out << "  \"combat\": {\"enabled\": true, \"campaign_armed\": true,"
                " \"bvr_hold\": false, \"missiles_hold\": false,"
                " \"guns_hold\": false";
-        if (!theater_tables.empty() || pilot_skill_flow) {
+        if (!theater_tables.empty() || pilot_skill_flow || passive_sensors) {
             // CAMP-SCALE-1: the converted tables + the pilot-skill gate
             // ride the scenario so the Simulation's bulk spawn path runs
             // the same flows the session's spawn paths run.
@@ -137,6 +138,13 @@ std::string session_scenario_json(
             }
             if (pilot_skill_flow) {
                 out << ", \"pilot_skill_flow\": true";
+            }
+            if (passive_sensors) {
+                // The passive-sensor fusion (the SENSORS_COUNTERMEASURES
+                // plan §8): the armed aircraft carry the IRST + visual
+                // components; the detection policy answers the passive
+                // optical legs from their contact books.
+                out << ", \"passive_sensors\": true";
             }
         }
         out << "},\n";
@@ -397,7 +405,8 @@ CampaignSession::create(const CampaignSessionOptions& opts,
                                          FidelityPolicy::Tiered,
                                      brain_abs,
                                      opts.theater_tables,
-                                     opts.pilot_skill_flow);
+                                     opts.pilot_skill_flow,
+                                     opts.passive_sensors);
         if (!out.good()) {
             return fail("cannot write " + scenario_path.string());
         }
