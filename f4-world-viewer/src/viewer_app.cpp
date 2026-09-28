@@ -723,31 +723,44 @@ void ViewerApp::Impl::reload_symbol_library() {
     status_msg = msg;
 }
 
+// Data/ asset resolution for the name/table loaders: a CWD upward walk
+// (repo root, Build/, or deeper) then the baked checkout source dir —
+// a viewer launched from ANY working directory finds the committed
+// assets. Returns an empty path when nothing exists.
+static std::filesystem::path resolve_data_path(
+    const std::filesystem::path& rel) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path p = rel;
+    if (fs::exists(p, ec)) return p;
+    p = fs::path("..") / rel;
+    if (fs::exists(p, ec)) return p;
+    p = fs::path("..") / ".." / rel;
+    if (fs::exists(p, ec)) return p;
+#ifdef F4_SOURCE_DIR
+    p = fs::path(F4_SOURCE_DIR) / rel;
+    if (fs::exists(p, ec)) return p;
+#endif
+    return {};
+}
+
 // The theater name table: Data/Theater/<theater>/names.json —
 // scripts/export_names.py's rewrite of the install's <theater>.idx +
 // <theater>.wch pair. korea is the repo's one theater; absence is the
 // normal cold path (the asset simply hasn't been exported) and every
-// nameid lookup then falls back to the raw id.
+// nameid lookup then falls back to the raw id. Load results land on
+// stdout — a silent empty table reads as a bug.
 void ViewerApp::Impl::reload_theater_names() {
-    namespace fs = std::filesystem;
     theater_names.clear();
 
-    // Repo-root resolution, identical to reload_symbol_library's: the
-    // viewer may run from the checkout root, from Build/, or deeper.
-    const auto resolve = [](const fs::path& name) {
-        std::error_code ec;
-        fs::path p = name;
-        if (fs::exists(p, ec)) return p;
-        p = fs::path("..") / name;
-        if (fs::exists(p, ec)) return p;
-        p = fs::path("..") / ".." / name;
-        if (fs::exists(p, ec)) return p;
-        return fs::path(name);
-    };
-    const fs::path path =
-        resolve(fs::path("Data") / "Theater" / "korea" / "names.json");
-    std::error_code ec;
-    if (!fs::exists(path, ec)) return;
+    const std::filesystem::path path =
+        resolve_data_path(std::filesystem::path("Data") / "Theater" /
+                          "korea" / "names.json");
+    if (path.empty()) {
+        std::printf("theater names: Data/Theater/korea/names.json not found "
+                    "(nameid lookups fall back to raw ids)\n");
+        return;
+    }
 
     std::ifstream f(path, std::ios::binary);
     if (!f) return;
@@ -756,9 +769,12 @@ void ViewerApp::Impl::reload_theater_names() {
 
     try {
         theater_names = load_theater_names(buf.str());
+        std::printf("theater names: %zu (from %s)\n", theater_names.size(),
+                    path.string().c_str());
     } catch (const std::exception& e) {
         theater_names.clear();
         symbol_load_errors.push_back(std::string("names.json: ") + e.what());
+        std::printf("theater names: LOAD FAILED: %s\n", e.what());
     }
 }
 
@@ -767,38 +783,40 @@ void ViewerApp::Impl::reload_theater_names() {
 // Data/Theater/korea/. Both fail soft: an absent/malformed asset leaves
 // the lookups empty and the inspector keeps its raw ids.
 void ViewerApp::Impl::reload_theater_tables() {
-    namespace fs = std::filesystem;
-    const auto resolve = [](const fs::path& name) {
-        std::error_code ec;
-        fs::path p = name;
-        if (fs::exists(p, ec)) return p;
-        p = fs::path("..") / name;
-        if (fs::exists(p, ec)) return p;
-        p = fs::path("..") / ".." / name;
-        if (fs::exists(p, ec)) return p;
-        return fs::path(name);
-    };
+    class_table = f4::world_types::ClassTable{};
+    theater_tables = f4::world::TheaterTables{};
 
-    std::error_code ec;
-    const fs::path ct_path =
-        resolve(fs::path("Data") / "Classes" / "falcon4.ct.json");
-    if (fs::exists(ct_path, ec)) {
+    const std::filesystem::path ct_path = resolve_data_path(
+        std::filesystem::path("Data") / "Classes" / "falcon4.ct.json");
+    if (!ct_path.empty()) {
         try {
             class_table.load_auto(ct_path.string());
         } catch (const std::exception& e) {
             symbol_load_errors.push_back(
                 std::string("falcon4.ct.json: ") + e.what());
+            std::printf("class table: LOAD FAILED: %s\n", e.what());
         }
     }
 
-    const fs::path tables_path =
-        resolve(fs::path("Data") / "Theater" / "korea" / "tables.json");
-    if (!fs::exists(tables_path, ec)) return;
+    const std::filesystem::path tables_path = resolve_data_path(
+        std::filesystem::path("Data") / "Theater" / "korea" / "tables.json");
+    if (tables_path.empty()) {
+        std::printf("theater tables: Data/Theater/korea/tables.json not "
+                    "found (type lookups stay raw)\n");
+        return;
+    }
     try {
         theater_tables = f4::world::TheaterTables::load(tables_path);
+        std::printf("theater tables: %zu units / %zu vehicles / %zu weapons "
+                    "(from %s)\n",
+                    theater_tables.units.size(),
+                    theater_tables.vehicles.size(),
+                    theater_tables.weapons.size(),
+                    tables_path.string().c_str());
     } catch (const std::exception& e) {
         theater_tables = f4::world::TheaterTables{};
         symbol_load_errors.push_back(std::string("tables.json: ") + e.what());
+        std::printf("theater tables: LOAD FAILED: %s\n", e.what());
     }
 }
 

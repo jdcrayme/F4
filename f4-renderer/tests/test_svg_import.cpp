@@ -241,6 +241,88 @@ TEST(SvgImport, DangerousAttributesFailLoudly) {
     });
 }
 
+TEST(SvgImport, InkscapeResaveImports) {
+    // The exact shape an Inkscape re-save writes: XML declaration,
+    // namespaced root attributes, <defs>, <sodipodi:namedview>,
+    // <metadata>, and shapes whose paint moved into style="" with
+    // non-scaling hairline strokes.
+    const std::string doc =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n"
+        "<svg viewBox=\"-1 -1 2 2\" version=\"1.1\" id=\"svg4\"\n"
+        "   sodipodi:docname=\"test.svg\"\n"
+        "   xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"\n"
+        "   xmlns:sodipodi=\"http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd\"\n"
+        "   xmlns=\"http://www.w3.org/2000/svg\">\n"
+        "  <defs id=\"defs4\" />\n"
+        "  <sodipodi:namedview id=\"nv\" inkscape:zoom=\"256\"/>\n"
+        "  <title>Test</title>\n"
+        "  <path d=\"M -0.5 -0.5 L 0.5 -0.5 L 0.5 0.5 L -0.5 0.5 Z\""
+        " fill=\"currentColor\" data-color-role=\"fill_blend\"/>\n"
+        "  <path"
+        " style=\"vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;"
+        "stroke-width:1;stroke-dasharray:none;stroke-opacity:1;"
+        "-inkscape-stroke:hairline\"\n"
+        "     d=\"M -0.5 -0.5 L 0.5 0.5\""
+        " sodipodi:nodetypes=\"cc\" />\n"
+        "  <metadata><rdf:RDF xmlns:rdf=\"r\"> <cc:Work/> </rdf:RDF></metadata>\n"
+        "</svg>";
+    const SymbolDefinition def = import_symbol_from_svg_string(doc, "inkscape");
+    ASSERT_EQ(def.polygons.size(), 1u);   // the team-colored bar
+    ASSERT_EQ(def.polylines.size(), 1u);  // the white hairline
+    EXPECT_EQ(def.polylines[0].color_role, SymbolColorRole::Outline);
+    // non-scaling-stroke width 1 = one screen px at the 64 px reference.
+    EXPECT_NEAR(def.polylines[0].width, 1.0f, 1e-3);
+}
+
+TEST(SvgImport, StyleAttributeOverridesPresentation) {
+    // CSS precedence: the style attribute wins over the attributes.
+    const SymbolDefinition def = import_symbol_from_svg_string(
+        svg_doc("<path d=\"M -0.5 -0.5 L 0.5 0.5\" fill=\"currentColor\" "
+                "style=\"fill:none;stroke:#ffffff\"/>"),
+        "style_precedence");
+    // fill:none killed the polygon; the stroke survived.
+    EXPECT_TRUE(def.polygons.empty());
+    ASSERT_EQ(def.polylines.size(), 1u);
+    EXPECT_EQ(def.polylines[0].color_role, SymbolColorRole::Outline);
+}
+
+TEST(SvgImport, GrayPaintsMapByLuminance) {
+    // Inkscape's default palette (#333333 fill / #b3b3b3 stroke) maps to
+    // the contrast paints instead of failing the import.
+    const SymbolDefinition def = import_symbol_from_svg_string(
+        svg_doc("<rect x=\"0\" y=\"0\" width=\"1\" height=\"1\" "
+                "style=\"fill:#333333;fill-opacity:1;"
+                "stroke:#b3b3b3;stroke-width:1\"/>"),
+        "grays");
+    ASSERT_EQ(def.polygons.size(), 1u);
+    EXPECT_EQ(def.polygons[0].color_role, SymbolColorRole::Outline);
+    // A stroked FILLED shape keeps the model's built-in contrast outline
+    // (stroke-width on filled shapes is not honored — no polyline).
+    EXPECT_TRUE(def.polylines.empty());
+    // A MID-gray is ambiguous and fails by name.
+    try {
+        (void)import_symbol_from_svg_string(
+            svg_doc("<rect x=\"0\" y=\"0\" width=\"1\" height=\"1\" "
+                    "fill=\"#808080\"/>"),
+            "bad");
+        FAIL() << "expected throw";
+    } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("#808080"), std::string::npos);
+    }
+}
+
+TEST(SvgImport, UnknownStylePropertyFailsByName) {
+    try {
+        (void)import_symbol_from_svg_string(
+            svg_doc("<rect x=\"0\" y=\"0\" width=\"1\" height=\"1\" "
+                    "style=\"blur:2\"/>"),
+            "bad");
+        FAIL() << "expected throw";
+    } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("blur"), std::string::npos);
+    }
+}
+
 TEST(SvgImport, MissingViewBoxFails) {
     try {
         (void)import_symbol_from_svg_string(

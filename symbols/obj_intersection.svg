@@ -1,9 +1,113 @@
-<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
-  <title>Intersection</title>
-  <desc>Plus sign: road intersection</desc>
-  <path d="M -0.25 -0.85 L 0.25 -0.85 L 0.25 0.85 L -0.25 0.85 Z" fill="currentColor" data-color-role="fill_blend" />
-  <path d="M -0.25 -0.85 L 0.25 -0.85 L 0.25 0.85 L -0.25 0.85 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
-  <path d="M -0.85 -0.25 L 0.85 -0.25 L 0.85 0.25 L -0.85 0.25 Z" fill="currentColor" data-color-role="fill_blend" />
-  <path d="M -0.85 -0.25 L 0.85 -0.25 L 0.85 0.25 L -0.85 0.25 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="-1 -1 2 2"
+   version="1.1"
+   id="svg4"
+   sodipodi:docname="obj_intersection.svg"
+   inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <defs
+     id="defs4" />
+  <sodipodi:namedview
+     id="namedview4"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="256"
+     inkscape:cx="0.99804688"
+     inkscape:cy="1.6230469"
+     inkscape:window-width="2560"
+     inkscape:window-height="1377"
+     inkscape:window-x="-8"
+     inkscape:window-y="322"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg4" />
+  <title
+     id="title1">Intersection</title>
+  <desc
+     id="desc1">Plus sign: road intersection</desc>
+  <path
+     d="M -0.25 -0.85 L 0.25 -0.85 L 0.25 0.85 L -0.25 0.85 Z"
+     fill="currentColor"
+     data-color-role="fill_blend"
+     id="path1" />
+  <path
+     d="M -0.85 -0.25 L 0.85 -0.25 L 0.85 0.25 L -0.85 0.25 Z"
+     fill="currentColor"
+     data-color-role="fill_blend"
+     id="path3" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="m -0.85,-0.25 h 0.6 v -0.6 m 0.5,1.7 v -0.6 h 0.6"
+     id="path5"
+     sodipodi:nodetypes="cccccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="M -0.85,0 H -0.7"
+     id="path6"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="m -0.5,0 h 0.15"
+     id="path7"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="m 0.25,-0.85 v 0.6 h 0.6"
+     id="path8"
+     sodipodi:nodetypes="ccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="m -0.85,0.25 h 0.6 v 0.6"
+     id="path9"
+     sodipodi:nodetypes="ccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="M 0.35,0 H 0.5"
+     id="path10"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="M 0.7,0 H 0.85"
+     id="path11"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="M 0,0.85 V 0.7"
+     id="path12"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="M 0,0.35 V 0.5"
+     id="path13"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="M 0,-0.35 V -0.5"
+     id="path14"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="M 0,-0.85 V -0.7"
+     id="path15"
+     sodipodi:nodetypes="cc" />
+  <metadata
+     id="metadata15">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:title>Intersection</dc:title>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
 </svg>

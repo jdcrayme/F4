@@ -5,6 +5,42 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## SVG-TOLERANCE-1 — Inkscape re-saves import, and the name tables load from anywhere
+
+- **Inkscape re-saves killed the symbols** — a round-trip through
+  Inkscape (the authoring workflow's whole point) moved every paint
+  into a CSS `style=""` attribute (`fill:#333333;stroke:#b3b3b3;...`),
+  stamped `vector-effect:non-scaling-stroke` hairlines, wrapped the
+  document in `sodipodi:`/`rdf:` vocabulary and `<defs>` — and the
+  importer failed on all of it (`style` was a named-dangerous
+  attribute; `<defs>`/`<sodipodi:namedview>` were unsupported
+  elements). Now: the style attribute parses with CSS precedence
+  (fill/stroke/stroke-width/fill-rule/opacity/dash identity rules kept,
+  unknown properties fail by name); hex grays map by luminance
+  (near-black → the contrast black, near-light → white, a MID-gray
+  fails as ambiguous); non-scaling-stroke widths read as screen px at
+  the 64 px reference; `<defs>`, `<metadata>`, and any namespaced
+  element skip whole. Verified against the user's actual re-saves:
+  `obj_intersection.svg`/`obj_bridge.svg` import (the export
+  round-trip carries the 14-segment edited geometry, not the corpus's
+  4 paths).
+- **The name/table assets load from any working directory** — the
+  loaders walked up only two levels from the CWD, so a viewer launched
+  from a deeper directory silently ran with empty tables (no names, no
+  types). `resolve_data_path` now adds the baked checkout dir
+  (`F4_SOURCE_DIR`), and both loaders report what they loaded (or why
+  not) on stdout: "theater names: 1631 (from ...)".
+- **Static units gained their names** — the inspector's unit branch
+  never resolved anything: header fell back to "Unit" and no Name row
+  existed. It now shows the unit's instance name (the PropertyBag's
+  `name_id` through the theater table), the CT type name
+  (`resolve_entity_type_name` — "F-16C", "Armor"), and a Type name row;
+  the header prefers class_name → type name → "Unit".
+- f4-renderer 15/15 (svg 20/20 — four new Inkscape-tolerance tests),
+  f4-world 405/405, f4-world-viewer 99/99; headless run from the exe
+  directory (not the repo root) loads both assets and names captures
+  in the Event Log.
+
 ## CT-NAMES-1 — the class table names things (the flights table + inspector speak "F-16C")
 
 - **`Data/Theater/korea/tables.json`** — CAMP-SCALE-1's

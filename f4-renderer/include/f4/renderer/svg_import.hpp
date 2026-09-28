@@ -22,20 +22,33 @@
 //              SVG's black default, for team-colored tactical symbols),
 //              "none" -> outline-only,
 //              "#000000"/"#ffffff"/"black"/"white" -> Outline role.
+//              Editor grays map by luminance: near-black (Inkscape's
+//              #333333 default fill) -> black, near-light (#b3b3b3) ->
+//              white; a mid-gray fails (ambiguous intent).
 //              data-color-role="fill|fill_blend|outline" overrides the
 //              paint-to-role mapping (this is how the exporter round-trips
 //              all three roles).
+//   style:     the CSS `style` ATTRIBUTE parses (editors write fills/
+//              strokes there on re-save): fill/stroke/stroke-width/
+//              fill-rule/fill-opacity/stroke-opacity/stroke-dasharray/
+//              vector-effect with CSS precedence over the presentation
+//              attributes. non-scaling-stroke widths are screen px at
+//              the 64 px reference. Unknown properties fail by name.
 //   stroke:    "none" or any fill value above; stroked outlines become
 //              polylines. Stroked FILLED shapes keep the model's built-in
 //              1px contrast outline (stroke-width on filled shapes is not
 //              honored).
 //   fill-rule: "nonzero" (default) and "evenodd" — for either rule, a
 //              subpath contained inside another becomes a hole.
+//   editor extras: <defs>, <metadata>, and any NAMESPACED element
+//              (Inkscape's <sodipodi:namedview>, RDF license blocks)
+//              skip whole — a re-save through Inkscape imports like
+//              the original.
 //
 // NOT supported — import throws std::runtime_error NAMING the feature:
 //   gradients, patterns, filters, masks, clip-paths, opacity, <style>/
-//   class-based CSS, <text>, <image>, <use>, <defs>, <script>, skewX/
-//   skewY transforms, and any element/attribute outside the list above.
+//   class-based CSS, <text>, <image>, <use>, <script>, skewX/skewY
+//   transforms, and any non-namespaced element outside the list above.
 //   Failing loudly keeps "limited SVG" honest: a symbol that imports is
 //   a symbol that renders.
 //

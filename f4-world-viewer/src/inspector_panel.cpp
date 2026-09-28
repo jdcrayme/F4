@@ -101,6 +101,13 @@ void ViewerApp::draw_inspector_window() {
             auto* uc = h.get<f4::entities::UnitCoreComponent>();
             if (uc && !uc->class_name.empty()) {
                 ImGui::TextUnformatted(uc->class_name.c_str());
+            } else if (uc && uc->class_table_index > 0) {
+                // The CT type name — the UCD/VCD row the unit's class
+                // table entry points into ("F-16C", "Armor", ...).
+                const std::string nm = f4::world::resolve_entity_type_name(
+                    impl_->theater_tables, impl_->class_table,
+                    static_cast<std::uint16_t>(uc->class_table_index));
+                ImGui::TextUnformatted(!nm.empty() ? nm.c_str() : "Unit");
             } else {
                 ImGui::TextUnformatted("Unit");
             }
@@ -337,15 +344,38 @@ void ViewerApp::draw_inspector() {
                     ? impl_->team_name_for_slot(owner) : "(no world)";
                 const char* subtype_str = f4::world_types::unit_subtype_name(
                     uc->domain, uc->unit_subtype);
-                ImGui::Text("Unit");
+                // Display name: the enriched class_name, else the unit's
+                // own nameid through the theater table, else the CT
+                // type name, else "Unit". The TYPE row carries the
+                // UCD/VCD name separately (a vehicle type, not a name).
+                std::string display = uc->class_name;
+                if (display.empty() && pb) {
+                    display = theater_name_for_id(
+                        impl_->theater_names,
+                        static_cast<int>(impl_->pb_int(pb, "name_id", 0)));
+                }
+                const std::string type_name =
+                    uc->class_table_index > 0
+                        ? f4::world::resolve_entity_type_name(
+                              impl_->theater_tables, impl_->class_table,
+                              static_cast<std::uint16_t>(
+                                  uc->class_table_index))
+                        : std::string{};
+                ImGui::TextUnformatted(
+                    !display.empty() ? display.c_str()
+                    : !type_name.empty() ? type_name.c_str()
+                                         : "Unit");
                 ImGui::Separator();
-                if (!uc->class_name.empty()) {
-                    ImGui::Text("Name:      %s", uc->class_name.c_str());
+                if (!display.empty()) {
+                    ImGui::Text("Name:      %s", display.c_str());
+                }
+                if (!type_name.empty()) {
+                    ImGui::Text("Type name: %s", type_name.c_str());
                 }
                 ImGui::Text("Class:     %s (%s)",
                             f4::entities::unit_class_name(uc->unit_class),
                             subtype_str);
-                ImGui::Text("Type:      %d", uc->class_table_index);
+                ImGui::Text("CT row:    %d", uc->class_table_index);
                 ImGui::Text("Subtype:   %d (%s)", uc->unit_subtype, subtype_str);
                 ImGui::Text("Domain:    %d (%s)", uc->domain,
                             f4::viewer::domain_name(uc->domain));

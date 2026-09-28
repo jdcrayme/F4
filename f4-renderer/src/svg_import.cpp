@@ -176,6 +176,34 @@ Xform parse_transform(const char* s) {
 
 enum class Paint { None, Current, Black, White };
 
+// Hex colors map to the subset's paints by luminance: editors (Inkscape)
+// write their default palette — #333333 fills, #b3b3b3 strokes — where
+// the author meant the contrast black/white. Dark → black, light →
+// white; a MID-gray is ambiguous and fails with the convention message.
+// Returns -1.0 on a malformed hex literal.
+double hex_paint_luminance(const char* value) {
+    std::size_t len = std::strlen(value);
+    if (value[0] != '#' || (len != 4 && len != 7)) return -1.0;
+    const std::size_t digits = len == 4 ? 1 : 2;
+    double rgb[3] = {0, 0, 0};
+    for (int ch = 0; ch < 3; ++ch) {
+        double v = 0;
+        for (std::size_t k = 0; k < digits; ++k) {
+            const char c = value[1 + ch * digits + k];
+            int d = c >= '0' && c <= '9'   ? c - '0'
+                    : c >= 'a' && c <= 'f' ? c - 'a' + 10
+                    : c >= 'A' && c <= 'F' ? c - 'A' + 10
+                                           : -1;
+            if (d < 0) return -1.0;
+            v = v * 16 + d;
+        }
+        if (digits == 1) v *= 17;  // #abc == #aabbcc
+        rgb[ch] = v / 255.0;
+    }
+    // Rec. 601 luma — the viewer's own swatch math uses the same shape.
+    return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+}
+
 Paint parse_paint(const char* value, const char* attr) {
     if (std::strcmp(value, "none") == 0) return Paint::None;
     if (std::strcmp(value, "currentColor") == 0) return Paint::Current;
@@ -183,6 +211,14 @@ Paint parse_paint(const char* value, const char* attr) {
         std::strcmp(value, "#000") == 0) return Paint::Black;
     if (std::strcmp(value, "white") == 0 || std::strcmp(value, "#ffffff") == 0 ||
         std::strcmp(value, "#fff") == 0) return Paint::White;
+    const double lum = hex_paint_luminance(value);
+    if (lum >= 0.0) {
+        if (lum < 1.0 / 3.0) return Paint::Black;
+        if (lum > 2.0 / 3.0) return Paint::White;
+        fail(std::string(attr) + "=\"" + value +
+             "\": a mid-gray is neither dark nor light — paint team colors "
+             "with currentColor and contrast with near-black/near-white");
+    }
     fail(std::string(attr) + "=\"" + value +
          "\": only currentColor / none / black / white paints are supported");
 }
@@ -192,16 +228,104 @@ struct Style {
     Paint stroke = Paint::None;
     float stroke_width = 1.0f;      // viewBox units
     bool evenodd = false;
+    bool non_scaling_px = false;    // vector-effect:non-scaling-stroke seen:
+                                    // stroke-width was written in SCREEN px
     std::optional<SymbolColorRole> role_override;  // data-color-role
 };
 
+// The `style` attribute's CSS property list — the shape editors write
+// when the user re-saves a symbol ("fill:#333333;stroke:#b3b3b3;...").
+// Same vocabulary as the presentation attributes; unknown properties
+// fail loudly by name, editor bookkeeping is ignored.
+void apply_style_property(Style& s, const std::string& prop,
+                          const std::string& value) {
+    const auto identity_or_fail = [&](const char* what) {
+        if (value == "1" || value == "none") return;
+        fail("style " + prop + ":" + value + " changes rendering and is " +
+             what);
+    };
+    if (prop == "fill") {
+        if (value != "inherit") s.fill = parse_paint(value.c_str(), "style fill");
+    } else if (prop == "stroke") {
+        if (value != "inherit") s.stroke = parse_paint(value.c_str(), "style stroke");
+    } else if (prop == "stroke-width") {
+        std::string v = value;
+        if (v.size() >= 2 && v.compare(v.size() - 2, 2, "px") == 0) {
+            v.resize(v.size() - 2);  // "1px" — the px unit is the identity
+        }
+        const char* p = v.c_str();
+        const double w = require_number(p, "for style stroke-width");
+        if (w < 0.0) fail("stroke-width must be >= 0");
+        s.stroke_width = s.non_scaling_px
+            ? static_cast<float>(w / (kSymbolReferenceSizePx * 0.5f))
+            : static_cast<float>(w);
+    } else if (prop == "fill-rule") {
+        if (value == "evenodd") s.evenodd = true;
+        else if (value == "nonzero") s.evenodd = false;
+        else fail("style fill-rule:" + value + ": only nonzero/evenodd");
+    } else if (prop == "fill-opacity" || prop == "stroke-opacity") {
+        identity_or_fail("outside the SVG symbol subset (opacity)");
+    } else if (prop == "stroke-dasharray") {
+        identity_or_fail("outside the SVG symbol subset (dashes)");
+    } else if (prop == "vector-effect") {
+        if (value == "non-scaling-stroke") {
+            s.non_scaling_px = true;
+        } else {
+            fail("style vector-effect:" + value +
+                 ": only non-scaling-stroke is supported");
+        }
+    } else if (prop == "-inkscape-stroke") {
+        // Editor display hint (hairline markers) — rendering-inert here.
+    } else {
+        fail("style property '" + prop +
+             "' is outside the SVG symbol subset");
+    }
+}
+
+// The `style` ATTRIBUTE (editors write fills/strokes there) applies with
+// CSS precedence — after the presentation attributes.
+void apply_style_attr(Style& s, const char* text) {
+    // Split "prop:value;prop:value" — then apply vector-effect FIRST so
+    // a following stroke-width reads with the px interpretation.
+    std::vector<std::pair<std::string, std::string>> props;
+    std::istringstream in(text);
+    std::string item;
+    while (std::getline(in, item, ';')) {
+        const auto colon = item.find(':');
+        if (colon == std::string::npos) continue;  // empty / trailing
+        std::string prop = item.substr(0, colon);
+        std::string value = item.substr(colon + 1);
+        const auto trim = [](std::string& str) {
+            const auto first = str.find_first_not_of(" \t");
+            const auto last = str.find_last_not_of(" \t");
+            str = first == std::string::npos
+                      ? std::string{}
+                      : str.substr(first, last - first + 1);
+        };
+        trim(prop);
+        trim(value);
+        if (!prop.empty()) props.emplace_back(std::move(prop), std::move(value));
+    }
+    for (const auto& [prop, value] : props) {
+        if (prop == "vector-effect") apply_style_property(s, prop, value);
+    }
+    for (const auto& [prop, value] : props) {
+        if (prop != "vector-effect") apply_style_property(s, prop, value);
+    }
+}
+
 // Style inheritance down the tree. "inherit" keeps the parent value.
+// The `style` ATTRIBUTE (editors write fills/strokes there) applies with
+// CSS precedence — after the presentation attributes.
 Style inherit_style(const Style& parent, const f4::xml::xml_node& n) {
     Style s = parent;
+    const char* style_attr = nullptr;
     for (f4::xml::xml_attribute a : n.attributes()) {
         const char* name = a.name();
         const char* value = a.value();
-        if (std::strcmp(name, "fill") == 0) {
+        if (std::strcmp(name, "style") == 0) {
+            style_attr = a.value();  // applied below, after the attributes
+        } else if (std::strcmp(name, "fill") == 0) {
             if (std::strcmp(value, "inherit") != 0) s.fill = parse_paint(value, "fill");
         } else if (std::strcmp(name, "stroke") == 0) {
             if (std::strcmp(value, "inherit") != 0) s.stroke = parse_paint(value, "stroke");
@@ -221,6 +345,7 @@ Style inherit_style(const Style& parent, const f4::xml::xml_node& n) {
             else fail(std::string("data-color-role=\"") + value + "\": fill/fill_blend/outline");
         }
     }
+    if (style_attr != nullptr) apply_style_attr(s, style_attr);
     return s;
 }
 
@@ -262,10 +387,11 @@ constexpr std::initializer_list<const char*> kPresentationAttrs = {
 
 // Attributes that change rendering outside the subset. Unknown-but-inert
 // attributes (id, data-*, editor metadata like Inkscape's sodipodi:*) are
-// ignored silently; these fail by name.
+// ignored silently; these fail by name. (The `style` attribute is NOT
+// here — inherit_style parses its property list with CSS precedence.)
 bool is_dangerous_attr(const char* n) {
     return name_in(n, {
-        "filter", "mask", "clip-path", "class", "style",
+        "filter", "mask", "clip-path", "class",
         "marker-start", "marker-mid", "marker-end",
         "xlink:href", "href", "vector-effect",
         "display", "opacity", "fill-opacity", "stroke-opacity",
@@ -821,12 +947,22 @@ void walk(const f4::xml::xml_node& parent, const Style& style, const Xform& xf,
         if (std::strcmp(name, "g") == 0) {
             check_attributes(n, {});
             walk(n, inherit_style(style, n), node_xform(xf, n), sink, meta);
+        } else if (std::strcmp(name, "defs") == 0) {
+            // Never rendered directly (gradients, markers, clip stubs).
+            // Its contents stay outside the symbol subset; the subtree
+            // is skipped whole.
+            continue;
         } else if (std::strcmp(name, "title") == 0) {
             if (meta.display_name.empty()) meta.display_name = n.child_value();
         } else if (std::strcmp(name, "desc") == 0) {
             if (meta.description.empty()) meta.description = n.child_value();
         } else if (std::strcmp(name, "metadata") == 0) {
             continue;  // editor metadata, ignored
+        } else if (std::strchr(name, ':') != nullptr) {
+            // A namespaced extension element — editor tooling vocabulary
+            // (Inkscape's <sodipodi:namedview>, RDF license blocks).
+            // Rendering-inert by definition; the subtree is skipped.
+            continue;
         } else if (std::strcmp(name, "path") == 0) {
             check_attributes(n, {"d"});
             if (!n.attribute("d")) fail("<path> requires a d attribute");

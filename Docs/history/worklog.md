@@ -200,3 +200,49 @@ for the vanilla table — NAMES-1's bounds check covers it if ever).
 Tests: test_theater_tables 5/5 (the new ResolveEntityTypeNameChain
 covers vehicle-self-name, unit→vehicle, unit-class fallback, OOR,
 empty); f4-world 405/405; f4-world-viewer 99/99.
+
+---
+Task ID: SVG-TOLERANCE-1
+Agent: main
+Task: Two user-visible failures after the naming tranches: (1) Inkscape
+re-saves of symbols (obj_intersection.svg, obj_bridge.svg) "no longer
+open", (2) "still no names for units or objectives".
+
+Work Log:
+- Read the user's actual re-saves: paints moved into CSS style=""
+  attributes (fill:#333333 / stroke:#b3b3b3 — Inkscape's default
+  palette), vector-effect:non-scaling-stroke hairlines at
+  stroke-width:1, <defs>/<sodipodi:namedview>/<metadata> blocks,
+  namespaced attributes everywhere. The importer failed on ALL of it:
+  style was in is_dangerous_attr, defs/namedview hit the unsupported-
+  element branch, #333333 wasn't a parseable paint.
+- svg_import.cpp: apply_style_attr parses the style property list with
+  CSS precedence over presentation attributes (two-pass so
+  vector-effect sets the px interpretation before stroke-width reads);
+  parse_paint maps hex colors by Rec.601 luminance (<1/3 black,
+  >2/3 white, mid-gray fails as ambiguous — Inkscape's #333333/#b3b3b3
+  both pass); non-scaling px convert at the kSymbolReferenceSizePx
+  convention (1 px @ 64 px = 0.03125 viewBox units — the exporter's
+  own hairline); defs/metadata/namespaced elements skip whole. Header
+  contract updated. Four new tests (InkscapeResaveImports,
+  StyleAttributeOverridesPresentation, GrayPaintsMapByLuminance,
+  UnknownStylePropertyFailsByName).
+- Verified against the REAL files: --export-symbols round-trip now
+  carries the edited 14-segment geometry (the corpus's was 4 paths) —
+  the overrides apply.
+- Names not showing: the asset loaders resolved Data/ with a 2-level
+  CWD walk — a viewer launched deeper than Build/ silently ran with
+  empty tables. resolve_data_path adds the F4_SOURCE_DIR baked path;
+  both loaders print what they loaded (or why not) to stdout. Verified
+  from the exe directory: "theater names: 1631", "theater tables: 296
+  units / 285 vehicles / 203 weapons".
+- Units never had names wired (the "units" half of the report):
+  the inspector's unit branch now resolves the instance name
+  (PropertyBag name_id through the theater table), the CT type name
+  (resolve_entity_type_name), and shows both plus a Type name row; the
+  header falls back class_name → type name → "Unit".
+
+Tests: f4-renderer 15/15 (svg 20/20), f4-world 405/405,
+f4-world-viewer 99/99; headless 330 s session from the exe directory
+shows the Event Log naming captures (Iksan, Weondang, Chigung-ni...)
+and the flights table type column filled.
