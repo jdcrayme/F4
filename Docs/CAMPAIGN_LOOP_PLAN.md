@@ -645,6 +645,37 @@ follow-up refinement, documented here.
   enrichment block). Wiring `TheaterTables` into the threat map's
   unit source (the campaign bridge already holds the tables) is the
   remaining small step.
+- **GROUND-OPS CRAWL (QC 2026-09-28, instrumented)** — campaign
+  sessions' aircraft taxi for 6-18 minutes, sit 9 more in
+  PrepToTakeRunway, and first liftoff lands at minute 16-19 (a
+  20-minute showcase session: 96/96 in TakeoffState::Taxi at minute
+  5, inAir=0 until minute 15; the same crawl on the kunsan fixture —
+  universal to ground ops, not campaign spawns). The FM's velocity
+  state and its position integration DISAGREE in the ground regime:
+  vcas and ground_speed_fps both read ~19 kts (the controller's
+  equilibrium — target 15 kts, brake margin +5 → throttle 0, brake
+  pulses) while the transform integrates at ~0.2-13 fps. The
+  ground-ops controller (GroundSteering/TakeoffModule) is CORRECT
+  against its feedback; the feedback and the kinematics lie. The fix
+  is an f4-flight-model tranche: the ground-contact regime's
+  velocity-vs-position reconciliation (gear drag, brake force, the
+  integration order that lets velocity persist while the position
+  pins), with the QC catch being the timeline above (a session
+  harness asserting first-liftoff inside the designed taxi window).
+- **MAP FLIGHT DISAPPEARANCE (QC 2026-09-28, open)** — the viewer's
+  campaign map occasionally loses flight glyphs. The FID fold-back is
+  designed (reaggregate_flight_ rolls the LEAD's live position up
+  into the aggregate row, so the handoff keeps the flight visible on
+  the aggregate layer) — but a fold whose aircraft is already gone
+  (reaper-retired, scrubbed) marks the flight DESTROYED
+  (`flights_->mark_destroyed`), and destroyed rows draw on NO layer.
+  Any path that retires a live aircraft outside EntityKilled
+  (aborts, scrub complements, roster churn) can therefore make a
+  flight vanish instead of fold. Needs the user's symptom context
+  (mid-flight vs after combat vs after abort) to pin which retirement
+  path; the QC shape: a session harness sampling every fleet row per
+  minute and asserting no row leaves both layers without a booked
+  loss.
 - **Per-action altitude shaping** (C3): lands with its consumer (the
   fuel tranche) — documented in route_builder.hpp. (Package-shared
   ingress and TOT slotting landed with C4's package composition —
