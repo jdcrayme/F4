@@ -94,6 +94,10 @@ f4_simulation_add_test(test_combat_integration     test_combat_integration.cpp)
 target_compile_definitions(test_combat_integration PRIVATE
     F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
 )
+f4_simulation_add_test(test_sensor_fidelity        test_sensor_fidelity.cpp)
+target_compile_definitions(test_sensor_fidelity PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
 f4_simulation_add_test(test_countermeasure_e2e     test_countermeasure_e2e.cpp)
 target_compile_definitions(test_countermeasure_e2e PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
@@ -164,7 +168,11 @@ add_dependencies(test_campaign_war_harness mission_profiles_fixture)
 # The 24-hour run on the small war is the acceptance gate; medium /
 # large / twinwars pin determinism and the two-war-pair bed.
 f4_simulation_add_test(test_campaign_init_wars test_campaign_init_wars.cpp
-    LABELS slow TIMEOUT 900)  # Tier 3.1: 170 s real-time — run via `ctest -L slow`
+    # Tier 3.1: 170 s real-time on the GCC dev machine — run via
+    # `ctest -L slow`. The MSVC Debug toolchain needs ~26 min for the
+    # two 24-hour passes (measured 1556 s); the cap clears it with
+    # headroom instead of false-timing-out the nightly gate locally.
+    LABELS slow TIMEOUT 2400)
 target_compile_definitions(test_campaign_init_wars PRIVATE
     F4_CAMPINIT_FIXTURES_DIR="${F4_CAMPINIT_FIXTURES_DIR}"
     F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
