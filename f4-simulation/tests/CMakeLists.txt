@@ -94,6 +94,10 @@ f4_simulation_add_test(test_combat_integration     test_combat_integration.cpp)
 target_compile_definitions(test_combat_integration PRIVATE
     F4_SIMULATION_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
 )
+f4_simulation_add_test(test_flight_state_diag      test_flight_state_diag.cpp)
+target_compile_definitions(test_flight_state_diag PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
 f4_simulation_add_test(test_sensor_fidelity        test_sensor_fidelity.cpp)
 target_compile_definitions(test_sensor_fidelity PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"

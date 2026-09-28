@@ -107,8 +107,13 @@ TEST_F(SymbolDrawTest, ViewerMergedLibraryFills) {
     const auto corpus = std::filesystem::path(F4_SYMBOLS_JSON_PATH);
     auto lib = f4::renderer::load_symbol_library(corpus);
     const auto overrides = corpus.parent_path() / "symbols";
-    ASSERT_GT(f4::renderer::merge_symbol_svg_directory(lib, overrides), 0u)
+    std::vector<std::string> merge_errors;
+    ASSERT_GT(f4::renderer::merge_symbol_svg_directory(lib, overrides,
+                                                       &merge_errors), 0u)
         << "the checked-in symbols/ overrides did not merge";
+    for (const auto& e : merge_errors) {
+        ADD_FAILURE() << "symbols/ override failed to import: " << e;
+    }
     const int fills = count_fill_pixels(lib, "obj_city");
     EXPECT_GT(fills, 400)
         << "merged obj_city rendered " << fills
@@ -124,6 +129,35 @@ TEST_F(SymbolDrawTest, LibraryUnitFills) {
     EXPECT_GT(fills, 400)
         << "library unit_fighter rendered " << fills
         << " fill pixels - the frame fill did not rasterize";
+}
+
+// The earcut winding pin (the obj_bridge truss bug): a CONCAVE filled
+// polygon whose ring is wound the culled way must still rasterize.
+// refresh_fill_caches normalizes every cached triangle to the drawable
+// orientation; without it this exact shape rendered zero fill pixels
+// through the merged library while the corpus's convex polys drew fine.
+TEST_F(SymbolDrawTest, ConcaveFillSurvivesAClockwiseRing) {
+    f4::renderer::SymbolLibrary lib;
+    f4::renderer::SymbolDefinition def;
+    def.key = "wind_pin";
+    // The obj_bridge truss ring, wound the culled way (positive
+    // shoelace in screen-space model coords).
+    f4::renderer::SymbolPolygon pg;
+    pg.filled = true;
+    pg.color_role = f4::renderer::SymbolColorRole::Fill;
+    const float xs[] = { 0.75f, 0.55f, -0.55f, -0.75f,
+                         -0.75f, -0.55f, 0.55f, 0.75f };
+    const float ys[] = { -0.40f, -0.20f, -0.20f, -0.40f,
+                         0.40f, 0.20f, 0.20f, 0.40f };
+    for (int i = 0; i < 8; ++i) pg.points.push_back({xs[i], ys[i]});
+    def.polygons.push_back(pg);
+    lib.add_or_replace(def);
+
+    const int fills = count_fill_pixels(lib, "wind_pin");
+    EXPECT_GT(fills, 400)
+        << "a clockwise-ringed concave fill rendered " << fills
+        << " fill pixels - the earcut triangles landed on the culled "
+           "winding (raylib DrawTriangle culls them silently)";
 }
 
 } // namespace

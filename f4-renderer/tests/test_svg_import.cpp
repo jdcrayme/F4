@@ -583,3 +583,70 @@ TEST(SymbolSvgDirectory, MergeOverridesByKeyAndSkipsBroken) {
 }
 
 } // namespace
+
+// ============================================================================
+// The Inkscape re-save regressions (the user's actual working-tree files,
+// reduced to the failing shapes): fills that live ONLY in the `style`
+// attribute, and a style fill that resolved the author's currentColor.
+// ============================================================================
+
+// obj_village.svg path3: the fill exists only as style fill:#000000 (no
+// fill presentation attribute — Inkscape dropped it when the author's
+// currentColor got resolved). The mechanical rule: a fill paints the
+// background whatever paint it carried; the polygon must exist and fill.
+TEST(SvgImportRegress, VillagePath3StyleOnlyFillEmitsAFilledPolygon) {
+    const SymbolDefinition def = import_symbol_from_svg_string(svg_doc(
+        "<path d='M -0.25 0.125 L 0.25 0.125 L 0.25 0.5 L -0.25 0.5 Z' "
+        " style='stroke:none'/>"
+        "<path d='M -0.27 0.125 L 0.27 0.125 L 0 -0.075 Z'"
+        " style='stroke:none;fill:#000000'/>"), "village_regress");
+    ASSERT_EQ(def.polygons.size(), 2u);
+    EXPECT_TRUE(def.polygons[1].filled);
+    EXPECT_EQ(def.polygons[1].color_role, SymbolColorRole::Fill);
+    ASSERT_EQ(def.polygons[1].points.size(), 3u);
+}
+
+// The editor's canvas-display gray: Inkscape stamps a mid-gray into the
+// STYLE attribute on a re-save (the hairline/unset display color). The
+// style attribute is the editor's cascade output, not a paint decision —
+// a mid-gray there resolves to the contrast black (rendering is
+// role-based; the author's presentation attribute said black). A
+// hand-authored mid-gray in the PRESENTATION attributes still fails.
+TEST(SvgImportRegress, StyleAttributeMidGrayResolvesToTheContrast) {
+    // obj_city.svg path2's exact shape: author black stroke, editor
+    // style stamp on top. CSS precedence makes the style win the paint;
+    // the polyline must exist in the Outline role.
+    const SymbolDefinition def = import_symbol_from_svg_string(svg_doc(
+        "<path d='M -0.5 -0.08 H -0.27 v 0.72 h -0.24 z' fill='none'"
+        " stroke='#000000' stroke-width='0.022'"
+        " style='stroke:#808080'/>"), "city_regress");
+    ASSERT_EQ(def.polylines.size(), 1u);
+    EXPECT_EQ(def.polylines[0].color_role, SymbolColorRole::Outline);
+}
+
+// obj_bridge.svg path9: the author's fill="currentColor" +
+// data-color-role="fill_blend" next to an Inkscape style stamp
+// (fill:#000000 resolved out of currentColor; stroke:none; hairline
+// bookkeeping). CSS precedence makes the style fill win the PAINT — but
+// the author's data-color-role must survive it, and the fill must emit.
+// The subpath is OPEN (no Z) — SVG fills it closed.
+TEST(SvgImportRegress, BridgePath9StyleOverriddenFillKeepsRoleAndEmits) {
+    const SymbolDefinition def = import_symbol_from_svg_string(svg_doc(
+        "<path style='fill:#000000;fill-opacity:1;stroke:none;"
+        "stroke-width:1;stroke-dasharray:none'"
+        " d='m 0.75,-0.4 -0.2,0.2 h -1.1 l -0.2,-0.2 v 0.8 l 0.2,-0.2 h 1.1 l 0.2,0.2'"
+        " fill='currentColor'"
+        " data-color-role='fill_blend'"
+        " sodipodi:nodetypes='cccccccc'/>"), "bridge_regress");
+    ASSERT_EQ(def.polygons.size(), 1u);
+    EXPECT_TRUE(def.polygons[0].filled);
+    // The author's role survives the editor's resolved paint: fill_blend
+    // is what the map draws (85% team alpha), not the resolved black.
+    EXPECT_EQ(def.polygons[0].color_role, SymbolColorRole::FillBlend);
+    ASSERT_EQ(def.polygons[0].points.size(), 8u);
+    // And it triangulates (the truss outline is concave).
+    SymbolDefinition cached = def;
+    refresh_fill_caches(cached);
+    EXPECT_FALSE(cached.polygons[0].triangles.empty());
+}
+

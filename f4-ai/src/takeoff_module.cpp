@@ -327,6 +327,9 @@ void TakeoffModule::cache_aircraft_state(const flight::IAircraftState* state)
         state->position_north_ft(),
         state->altitude_msl_ft());
     current_vcas_kts_ = state->vcas_kts();
+    constexpr double kFpsPerKt = 1.6878098571011957;  // 1 knot in ft/s
+    current_ground_speed_kts_ =
+        state->ground_speed_fps() / kFpsPerKt;
     current_alt_agl_ft_ = state->altitude_agl_ft();
     current_alt_msl_ft_ = state->altitude_msl_ft();
     current_heading_rad_ = state->heading_rad();
@@ -342,7 +345,9 @@ GroundSteering::Input TakeoffModule::steering_input() const noexcept {
     GroundSteering::Input in;
     in.position = current_position_;
     in.heading_rad = current_heading_rad_;
-    in.speed_kts = current_vcas_kts_;
+    // The GROUND speed, not vcas (see the member's doc): the controller's
+    // whole job here is wheels-over-ground.
+    in.speed_kts = current_ground_speed_kts_;
     in.heading_rate_radps = current_yaw_rate_radps_;
     return in;
 }

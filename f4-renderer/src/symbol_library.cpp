@@ -661,6 +661,20 @@ bool polygon_is_convex(const std::vector<SymbolPoint>& pts) {
 
 } // namespace
 
+// The drawable triangle orientation. raylib's DrawTriangle requires
+// counter-clockwise vertices and culls the other winding — measured on
+// the canvas: a triangle with POSITIVE shoelace (in these screen-space
+// model coords) draws nothing (the obj_bridge truss override rendered
+// zero fill pixels through this exact bug), negative draws. The convex
+// fan below dodges the same trap by emitting (centroid, next, cur) —
+// the REVERSED ring.
+[[nodiscard]] inline double triangle_shoelace(const SymbolPoint& a,
+                                              const SymbolPoint& b,
+                                              const SymbolPoint& c) noexcept {
+    return static_cast<double>(b.x - a.x) * static_cast<double>(c.y - a.y) -
+           static_cast<double>(c.x - a.x) * static_cast<double>(b.y - a.y);
+}
+
 void refresh_fill_caches(SymbolDefinition& def) {
     for (auto& pg : def.polygons) {
         pg.triangles.clear();
@@ -669,8 +683,12 @@ void refresh_fill_caches(SymbolDefinition& def) {
 
         // earcut consumes tuple-like points (std::get<I>); feed arrays and
         // keep a flat vertex list to map its concatenated ring indices back
-        // to SymbolPoints. Triangles follow the outer ring's winding, so
-        // they render with the same orientation as the convex fan path.
+        // to SymbolPoints. Earcut preserves the OUTER RING's winding — and
+        // a ring authored clockwise (an editor round-trip can flip it)
+        // produces triangles raylib culls wholesale (zero fill pixels, no
+        // error). Every cached triangle is normalized to the drawable
+        // orientation, so a filled polygon draws whatever winding the
+        // author (or their editor) left on the ring.
         std::vector<SymbolPoint> flat;
         std::vector<std::vector<std::array<double, 2>>> loops;
         auto add_loop = [&](const std::vector<SymbolPoint>& loop) {
@@ -692,9 +710,13 @@ void refresh_fill_caches(SymbolDefinition& def) {
             mapbox::earcut<std::uint32_t>(loops);
         pg.triangles.reserve(indices.size() / 3);
         for (std::size_t i = 0; i + 2 < indices.size(); i += 3) {
-            pg.triangles.push_back({ flat[indices[i]],
-                                     flat[indices[i + 1]],
-                                     flat[indices[i + 2]] });
+            std::array<SymbolPoint, 3> t{flat[indices[i]],
+                                         flat[indices[i + 1]],
+                                         flat[indices[i + 2]]};
+            if (triangle_shoelace(t[0], t[1], t[2]) > 0.0) {
+                std::swap(t[1], t[2]);  // to the drawable orientation
+            }
+            pg.triangles.push_back(t);
         }
     }
 }
@@ -837,14 +859,30 @@ void draw_library_symbol(const SymbolLibrary& lib, const std::string& key,
                 // was the first cut here and silently drew NOTHING on the
                 // canvas — its RL_QUADS path never rasterized for these
                 // vertices; explicit triangles are boring and visible.)
+                // The fan emits (centroid, next, cur) — the REVERSED ring.
+                // A ring already wound the other way must NOT reverse, or
+                // the fan lands on the culled orientation (the same trap
+                // the earcut cache normalizes around): pick the emit order
+                // from the ring's own signed area.
                 Vector2 centroid = { 0, 0 };
                 for (const auto& p : pts) { centroid.x += p.x; centroid.y += p.y; }
                 centroid.x /= static_cast<float>(pts.size());
                 centroid.y /= static_cast<float>(pts.size());
+                double ring2 = 0.0;
                 for (std::size_t i = 0; i < pts.size(); ++i) {
                     const Vector2& a = pts[i];
                     const Vector2& b = pts[(i + 1) % pts.size()];
-                    DrawTriangle(centroid, b, a, pc);
+                    ring2 += static_cast<double>(a.x) * static_cast<double>(b.y) -
+                             static_cast<double>(b.x) * static_cast<double>(a.y);
+                }
+                for (std::size_t i = 0; i < pts.size(); ++i) {
+                    const Vector2& a = pts[i];
+                    const Vector2& b = pts[(i + 1) % pts.size()];
+                    if (ring2 > 0.0) {
+                        DrawTriangle(centroid, b, a, pc);
+                    } else {
+                        DrawTriangle(centroid, a, b, pc);
+                    }
                 }
             }
         }

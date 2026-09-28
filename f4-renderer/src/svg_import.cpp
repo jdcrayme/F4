@@ -237,6 +237,22 @@ struct Style {
 // when the user re-saves a symbol ("fill:#333333;stroke:#b3b3b3;...").
 // Same vocabulary as the presentation attributes; unknown properties
 // fail loudly by name, editor bookkeeping is ignored.
+// A paint arriving via the STYLE attribute. The style attribute on a
+// re-save is the editor's cascade output, and a MID-gray there is the
+// canvas-display residue (Inkscape shows a hairline/unset paint as its
+// ~50% gray and stamps #808080 into the style on save) — not a paint
+// decision. It resolves to the contrast black: rendering is role-based
+// (stroke_role sends any non-current stroke to the Outline role), so
+// the resolution only decides which side of the convention the shape
+// lands on, and the author's presentation attribute said black. A
+// hand-authored mid-gray in the PRESENTATION attributes is a real paint
+// choice, stays ambiguous, and fails (the SVG-TOLERANCE-1 rule).
+Paint parse_style_paint(const std::string& value, const char* attr) {
+    const double lum = hex_paint_luminance(value.c_str());
+    if (lum > 1.0 / 3.0 && lum < 2.0 / 3.0) return Paint::Black;
+    return parse_paint(value.c_str(), attr);
+}
+
 void apply_style_property(Style& s, const std::string& prop,
                           const std::string& value) {
     const auto identity_or_fail = [&](const char* what) {
@@ -245,9 +261,13 @@ void apply_style_property(Style& s, const std::string& prop,
              what);
     };
     if (prop == "fill") {
-        if (value != "inherit") s.fill = parse_paint(value.c_str(), "style fill");
+        if (value != "inherit") {
+            s.fill = parse_style_paint(value, "style fill");
+        }
     } else if (prop == "stroke") {
-        if (value != "inherit") s.stroke = parse_paint(value.c_str(), "style stroke");
+        if (value != "inherit") {
+            s.stroke = parse_style_paint(value, "style stroke");
+        }
     } else if (prop == "stroke-width") {
         std::string v = value;
         if (v.size() >= 2 && v.compare(v.size() - 2, 2, "px") == 0) {

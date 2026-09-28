@@ -293,6 +293,15 @@ private:
     // Cached state for control logic (refreshed each update()).
     geo::WorldPosition current_position_;
     double current_vcas_kts_{0.0};
+    /// TRUE horizontal ground speed (the EOM's own xdot/ydot — the same
+    /// source the position integrates). The ground steering's speed
+    /// feedback: on the ground vcas reads HIGH vs the wheels' actual
+    /// speed (the FM's gear dynamics bleed velocity the airspeed
+    /// model doesn't see — measured 19 kts vcas against 2.5-8 kts of
+    /// real displacement), and a controller fed vcas believes it is
+    /// over its target and idles: the aircraft crawls at a coast for
+    /// tens of minutes (the campaign ground-ops crawl, QC-caught).
+    double current_ground_speed_kts_{0.0};
     double current_alt_agl_ft_{0.0};
     double current_alt_msl_ft_{0.0};
     double current_heading_rad_{0.0};
