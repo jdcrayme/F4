@@ -17,9 +17,12 @@
 #
 # After configure:
 #   cmake --build build -j                    # Ninja parallelism is automatic
+#   scripts/test.sh                           # build + EVERYTHING, one command
 #   ctest --test-dir build -LE slow -j4       # the fast iteration tier (~30 s)
 #   ctest --test-dir build -L f4-ai -j4      # one library
 #   ctest --test-dir build -L slow -j1       # the nightly harness tier (serial)
+# (scripts/test.sh wraps build + ctest with the config flag that
+#  multi-config generators need — see its header.)
 set -euo pipefail
 
 BUILD_TYPE="${1:-Debug}"
