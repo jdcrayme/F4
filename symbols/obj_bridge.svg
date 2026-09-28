@@ -24,8 +24,8 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:zoom="256"
-     inkscape:cx="0.99804688"
-     inkscape:cy="0.99804688"
+     inkscape:cx="1.0019531"
+     inkscape:cy="1.0019531"
      inkscape:window-width="2560"
      inkscape:window-height="1377"
      inkscape:window-x="-8"
@@ -39,7 +39,7 @@
   <path
      style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none"
      d="m 0.75,-0.4 -0.2,0.2 h -1.1 l -0.2,-0.2 v 0.8 l 0.2,-0.2 h 1.1 l 0.2,0.2"
-	 fill="currentColor"
+     fill="currentColor"
      data-color-role="fill_blend"
      id="path9"
      sodipodi:nodetypes="cccccccc" />
@@ -68,4 +68,24 @@
       </cc:Work>
     </rdf:RDF>
   </metadata>
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:0.921954;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="m -0.75,0 h 0.1275"
+     id="path6"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:0.921954;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="M -0.4525,0 H -0.325"
+     id="path7-3"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:0.866025;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="M 0.375,0 H 0.4875"
+     id="path10"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#ffffff;stroke-width:0.866025;stroke-dasharray:none;stroke-opacity:1;-inkscape-stroke:hairline"
+     d="M 0.6375,0 H 0.75"
+     id="path11"
+     sodipodi:nodetypes="cc" />
 </svg>

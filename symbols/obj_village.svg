@@ -22,7 +22,7 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:zoom="256"
      inkscape:cx="1.0019531"
-     inkscape:cy="1.6269531"
+     inkscape:cy="1.9394531"
      inkscape:window-width="2560"
      inkscape:window-height="1377"
      inkscape:window-x="-8"
@@ -34,25 +34,27 @@
   <desc
      id="desc1">Single building with peaked roof</desc>
   <path
-     d="M -0.25 0.125 L 0.25 0.125 L 0.25 0.5 L -0.25 0.5 Z"
+     d="m -0.25,0 h 0.5 v 0.375 h -0.5 z"
      id="path1"
      style="stroke:none" />
   <path
-     d="M -0.25 0.125 L 0.25 0.125 L 0.25 0.5 L -0.25 0.5 Z"
+     d="m -0.25,0 h 0.5 v 0.375 h -0.5 z"
      fill="none"
      stroke="#000000"
      stroke-width="0.03125"
      id="path2"
-     style="stroke:#808080;vector-effect:non-scaling-stroke;-inkscape-stroke:hairline;stroke-width:1;stroke-dasharray:none" />
+     style="vector-effect:non-scaling-stroke;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline" />
   <path
-     d="M -0.27 0.125 L 0.27 0.125 L 0 -0.075 Z"
+     d="M -0.3,0 H 0.3 L 0,-0.25 Z"
      id="path3"
-     style="stroke:none;fill:#000000" />
+     style="fill:#000000;stroke:none"
+     sodipodi:nodetypes="cccc" />
   <path
-     d="M -0.27 0.125 L 0.27 0.125 L 0 -0.075 Z"
+     d="M -0.3,0 H 0.3 L 0,-0.25 Z"
      fill="none"
      stroke="#000000"
      stroke-width="0.03125"
      id="path4"
-     style="stroke:#808080;stroke-width:1;stroke-dasharray:none;vector-effect:non-scaling-stroke;-inkscape-stroke:hairline" />
+     style="vector-effect:non-scaling-stroke;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     sodipodi:nodetypes="cccc" />
 </svg>

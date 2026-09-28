@@ -21,8 +21,8 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:zoom="256"
-     inkscape:cx="0.99804688"
-     inkscape:cy="1.3105469"
+     inkscape:cx="1.0019531"
+     inkscape:cy="1.3144531"
      inkscape:window-width="2560"
      inkscape:window-height="1377"
      inkscape:window-x="-8"
@@ -34,42 +34,62 @@
   <desc
      id="desc1">Cluster of 3 buildings of varying heights</desc>
   <path
-     d="m -0.5,-0.075 h 0.234375 v 0.7 H -0.5 Z"
-     fill="currentColor"
-     data-color-role="fill_blend"
-     id="path1"
-     style="stroke:none;stroke-width:0.684653" />
+     style="vector-effect:non-scaling-stroke;fill:#000000;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline;stroke:none"
+     d="M 0.0262295,0.14321209 0.026,-0.15286868 v -0.13697508 h 0.3880625 v 0.78984375 h -0.062833 v -0.1692879 h 0.05 l -0.3,-0.25 z"
+     id="path4-4"
+     sodipodi:nodetypes="cccccccccc" />
   <path
-     d="M -0.50858076,-0.08358076 H -0.265625 v 0.71716152 h -0.24295576 z"
-     fill="none"
-     stroke="#000000"
-     stroke-width="0.022049"
-     id="path2"
-     style="stroke:#808080" />
+     d="m -0.1987705,0.33071209 h 0.6 l -0.3,-0.25 z"
+     id="path3-7"
+     style="vector-effect:non-scaling-stroke;fill:#000000;stroke:none;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     sodipodi:nodetypes="cccc" />
   <path
-     d="m 0.25,-0.225 h 0.275 v 0.75 H 0.25 Z"
-     fill="currentColor"
-     data-color-role="fill_blend"
-     id="path3"
-     style="stroke:none;stroke-width:0.741619" />
-  <path
-     d="M 0.2614944,-0.2291306 H 0.5291306 V 0.5291306 H 0.2614944 Z"
-     fill="none"
-     stroke="#000000"
-     stroke-width="0.0229888"
-     id="path4"
-     style="fill:none;stroke:#808080" />
-  <path
-     d="M -0.25 -0.475 L 0.25 -0.475 L 0.25 0.675 L -0.25 0.675 Z"
-     fill="currentColor"
-     data-color-role="fill_blend"
-     id="path5"
-     style="stroke:none" />
-  <path
-     d="M -0.25 -0.475 L 0.25 -0.475 L 0.25 0.675 L -0.25 0.675 Z"
+     d="m -0.1487705,0.33071209 h 0.5 v 0.375 h -0.5 z"
      fill="none"
      stroke="#000000"
      stroke-width="0.03125"
-     id="path6"
-     style="stroke:#666666" />
+     id="path2-7"
+     style="vector-effect:non-scaling-stroke;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline" />
+  <path
+     d="m -0.1487705,0.33071209 h 0.5 v 0.375 h -0.5 z"
+     fill="none"
+     stroke="#000000"
+     stroke-width="0.03125"
+     id="path2-2"
+     style="vector-effect:non-scaling-stroke;fill:#000000;stroke:none;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:#000000;stroke:none;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     d="m -0.266,0.5 h 0.1172295 V 0.33071209 h -0.05 L 0.026,0.143212 v -0.29608067 h -0.292 z"
+     id="path2-6-6"
+     sodipodi:nodetypes="cccccccc" />
+  <path
+     d="m -0.1987705,0.33071209 h 0.6 l -0.3,-0.25 z"
+     id="path3"
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     sodipodi:nodetypes="cccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     d="m -0.266,0.5 h 0.1172295 V 0.33071209 h -0.05 L 0.026,0.143212 v -0.29608067 h -0.292 z"
+     id="path2"
+     sodipodi:nodetypes="cccccccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     d="m -0.266,0.5 h 0.1172295 V 0.33071209 h -0.05 L 0.026,0.143212 v -0.29608067 h -0.292 z"
+     id="path2-6"
+     sodipodi:nodetypes="cccccccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     d="M 0.1,-0.15 V -0.1"
+     id="path5"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     d="m 0.25,-0.0625 v 0.05"
+     id="path5-3"
+     sodipodi:nodetypes="cc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     d="m -0.16796875,-0.05078125 v 0.05"
+     id="path5-2"
+     sodipodi:nodetypes="cc" />
 </svg>

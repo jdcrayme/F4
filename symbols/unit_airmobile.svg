@@ -1,12 +1,71 @@
-<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
-  <title>Airmobile</title>
-  <desc>Battalion + helicopter silhouette</desc>
-  <path d="M -1 -0.75 L 1 -0.75 L 1 0.75 L -1 0.75 Z" fill="currentColor" data-color-role="fill_blend" />
-  <path d="M -1 -0.75 L 1 -0.75 L 1 0.75 L -1 0.75 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
-  <path d="M 0.2 0.1 L 0.141421 0.241421 L 1.22465e-17 0.3 L -0.141421 0.241421 L -0.2 0.1 L -0.141421 -0.0414214 L -3.67394e-17 -0.1 L 0.141421 -0.0414214 Z" fill="#000000" data-color-role="outline" />
-  <path d="M 0 -1.5 L 0 -1" fill="none" stroke="#000000" stroke-width="0.046875" />
-  <path d="M -0.45 -0.3 L 0.45 -0.3" fill="none" stroke="#000000" stroke-width="0.046875" />
-  <path d="M 0 -0.3 L 0 -0.05" fill="none" stroke="#000000" stroke-width="0.046875" />
-  <path d="M 0 0.3 L 0.3 0.45" fill="none" stroke="#000000" stroke-width="0.046875" />
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="-1 -1 2 2"
+   version="1.1"
+   id="svg7"
+   sodipodi:docname="unit_airmobile.svg"
+   inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs7" />
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="256"
+     inkscape:cx="0.99804688"
+     inkscape:cy="0.99804688"
+     inkscape:window-width="2560"
+     inkscape:window-height="1377"
+     inkscape:window-x="-8"
+     inkscape:window-y="322"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg7" />
+  <title
+     id="title1">Airmobile</title>
+  <desc
+     id="desc1">Battalion + helicopter silhouette</desc>
+  <path
+     d="M -1 -0.75 L 1 -0.75 L 1 0.75 L -1 0.75 Z"
+     fill="currentColor"
+     data-color-role="fill_blend"
+     id="path1"
+     style="stroke:none" />
+  <path
+     d="M -1 -0.75 L 1 -0.75 L 1 0.75 L -1 0.75 Z"
+     fill="none"
+     stroke="#000000"
+     stroke-width="0.03125"
+     id="path2"
+     style="stroke:#808080;vector-effect:non-scaling-stroke;-inkscape-stroke:hairline;stroke-width:1;stroke-dasharray:none" />
+  <path
+     d="M 0 -1.5 L 0 -1"
+     fill="none"
+     stroke="#000000"
+     stroke-width="0.046875"
+     id="path4"
+     style="stroke:#808080;vector-effect:non-scaling-stroke;-inkscape-stroke:hairline;stroke-width:1;stroke-dasharray:none" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     d="m 0,0.54955061 -0.4,-0.75 h 0.8 z"
+     id="path8"
+     sodipodi:nodetypes="cccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     d="m 0,0.54955061 -0.2,-0.75 h 0.4 z"
+     id="path9"
+     sodipodi:nodetypes="cccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline"
+     d="m -0.4,-0.20044939 c 0,0 -0.001263,-0.41221286 0.40390625,-0.40546875 C 0.37821184,-0.59968776 0.4,-0.20044939 0.4,-0.20044939 Z"
+     id="path10"
+     sodipodi:nodetypes="cscc" />
 </svg>

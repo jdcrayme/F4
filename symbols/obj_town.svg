@@ -1,17 +1,78 @@
-<?xml version="1.0"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 2 2">
-  <title>Town</title>
-  <desc>3 buildings with peaked roofs</desc>
-  <path d="M -0.5 -0.075 L 0 -0.075 L 0 0.3 L -0.5 0.3 Z" fill="currentColor" data-color-role="fill_blend" />
-  <path d="M -0.5 -0.075 L 0 -0.075 L 0 0.3 L -0.5 0.3 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
-  <path d="M -0.52 -0.075 L 0.02 -0.075 L -0.25 -0.275 Z" fill="currentColor" data-color-role="fill_blend" />
-  <path d="M -0.52 -0.075 L 0.02 -0.075 L -0.25 -0.275 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
-  <path d="M 0 -0.225 L 0.5 -0.225 L 0.5 0.15 L 0 0.15 Z" fill="currentColor" data-color-role="fill_blend" />
-  <path d="M 0 -0.225 L 0.5 -0.225 L 0.5 0.15 L 0 0.15 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
-  <path d="M -0.02 -0.225 L 0.52 -0.225 L 0.25 -0.425 Z" fill="currentColor" data-color-role="fill_blend" />
-  <path d="M -0.02 -0.225 L 0.52 -0.225 L 0.25 -0.425 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
-  <path d="M -0.25 0.125 L 0.25 0.125 L 0.25 0.5 L -0.25 0.5 Z" fill="currentColor" data-color-role="fill_blend" />
-  <path d="M -0.25 0.125 L 0.25 0.125 L 0.25 0.5 L -0.25 0.5 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
-  <path d="M -0.27 0.125 L 0.27 0.125 L 0 -0.075 Z" fill="currentColor" data-color-role="fill_blend" />
-  <path d="M -0.27 0.125 L 0.27 0.125 L 0 -0.075 Z" fill="none" stroke="#000000" stroke-width="0.03125" />
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="-1 -1 2 2"
+   version="1.1"
+   id="svg12"
+   sodipodi:docname="obj_town.svg"
+   inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs12" />
+  <sodipodi:namedview
+     id="namedview12"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="256"
+     inkscape:cx="0.95898438"
+     inkscape:cy="0.77148438"
+     inkscape:window-width="2560"
+     inkscape:window-height="1377"
+     inkscape:window-x="-8"
+     inkscape:window-y="322"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg12" />
+  <title
+     id="title1">Town</title>
+  <desc
+     id="desc1">3 buildings with peaked roofs</desc>
+  <path
+     style="vector-effect:non-scaling-stroke;fill:#000000;stroke:none;-inkscape-stroke:hairline;stroke-width:1;stroke-dasharray:none"
+     d="m 0.2168545,-0.06928791 h 0.25 V 0.3 H 0.25 V 0 H 0.3 Z"
+     id="path13-4"
+     sodipodi:nodetypes="ccccccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:#000000;stroke:none;-inkscape-stroke:hairline;stroke-width:1;stroke-dasharray:none"
+     d="m 0.0668545,-0.19428791 0.15,-0.125 0.3,0.25 h -0.3 z"
+     id="path14-1" />
+  <path
+     d="M -0.3,0 H 0.3 L 0,-0.25 Z"
+     id="path3-7"
+     style="fill:#000000;stroke:none;vector-effect:non-scaling-stroke;-inkscape-stroke:hairline;stroke-width:1;stroke-dasharray:none"
+     sodipodi:nodetypes="cccc" />
+  <path
+     d="m -0.25,0 h 0.5 v 0.375 h -0.5 z"
+     fill="none"
+     stroke="#000000"
+     stroke-width="0.03125"
+     id="path2-2"
+     style="vector-effect:non-scaling-stroke;stroke:none;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline;fill:#000000" />
+  <path
+     d="m -0.25,0 h 0.5 v 0.375 h -0.5 z"
+     fill="none"
+     stroke="#000000"
+     stroke-width="0.03125"
+     id="path2"
+     style="vector-effect:non-scaling-stroke;stroke:#808080;stroke-width:1;stroke-dasharray:none;-inkscape-stroke:hairline" />
+  <path
+     d="M -0.3,0 H 0.3 L 0,-0.25 Z"
+     id="path3"
+     style="fill:none;stroke:#808080;vector-effect:non-scaling-stroke;-inkscape-stroke:hairline;stroke-width:1;stroke-dasharray:none"
+     sodipodi:nodetypes="cccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;-inkscape-stroke:hairline;stroke-width:1;stroke-dasharray:none"
+     d="m 0.2168545,-0.06928791 h 0.25 V 0.3 H 0.25 V 0 H 0.3 Z"
+     id="path13"
+     sodipodi:nodetypes="ccccccc" />
+  <path
+     style="vector-effect:non-scaling-stroke;fill:none;stroke:#808080;-inkscape-stroke:hairline;stroke-width:1;stroke-dasharray:none"
+     d="m 0.0668545,-0.19428791 0.15,-0.125 0.3,0.25 h -0.3 z"
+     id="path14" />
 </svg>
