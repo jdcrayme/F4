@@ -5,6 +5,23 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## THREAT-TABLES-1 — the converted UCD paints the threat map
+
+- **The C3 threat-map coverage gap closes with the data CAMP-SCALE-1
+  already exported** — `ThreatMap` takes an optional `TablesContext`
+  (the converted `TheaterTables` + the runtime ClassTable): a
+  battalion whose world-JSON threat enrichment is all-zero (every
+  committed campaign world) resolves its entity type through the CT's
+  data pointer to its UCD row, and the full theater's air-defense
+  rings paint with no world re-conversion. A unit WITH enrichment
+  keeps it; no context (the tests' bare worlds) is byte-identical.
+  The campaign session wires the context from the sim's
+  `theater_tables_path` load (the route planner's threat map, the
+  ATM's SEAD pairing, and the viewer's FLOT all read the same map).
+  Pinned by test_threat_map's TablesFallback pair (fallback paints
+  against the REAL falcon4.ct fixture; the unit's own enrichment
+  wins over the table's row).
+
 ## SENSOR-FUSION-1 — the passive legs answer, the jammer degrades, the throttle picks the band
 
 - **The radar-backed policy gains the passive optical legs** — the

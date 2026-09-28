@@ -40,6 +40,9 @@ target_compile_definitions(test_result_ledger PRIVATE
 # C3 — the route tranche: threat map (ScoreThreatFast port), the grid
 # A* (asearch port), and the route builder (BuildPathToTarget port).
 f4_campaign_add_test(test_threat_map      test_threat_map.cpp)
+target_compile_definitions(test_threat_map PRIVATE
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+)
 f4_campaign_add_test(test_path_finder     test_path_finder.cpp)
 f4_campaign_add_test(test_route_builder   test_route_builder.cpp)
 

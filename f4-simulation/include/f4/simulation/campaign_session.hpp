@@ -1185,6 +1185,12 @@ private:
     // Display snapshot.
     Stats stats_;
     std::uint8_t threat_viewer_ = 0;
+    /// The threat map's UCD fallback (the CAMP-SCALE-1 tables + the
+    /// ClassTable, when the sim loaded them): battalions whose world
+    /// JSON carries no per-unit threat enrichment paint their UCD row.
+    /// Outlives the RouteBuilder (which copies the pointers into its
+    /// ThreatMap at construction).
+    f4::campaign::ThreatMap::TablesContext threat_tables_ctx_{};
 };
 
 } // namespace f4::simulation

@@ -307,7 +307,8 @@ public:
                  const f4::world::IUnitCoreSource& units,
                  const f4::world::ITeamSource& teams,
                  std::uint8_t viewer,
-                 RouteBuilderConfig cfg = {});
+                 RouteBuilderConfig cfg = {},
+                 const ThreatMap::TablesContext* tables_ctx = nullptr);
 
     /// Build the route for one mission.
     /// \param team        the flying team (RoE/threat perspective)

@@ -698,6 +698,19 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         viewer = static_cast<std::uint8_t>(war.front());
     }
     session->threat_viewer_ = viewer;
+    // The threat map's UCD fallback: the sim's converted tables (loaded
+    // from the theater_tables_path when the host configured one) + the
+    // ClassTable resolve a battalion's entity type to its UCD threat
+    // row when the world JSON's per-unit enrichment is absent.
+    {
+        session->threat_tables_ctx_.tables = session->sim_->theater_tables();
+        session->threat_tables_ctx_.ct = &session->sim_->class_table();
+        if (session->threat_tables_ctx_.tables == nullptr ||
+            !session->threat_tables_ctx_.tables->loaded() ||
+            !session->threat_tables_ctx_.ct->loaded()) {
+            session->threat_tables_ctx_ = {};
+        }
+    }
     f4::campaign::RouteBuilderConfig route_cfg;
     route_cfg.min_avoid_threat = 25;
     // P7: the loiter racetracks ride the strategy arm (one source of
@@ -714,7 +727,9 @@ CampaignSession::create(const CampaignSessionOptions& opts,
             session->adapters_->units),
         static_cast<const f4::world::ITeamSource&>(
             session->adapters_->teams),
-        viewer, route_cfg);
+        viewer, route_cfg,
+        session->threat_tables_ctx_.tables != nullptr
+            ? &session->threat_tables_ctx_ : nullptr);
     session->ladder_->set_route_planner(
         session->route_builder_.get(),
         &static_cast<const f4::world::IObjectiveSource&>(

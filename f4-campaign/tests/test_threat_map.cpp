@@ -11,10 +11,12 @@
 
 #include <f4/campaign/threat_map.hpp>
 #include <f4/world/world_adapters.hpp>
+#include <f4/world_types/class_table.hpp>
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <filesystem>
 
 using namespace f4::campaign;
 using f4::entities::UnitClass;
@@ -226,4 +228,113 @@ TEST(ThreatMap, AltBandFromFeetBoundaries) {
     EXPECT_EQ(alt_band_from_feet(39999), AltBand::High);
     EXPECT_EQ(alt_band_from_feet(40000), AltBand::VeryHigh);
     EXPECT_EQ(alt_band_from_feet(30000), AltBand::High);
+}
+
+// ============================================================================
+// The UCD fallback (the TablesContext): a battalion whose world JSON
+// carries no per-unit threat enrichment reads its entity type's UCD row
+// out of the converted theater tables — the full theater's air-defense
+// picture paints with no world re-conversion.
+// ============================================================================
+
+namespace {
+
+/// The first UNIT-typed entity in the real class table (the CT's own
+/// data pointer indexes the UCD), or 0 when the fixture is absent.
+uint16_t find_unit_entity_type(const f4::world_types::ClassTable& ct) {
+    for (uint16_t t = 1; t < 1000; ++t) {
+        uint8_t dtype = 0;
+        uint32_t ptr = 0;
+        if (ct.data_ptr_for(t, dtype, ptr) &&
+            dtype == static_cast<uint8_t>(f4::world_types::DTYPE_UNIT)) {
+            return t;
+        }
+    }
+    return 0;
+}
+
+} // namespace
+
+TEST(ThreatMap, TablesFallbackPaintsAnUnenrichedBattalion) {
+    const auto ct_path = std::filesystem::path(F4_SOURCE_FIXTURES_DIR) /
+                         "falcon4.ct.json";
+    if (!std::filesystem::exists(ct_path)) {
+        GTEST_SKIP() << "falcon4.ct.json fixture not present";
+    }
+    f4::world_types::ClassTable ct;
+    ct.load_json(ct_path);
+    const uint16_t unit_type = find_unit_entity_type(ct);
+    ASSERT_NE(unit_type, 0) << "no UNIT-typed entity in the fixture CT";
+
+    // The UCD row AT the CT's data pointer (unit_at indexes by position).
+    uint8_t dtype = 0;
+    uint32_t ptr = 0;
+    (void)ct.data_ptr_for(unit_type, dtype, ptr);
+
+    // The world: the standard AD battalion, ZERO enrichment, typed.
+    auto ws = make_world();
+    ws.units[0].unit_hit_chance.fill(0);
+    ws.units[0].unit_weapon_range.fill(0);
+    ws.units[0].entity_type = unit_type;
+    f4::world::WorldStateAdapters adapters(ws);
+
+    // The tables: the row AT `ptr` carries the threat model.
+    std::string tables_json = "{\"units\":[";
+    for (uint32_t i = 0; i < ptr; ++i) tables_json += "{\"index\":0},";
+    tables_json += "{\"index\":" + std::to_string(ptr) +
+                   ",\"name\":\"T\",\"hit_chance\":[0,0,0,0,60,55,0,0],"
+                   "\"range\":[0,0,0,0,24,42,0,0]}]}";
+    const auto tables = f4::world::TheaterTables::parse(tables_json);
+
+    // No context: the bare world paints nothing (the pre-tables shape).
+    {
+        const ThreatMap map(adapters.objectives, adapters.units,
+                            adapters.teams, /*viewer=*/1);
+        EXPECT_EQ(map.stats().ad_units, 0);
+    }
+    // With the context: the UCD row paints the rings.
+    {
+        const ThreatMap::TablesContext ctx{&tables, &ct};
+        const ThreatMap map(adapters.objectives, adapters.units,
+                            adapters.teams, /*viewer=*/1, &ctx);
+        EXPECT_EQ(map.stats().ad_units, 1);
+        EXPECT_EQ(map.low_band_density(300, 300, 1), 1);
+        EXPECT_EQ(map.high_band_density(300, 300, 1), 1);
+    }
+}
+
+TEST(ThreatMap, TablesFallbackKeepsTheUnitsOwnEnrichment) {
+    const auto ct_path = std::filesystem::path(F4_SOURCE_FIXTURES_DIR) /
+                         "falcon4.ct.json";
+    if (!std::filesystem::exists(ct_path)) {
+        GTEST_SKIP() << "falcon4.ct.json fixture not present";
+    }
+    f4::world_types::ClassTable ct;
+    ct.load_json(ct_path);
+    const uint16_t unit_type = find_unit_entity_type(ct);
+    ASSERT_NE(unit_type, 0);
+
+    // The unit keeps its OWN enrichment (hit 30/25 — NOT the table's
+    // 60/55): the context must not overwrite a painted unit.
+    auto ws = make_world();
+    ws.units[0].unit_hit_chance = {0, 0, 0, 0, 30, 25, 0, 0};
+    ws.units[0].entity_type = unit_type;
+    f4::world::WorldStateAdapters adapters(ws);
+
+    // The tables' row (position 0 — ptr may or may not be 0; either way
+    // a DIFFERENT model than the unit's own).
+    const auto tables = f4::world::TheaterTables::parse(
+        "{\"units\":[{\"index\":0,\"name\":\"T\","
+        "\"hit_chance\":[0,0,0,0,60,55,0,0],"
+        "\"range\":[0,0,0,0,24,42,0,0]}]}");
+
+    const ThreatMap::TablesContext ctx{&tables, &ct};
+    const ThreatMap map(adapters.objectives, adapters.units,
+                        adapters.teams, /*viewer=*/1, &ctx);
+    ASSERT_EQ(map.stats().ad_units, 1);
+    // The unit's own 24-grid low ring paints exactly one cell at
+    // (300,300) — a 42-grid table ring would reach the neighbors.
+    EXPECT_EQ(map.low_band_density(300, 300, 1), 1);
+    EXPECT_EQ(map.low_band_density(300 + 30, 300, 1), 0)
+        << "the table's 42-grid ring leaked over the unit's own 24";
 }

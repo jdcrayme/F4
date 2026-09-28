@@ -635,16 +635,19 @@ follow-up refinement, documented here.
   objectives' fstatus bitmaps: destroyed features file CAS, ≥25%
   damage adds the garrison BARCAP station, a war enemy objective files
   SEADSTRIKE — see CAMP_HOST_PLAN.md §8).
-- **Threat-map coverage** (C3): only AD battalions whose entity
-  types resolve into the theater DB's UCD paint. The full theater's
-  UCD (296 rows) exported with **CAMP-SCALE-1**
-  (`Data/Theater/korea/tables.json` + the runtime `TheaterTables`
-  reader), but the map still feeds from the world JSON's per-unit
-  `unit_hit_chance`/`unit_weapon_range` enrichment — which the
-  committed campaign worlds do not carry (showcase.world.json has no
-  enrichment block). Wiring `TheaterTables` into the threat map's
-  unit source (the campaign bridge already holds the tables) is the
-  remaining small step.
+- ~~**Threat-map coverage** (C3): only AD battalions whose entity
+  types resolve into the theater DB's UCD paint — the full theater's
+  UCD exported with CAMP-SCALE-1, but the map fed from the world
+  JSON's per-unit enrichment, which the committed worlds do not
+  carry.~~ — LANDED (the UCD fallback): `ThreatMap` takes an optional
+  `TablesContext` (the converted `TheaterTables` + the runtime
+  ClassTable — the session wires it from the sim's
+  `theater_tables_path` load); a battalion whose enrichment is
+  all-zero reads its entity type's UCD row, so the converted tables'
+  air-defense picture paints with no world re-conversion, and a unit
+  WITH enrichment keeps it. The campaign session and the QC's
+  harness path pass the context; pinned by test_threat_map's
+  TablesFallback pair.
 - **GROUND-OPS CRAWL (QC 2026-09-28, instrumented)** — campaign
   sessions' aircraft taxi for 6-18 minutes, sit 9 more in
   PrepToTakeRunway, and first liftoff lands at minute 16-19 (a

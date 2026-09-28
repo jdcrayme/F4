@@ -91,11 +91,12 @@ RouteBuilder::RouteBuilder(const f4::world::IObjectiveSource& objectives,
                            const f4::world::IUnitCoreSource& units,
                            const f4::world::ITeamSource& teams,
                            std::uint8_t viewer,
-                           RouteBuilderConfig cfg)
+                           RouteBuilderConfig cfg,
+                           const ThreatMap::TablesContext* tables_ctx)
     : objectives_(&objectives),
       units_(&units),
       cfg_(cfg),
-      map_(objectives, units, teams, viewer),
+      map_(objectives, units, teams, viewer, tables_ctx),
       finder_(map_, viewer) {}
 
 std::optional<std::pair<int, int>>

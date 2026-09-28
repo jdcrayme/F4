@@ -79,6 +79,8 @@
 #pragma once
 
 #include <f4/world/data_source.hpp>
+#include <f4/world/theater_tables.hpp>
+#include <f4/world_types/class_table.hpp>
 
 #include <array>
 #include <cstdint>
@@ -120,16 +122,32 @@ enum class AltBand : std::uint8_t {
 /// per run (saved campaigns carry static AD dispositions).
 class ThreatMap {
 public:
+    /// The converted theater tables (CAMP-SCALE-1's
+    /// `f4.theater.tables/1` + the runtime ClassTable) — the UCD's
+    /// threat-model rows keyed by the CT's data pointers. Optional:
+    /// when the world JSON's per-unit `unit_hit_chance`/
+    /// `unit_weapon_range` enrichment is absent (the committed
+    /// campaign worlds carry none), a battalion's rings fall back to
+    /// its entity type's UCD row — the full theater's air-defense
+    /// picture with no conversion re-run. Pointers non-owning; null
+    /// fields disable the fallback (the pre-tables behavior).
+    struct TablesContext {
+        const f4::world::TheaterTables* tables = nullptr;
+        const f4::world_types::ClassTable* ct = nullptr;
+    };
+
     /// Build from the world sources, from `viewer_team`'s perspective
     /// (the team whose ENEMIES pack the high bits — see the class doc).
     /// \param objectives  objective list (positions + owners)
     /// \param units       unit roster (air-defense battalions + ranges)
     /// \param teams       team slots + stance matrix (RoE source)
     /// \param viewer_team slot of the team the map is built for
+    /// \param tables_ctx  optional UCD fallback (see TablesContext)
     ThreatMap(const f4::world::IObjectiveSource& objectives,
               const f4::world::IUnitCoreSource& units,
               const f4::world::ITeamSource& teams,
-              std::uint8_t viewer_team);
+              std::uint8_t viewer_team,
+              const TablesContext* tables_ctx = nullptr);
 
     /// ScoreThreatFast port: threat to `who`'s aircraft at grid (x, y),
     /// altitude band `alt`. See the header doc for the band formulas.
@@ -210,6 +228,18 @@ private:
 
     /// Stance rows by slot (slot → row) for the hostility test.
     std::vector<std::vector<int16_t>> stance_by_slot_;
+
+    /// Per-unit threat-model rows as the paint loop reads them: the
+    /// unit's own enrichment when it carries one, else the UCD row its
+    /// entity type resolves to (the TablesContext fallback). Sized to
+    /// the roster at construction; empty when no context is set (the
+    /// paint loop reads the unit source directly).
+    std::vector<std::array<std::uint8_t, 8>> resolved_hit_;
+    std::vector<std::array<std::uint8_t, 8>> resolved_range_;
+    [[nodiscard]] const std::array<std::uint8_t, 8>& hit_of_(
+        const f4::world::IUnitCoreSource& units, int i) const noexcept;
+    [[nodiscard]] const std::array<std::uint8_t, 8>& range_of_(
+        const f4::world::IUnitCoreSource& units, int i) const noexcept;
 
     Stats stats_;
 };

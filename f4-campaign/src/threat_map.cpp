@@ -31,8 +31,60 @@ constexpr std::uint8_t kUnowned = 0x0F;
 ThreatMap::ThreatMap(const f4::world::IObjectiveSource& objectives,
                      const f4::world::IUnitCoreSource& units,
                      const f4::world::ITeamSource& teams,
-                     std::uint8_t viewer_team)
+                     std::uint8_t viewer_team,
+                     const TablesContext* tables_ctx)
     : viewer_team_(viewer_team) {
+
+    // The UCD fallback (the TablesContext): every battalion whose world
+    // JSON carries no per-unit enrichment (all-zero hit/range — the
+    // committed campaign worlds) reads its entity type's UCD row, so
+    // the converted tables' full air-defense picture paints without a
+    // world re-conversion. A unit WITH enrichment keeps it (per-element:
+    // a nonzero byte wins).
+    if (tables_ctx != nullptr && tables_ctx->tables != nullptr &&
+        tables_ctx->ct != nullptr && tables_ctx->ct->loaded()) {
+        resolved_hit_.resize(static_cast<std::size_t>(units.unit_count()));
+        resolved_range_.resize(static_cast<std::size_t>(units.unit_count()));
+        for (std::size_t i = 0; i < resolved_hit_.size(); ++i) {
+            const auto& src_hit = units.unit_hit_chance(i);
+            const auto& src_range = units.unit_weapon_range(i);
+            bool any = false;
+            for (int b = 0; b < 8; ++b) {
+                any = any || src_hit[b] != 0 || src_range[b] != 0;
+            }
+            if (any) {
+                // The unit's own enrichment stands — copy it so the
+                // accessor path stays single-source.
+                resolved_hit_[i] = src_hit;
+                resolved_range_[i] = src_range;
+                continue;
+            }
+            uint8_t dtype = 0;
+            uint32_t ptr = 0;
+            if (!tables_ctx->ct->data_ptr_for(units.entity_type(i), dtype,
+                                              ptr) ||
+                dtype != static_cast<uint8_t>(
+                             f4::world_types::DTYPE_UNIT)) {
+                continue;
+            }
+            const auto* u = tables_ctx->tables->unit_at(ptr);
+            if (u == nullptr) continue;
+            for (int b = 0; b < 8; ++b) {
+                resolved_hit_[i][b] =
+                    src_hit[b] != 0
+                        ? src_hit[b]
+                        : (b < static_cast<int>(u->hit_chance.size())
+                               ? u->hit_chance[b]
+                               : uint8_t{0});
+                resolved_range_[i][b] =
+                    src_range[b] != 0
+                        ? src_range[b]
+                        : (b < static_cast<int>(u->range.size())
+                               ? u->range[b]
+                               : uint8_t{0});
+            }
+        }
+    }
 
     // Stance rows by slot: slot -> that team's stance vector (indexed
     // by slot). Slots without a team row resolve to an empty vector =
@@ -81,8 +133,8 @@ ThreatMap::ThreatMap(const f4::world::IObjectiveSource& objectives,
             continue;
         if (units.unit_subtype(i) != 1 /* STYPE_LAND_AIR_DEFENSE */) continue;
 
-        const auto& range = units.unit_weapon_range(i);
-        const auto& hit = units.unit_hit_chance(i);
+        const auto& range = range_of_(units, i);
+        const auto& hit = hit_of_(units, i);
         // Both rings zero: a destroyed/bare battalion paints nothing
         // (the reference's GetAproxHitChance gate would reject every
         // cell anyway — skip the loop entirely).
@@ -104,6 +156,20 @@ ThreatMap::ThreatMap(const f4::world::IObjectiveSource& objectives,
     for (const std::uint8_t s : sam_) {
         if (s != 0) ++stats_.threatened_cells;
     }
+}
+
+const std::array<std::uint8_t, 8>& ThreatMap::hit_of_(
+    const f4::world::IUnitCoreSource& units, int i) const noexcept {
+    const auto idx = static_cast<std::size_t>(i);
+    return idx < resolved_hit_.size() ? resolved_hit_[idx]
+                                      : units.unit_hit_chance(i);
+}
+
+const std::array<std::uint8_t, 8>& ThreatMap::range_of_(
+    const f4::world::IUnitCoreSource& units, int i) const noexcept {
+    const auto idx = static_cast<std::size_t>(i);
+    return idx < resolved_range_.size() ? resolved_range_[idx]
+                                        : units.unit_weapon_range(i);
 }
 
 void ThreatMap::build_ownership_(
