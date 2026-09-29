@@ -733,6 +733,17 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
     // TaxiRequest/TakeoffRequest carry it — the multi-airbase ATC answers
     // from the registered per-base airfield.
     brain.module().airbase_id = home_airbase_vu;
+    // DEAGG-RWY: a GROUND spawn is a deaggregated flight waiting for its
+    // takeoff slot — it holds brakes at parking for a set time, then the
+    // host teleports it onto the runway threshold (FreeFalcon's
+    // imminent-slot placement, atcbrain.cpp FindTakeoffPt) and the takeoff
+    // roll starts from there. The parking -> hold-short taxi crawl (the
+    // campaign ground-ops crawl) is skipped entirely. Airborne spawns fly
+    // their route directly (FID-4 Enroute start) and never enter the
+    // takeoff FSM at all.
+    if (!spawn_in_air) {
+        brain.module().wait_then_teleport = true;
+    }
     if (auto plan = build_mission_plan_from_flight(world, flight_entity,
                                                     objective_id_map,
                                                     unit_id_map)) {
@@ -1727,6 +1738,14 @@ spawn_aircraft_for_intent(
     brain.module().departure_alt_ft = field.departure_altitude_ft;
     brain.module().taxi_speed_kts = 15.0;
     brain.module().airbase_id = home_airbase_vu;
+    // DEAGG-RWY: synthetic flights materialized on the ground (the §4.5
+    // aggregate handoff, air_pose == nullptr) use the same wait-then-
+    // teleport departure as save-flight deaggs — hold at parking, then
+    // the host places them on the runway threshold. See the matching
+    // block in spawn_aircraft_for_flight.
+    if (!spawn_in_air) {
+        brain.module().wait_then_teleport = true;
+    }
     // CAMP-SCALE-1 — the pilot-skill flow (gated): the intent's squadron
     // pilot roster (already resolved as `sq` above) sets the fusion
     // cadence. Off (or no squadron) = the Veteran default.

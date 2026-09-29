@@ -27,6 +27,14 @@
 // TakeRunway). When liftoff is detected, Liftoff fires (Takeoff -> FlyOut).
 // When departure altitude is reached, FlyOutComplete fires (FlyOut -> Done).
 //
+// DEAGG-RWY wait-then-teleport mode (see wait_then_teleport): instead of
+// steering the parking -> hold-short route, the module dwells in Taxi
+// (brakes on) for runway_wait_s, then publishes RunwayTeleportRequest
+// and fires RunwayAssigned. The HOST repositions the airframe onto the
+// runway threshold (FreeFalcon's imminent-slot placement); the FSM then
+// runs the normal HoldShort -> TakeoffClearance -> lineup -> roll chain
+// from the threshold, so the long ground-ops taxi crawl never happens.
+//
 // Phase 2 (H2): The module takes const IAircraftState& instead of
 // const AircraftState*. This decouples the module from the full
 // AircraftState struct (35+ fields) and its NED coordinate convention.
@@ -197,6 +205,24 @@ public:
     // climb speed for the F-16; hosts can override via AircraftConfig.
     double flyout_speed_kts{250.0};
 
+    // DEAGG-RWY wait-then-teleport mode. When TRUE the module does NOT
+    // follow the taxi route: it holds brakes at parking for runway_wait_s
+    // ("a set time"), publishes RunwayTeleportRequest, and fires
+    // RunwayAssigned — the host then places the aircraft on the runway
+    // threshold (see the message's doc for the FreeFalcon provenance:
+    // imminent-slot flights are placed directly on the runway, not
+    // taxied). Intended for ground-DEAGGREGATED campaign flights, where
+    // the long taxi crawl is invisible-world complexity; scenario-list
+    // spawns (hand-authored parking + taxi routes) keep the full taxi.
+    bool wait_then_teleport{false};
+
+    // DEAGG-RWY: how long a wait_then_teleport flight holds at parking
+    // before the teleport request goes out. 45 s keeps the flight visible
+    // at its base for a meaningful beat without stalling the war's tempo
+    // (FreeFalcon's own wait — slot minus estimated taxi time minus
+    // g_fTaxiEarly — collapses to this order when the slot is near).
+    double runway_wait_s{45.0};
+
     // Shared air-steering controller for the FlyOut phase. Public so hosts
     // can tune its gains. Uses the same bank cascade + roll-rate damping
     // as NavigationModule, killing the FlyOut roll limit cycle.
@@ -245,6 +271,7 @@ private:
     // Transition checks — called from update() before control logic.
     // Each returns true if the corresponding transition should fire.
     void check_taxi_progress();           // Taxi -> HoldShort (RunwayAssigned)
+    void check_runway_wait();             // DEAGG-RWY: dwell expiry -> teleport + HoldShort
     void check_takeoff_clearance_ack();   // (no-op; handled by subscription)
     void check_runway_alignment();        // PrepToTakeRunway -> TakeRunway
     void check_liftoff();                 // Takeoff -> FlyOut
@@ -283,6 +310,12 @@ private:
     // Taxi route from ATC clearance.
     std::vector<geo::WorldPosition> taxi_route_;
     std::size_t taxi_wp_index_{0};
+
+    // DEAGG-RWY dwell: seconds accumulated in Taxi while
+    // wait_then_teleport is on, and the once-only latch for the
+    // RunwayTeleportRequest publication.
+    double runway_wait_elapsed_s_{0.0};
+    bool runway_teleport_requested_{false};
 
     // Runway data from clearance.
     int runway_id_{0};

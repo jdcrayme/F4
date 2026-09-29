@@ -575,6 +575,43 @@ private:
     /// carries a hand-authored airfield (non-empty taxi route) or when no
     /// airbase objective exists (spawn then fails loudly).
     void derive_campaign_airfield();
+    /// STOCK-SAVE ATC FIX (the "taxi toward the theater origin, never
+    /// take off" bug): derive every airbase-class objective's
+    /// ScenarioAirfield from the world JSON and register it with the ATC
+    /// (set_airbase_airfield). Idempotent — the derived map is cached in
+    /// airbase_airfields_ and a second call only re-registers.
+    ///
+    /// The CampaignFlights path used to derive + register INSIDE
+    /// spawn_from_campaign_flights(), but a stock save's session runs in
+    /// ScenarioList mode (the save decodes no Flight-class units until
+    /// the ladder tasks squadrons), so that function never ran: the ATC
+    /// kept ONLY the fallback default field, answered every TaxiRequest
+    /// with it (the theater origin for session-generated scenarios), and
+    /// every ground-deaggregated aircraft taxied cross-theater forever.
+    /// No-op when the scenario has no world JSON.
+    /// \param preloaded_world  optional already-loaded WorldState (the
+    ///                         CampaignFlights path passes its own load —
+    ///                         skips a redundant world re-read). Null = load
+    ///                         the scenario's world JSON here.
+    void register_campaign_airbase_airfields(
+        const f4::world::WorldState* preloaded_world = nullptr);
+    /// DEAGG-RWY follow-up (DEFAULT-FIELD): when the scenario did not
+    /// hand-author an airfield, derive the ATC's DEFAULT airfield (the
+    /// one airbase_id=0 aircraft resolve) from the world too — the
+    /// registered per-base field NEAREST the scenario aircraft. Without
+    /// this, airbase_id=0 aircraft still fall back to the empty scenario
+    /// airfield (the theater-origin runway) for their taxi route and
+    /// teleport target. No-op when the scenario carries a real airfield
+    /// or airbase_airfields_ is empty (no world / nothing derived).
+    void apply_world_default_airfield();
+    /// DEAGG-RWY: execute a RunwayTeleportRequest — snap the aircraft's
+    /// flight model (and the renderer-facing transform) onto its
+    /// airfield's runway threshold, lined up on the runway heading, at
+    /// rest. Runway resolution mirrors the ATC's own: the registered
+    /// per-base field for airbase_id, else the default (scenario)
+    /// airfield. No-op for unknown ids.
+    void teleport_aircraft_to_runway(std::uint64_t aircraft_id,
+                                     std::uint64_t airbase_id);
     void wire_atc();              // ATC (stub|tower per scenario.atc) + AirfieldConfig
     void record_snapshot();
     void record_fcs_trace_sample();

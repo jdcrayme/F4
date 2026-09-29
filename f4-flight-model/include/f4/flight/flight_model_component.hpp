@@ -144,6 +144,60 @@ public:
 
     [[nodiscard]] bool is_initialized() const noexcept { return initialized_; }
 
+    // --- Host placement (DEAGG-RWY) -------------------------------------
+    // Teleport a GROUND aircraft to a new ground pose: position, ground
+    // elevation, and heading, at rest. FreeFalcon places imminent-slot
+    // deaggregated flights directly on the runway (atcbrain FindTakeoffPt);
+    // this is the write half of that behavior — the TakeoffModule asks via
+    // RunwayTeleportRequest and the HOST calls this (the AI's
+    // IAircraftState view is read-only by design).
+    //
+    // Writes the FM's NED kinematics (NOT just the TransformComponent —
+    // the per-tick sync copies FM -> transform, so a transform-only write
+    // would snap back), zeroes all motion, re-derives the yaw-only
+    // quaternion + trig caches exactly like initKinematics does, and
+    // leaves the gear planted. No-op before init().
+    void snap_to_ground(double north_ft, double east_ft, double ground_z_ft,
+                        double heading_rad) {
+        if (!initialized_) return;
+        KinematicState& k = fm_.state().kin;
+        k.x = north_ft;
+        k.y = east_ft;
+        k.z = -ground_z_ft;  // NED: altitude = -z
+
+        // At rest, wings level, zero body rates.
+        k.vt = 0.0;
+        k.xdot = k.ydot = k.zdot = 0.0;
+        k.p = k.q = k.r = 0.0;
+        k.psi = angle_from_radians(heading_rad);
+        k.sigma = angle_from_radians(heading_rad);
+        k.gmma = zero_angle();
+        k.mu = zero_angle();
+        k.theta = zero_angle();
+        k.phi = zero_angle();
+
+        // Yaw-only quaternion, wings level (the initKinematics shape).
+        const double cy = std::cos(heading_rad * 0.5);
+        const double sy = std::sin(heading_rad * 0.5);
+        k.quat = math::Quatd(cy, 0.0, 0.0, sy).normalized();
+
+        // Refresh the trig caches the same way the per-frame update would.
+        k.sinalp = 0.0; k.cosalp = 1.0;
+        k.sinbet = 0.0; k.cosbet = 1.0;
+        k.singam = 0.0; k.cosgam = 1.0;
+        k.sinsig = std::sin(heading_rad); k.cossig = std::cos(heading_rad);
+        k.sinmu = 0.0;  k.cosmu = 1.0;
+        k.sinthe = 0.0; k.costhe = 1.0;
+        k.sinphi = 0.0; k.cosphi = 1.0;
+        k.sinpsi = std::sin(heading_rad); k.cospsi = std::cos(heading_rad);
+
+        // Planted on the ground at the new spot.
+        auto& g = fm_.state().gear;
+        g.inAir = false;
+        g.planted = true;
+        fm_.state().aero.gearPos = 1.0f;
+    }
+
     // --- Dormancy (parked inventory) ------------------------------------
     // See the update() override. Set by the squadron spawner; cleared by
     // nothing today (a launch creates a fresh non-dormant entity).

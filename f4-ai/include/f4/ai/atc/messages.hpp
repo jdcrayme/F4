@@ -91,6 +91,32 @@ struct LineUpAndWait {
     int runway_id{0};
 };
 
+// DEAGG-RWY — aircraft -> host: "place me on the runway."
+//
+// Published by the TakeoffModule in wait-then-teleport mode (see
+// TakeoffModule::wait_then_teleport): a ground-deaggregated flight holds
+// at parking for a set time, then asks the HOST to reposition it onto
+// its airfield's runway threshold, lined up on the runway heading. The
+// module cannot move the airframe itself (it only reads IAircraftState),
+// and only the host owns the flight model state + the per-airbase
+// airfield data the target pose comes from.
+//
+// FreeFalcon provenance: the original does not physically taxi every
+// deaggregated airframe from its parking pad — a flight whose takeoff
+// slot is imminent is placed DIRECTLY ON THE RUNWAY at deaggregation
+// (FlightClass::GetVehicleDeagData's TakeoffPt branch -> ATCBrainClass::
+// FindTakeoffPt, atcbrain.cpp). The teleport is that imminent-slot
+// placement, applied after a configurable wait instead of at deagg time.
+// The ATC protocol stays intact: the placement is followed by the normal
+// HoldShort -> TakeoffRequest -> TakeoffClearance -> lineup -> roll chain.
+struct RunwayTeleportRequest {
+    std::uint64_t aircraft_id{0};
+    // The airbase whose runway to place the aircraft on (VU_ID.num;
+    // 0 = the host's default airfield — the same resolution the ATC
+    // applies to requests).
+    std::uint64_t airbase_id{0};
+};
+
 // ============================================================================
 // Landing / Approach messages
 // ============================================================================

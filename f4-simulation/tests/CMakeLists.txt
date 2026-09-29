@@ -138,6 +138,17 @@ target_compile_definitions(test_simulation_lifetime PRIVATE
 )
 add_dependencies(test_simulation_lifetime convert_golden_fixtures)
 
+# DEAGG-RWY regression: a ground-deaggregated campaign flight holds at
+# parking for a set time, teleports onto the runway threshold (FreeFalcon's
+# imminent-slot placement), and reaches TakeoffState::Done — the whole
+# spawn → takeoff chain the "aircraft never take off" report broke.
+f4_simulation_add_test(test_deagg_takeoff  test_deagg_takeoff.cpp TIMEOUT 300)
+target_compile_definitions(test_deagg_takeoff PRIVATE
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
+add_dependencies(test_deagg_takeoff convert_golden_fixtures)
+
 # The register_aircraft test hand-initializes a FlightModelComponent from
 # the generated F-16 config fixture (real aero tables).
 target_compile_definitions(test_register_aircraft PRIVATE

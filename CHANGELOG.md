@@ -5,117 +5,66 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
-## GROUND-OPS-1 — the ground regime stops lying to itself
+## DEAGG-RWY-1 — deaggregated flights hold, teleport to the runway, and the stock-save ATC knows every field
 
-- **The wheel equation replaces the flight-path gravity term on the
-  ground** — `eom.cpp`'s ground branch of `calculateVt` integrated
-  `−g·singam`, where γ is the θ−α flight-path approximation. With the
-  ground clamp holding the body, the FCS drives θ to the −2° pitch
-  floor, so the term read as a standing +1.12 ft/s² "downhill" velocity
-  pump the pinned position never collected — the velocity-vs-position
-  disagreement the QC 2026-09-28 GROUND-OPS CRAWL finding named
-  (CAMPAIGN_LOOP_PLAN §7). And at rotation (θ→+15°, still rolling on
-  the wheels) it read as a phantom −8.3 ft/s² deceleration through the
-  takeoff roll. Both are lies on a flat runway: the FM models ground
-  height as the single `groundZ_ft` scalar (no slope data), so gravity
-  contributes NO forward force while the wheels carry the weight. The
-  ground branch now integrates `xwaero − friction` only; the gravity
-  term returns the instant `inAir` flips.
-- **The crawl gate** — test_digi_mission records the first-liftoff tick
-  and fails past 4 minutes (the QC's 16-19-minute crawl signature;
-  measured ~1.9 on the rig). The liftoff-station pin's grace widened
-  1000 → 1400 ft with the reason documented: the old pin rode the fake
-  climb the clamp allowed during rotation (the aircraft "left the
-  ground" early off the position pin, not off real lift), so the
-  measured station shifted +91 ft when the roll became honest.
-- Blast radius checked: the full taxi→takeoff→navigate→approach→land→
-  park loop passes (landing rollout rides the same ground regime),
-  test_eom (10) / test_gear (20) / test_aar_e2e green. The
-  campaign-context face of the crawl (the 96-aircraft real-data
-  timeline) stays open for the QC env — re-run `campaign_qc --war` to
-  re-measure with honest kinematics.
-
-## ECM-DATA-1 — the converted tables decide who jams
-
-- **The ECM data source lands as a consumer of data F4 already
-  converted** — upstream "who carries a jammer" is two flag bits: VCD
-  Flags & VEH_HAS_JAMMER 0x10000 (vehicle.h:35 — the EA-6B/EF-111A/
-  F-4G/E-3/B-1B/B-52G/Tu-16/... family, 13 Korea rows) and WCD Flags &
-  WEAP_ECM 0x04 (campweap.h:34 — the ALQ-131 pod). The converted
-  theater tables (`f4.theater.tables/1`) captured both verbatim;
-  `resolve_vehicle_ecm` (f4-world, the `resolve_countermeasures`
-  sibling) walks CT→VCD→(hardpoints→WCD) and returns the fit: built-in
-  or pod, the pod's name, and a burn-through seeded from the pod's own
-  WCD range_km (30 km ≈ 16.2 NM — the data's number; built-ins keep
-  the documented 20 NM; upstream has no real per-unit strength field —
-  the S.G. `Name[14] & 0x7f` hack is deliberately not read — so 1.0
-  stands).
-- **The spawn→arm split follows the CAMP-SCALE-1 supply precedent** —
-  both campaign spawn paths (the flight path and the intent path,
-  squadron fallback) stamp an `EcmFitComponent` beside the
-  `CountermeasureSupplyComponent`; `arm_campaign_combat`'s ECM block
-  becomes the plan's double gate in earnest: the session's `ecm` gate
-  AND the stamped fit attach the pod, and the fit's values shape it
-  (`jamming_strength` / `burn_through_range_nm`). The session option is
-  `CampaignSessionOptions::ecm` (scenario JSON `"ecm": true`), default
-  off — and gate-without-fit jams nobody, fit-without-gate stays the
-  golden identity.
-- Tests: the resolver truth table (built-in / pod with burn-through
-  from the data / neither / unit-dtype decline / empty tables) in
-  test_theater_tables; the arm truth table (fit+gate → pod with the
-  fit's values; gate-only → nothing; fit-only → nothing) in
-  test_campaign_combat. The AI's notching response to a Jamming strobe
-  is now unblocked — it waits on design, not data.
-
-## WTH-CODEC-1 — the save's weather decodes
-
-- **The `.wth` sub-file gets a codec** — three upstream layouts
-  (campupd/weather.cpp:474 CampLoad / :665 Save / :30 COVersion): the
-  original-F4 37-byte header + 128×128×2-byte cloud map (32,805 bytes —
-  every committed fixture), the Cobra Tacedit-compat 37-byte form (the
-  COVersion marker float at @21 or @25, the fields reinterpreted per
-  the upstream comment table), and the v75+ flat 32/36-byte form (8/9
-  fields, no map). The decoder branches on size + marker exactly as
-  upstream does; campinit's 0-byte ride decodes to absent weather;
-  garbage throws. Golden values pinned from the real archives (save1:
-  wind 10 KPH, 20 °C, lastCheck 09:00, the pristine all-{0xFF,0x00}
-  map; TestCamp: real cloud levels 46..179 / covers 0..8).
-- **Byte-identity holds end to end** — `encode_wth(decode_wth(bytes))`
-  == bytes for every layout (floats ride 4-byte memcpys on both sides;
-  trailing bytes beyond the modeled layout are captured verbatim). The
-  world JSON gains a top-level `"weather"` face (layout, the header
-  fields in stored units named per the upstream variables, the cloud
-  map as b64 + dims) while `raw_subfiles."wth"` keeps the rosetta
-  passthrough; the byte-identity closure re-encodes `.wth` on both
-  fixtures (count pins 5→6 / 4→5).
-- The runtime seed (WTH-SEED-1: `WeatherSystem::set_state` from the
-  decoded face at session load) is named as the follow-on; the mapping
-  table (condition/clock/wind/temperature → WeatherState) is in the
-  recon notes. Tests: 11 in test_weather_codec + the closure suite.
-
-## AI-PIII-DESIGN + AVIONICS-PLAN + SSD-CONSUME-1 — the queue grows a spine
-
-- **Part III is designed** (AI_IMPLEMENTATION_PLAN §15): the datalink
-  tier (Step 13 — the host-built per-team `DatalinkNet` over the
-  AirPicture discipline replacing the omniscient `detected_by_gci` leg
-  behind `combat.gci_datalink`), the flight-lead command module
-  (Step 14 — rejoin/engage/RTB orders + the closed radio vocabulary
-  behind `ai.flight_lead`), and the specialist support brains (Step 15
-  — SupportStationBrain/FACBrain as DigitalBrain compositions, the
-  FAC talk-on riding the same hint pipe). Landing order and the risk
-  table included.
-- **The avionics layer gets its plan** (`Docs/AVIONICS_PLAN.md`): the
-  charter's cockpit exclusion re-drawn as rendering-only — the avionics
-  LOGIC (INS + steerpoints, the FCR page SM, the HUD view model,
-  SMS/HSD) is engine-agnostic simulation state every host cockpit must
-  display; AVIONICS-1..4 ladder with the `f4-flight-api` seam and the
-  "view models, not pixels" principle.
-- **SSD-CONSUME-1 is designed and recorded** (CAMP_HOST_PLAN §14): the
-  full squadron-munitions-attrition data flow (typed face → ledger
-  books → the filing-time drain at `apply_mission_draw` → restock via
-  the DOM-2 reserve shape → the width-preserving `stores_raw`
-  write-back → the `squadron_stores_attrition` flag → QC exit 19) from
-  the recon, ready to implement in DOM-3's order.
+- **The campaign takeoff fix, twice over** — the user report
+  ("aircraft taxi to their target in the campaign and never take
+  off") had two stacked causes. (1) STOCK-SAVE ATC: a save that decodes
+  no Flight-class units (72 squadrons, 0 flights — every stock .cam)
+  runs its session in ScenarioList mode, and the per-base ATC airfield
+  registration lived only inside the CampaignFlights spawn path — so
+  the ATC kept ONLY the theater-origin fallback field and answered
+  every TaxiRequest with a cross-theater route no aircraft could ever
+  finish taxiing. The derivation + registration is now
+  `Simulation::register_campaign_airbase_airfields()` (member-cached,
+  idempotent, shared by BOTH spawn paths), called in `initialize()`
+  for ScenarioList right after `wire_atc()` and before any brain can
+  publish a TaxiRequest. (2) DEAGG-RWY: the parking → hold-short taxi
+  crawl itself is gone for deaggregated flights (see next bullet).
+- **DEAGG-RWY — deagged flights hold a set time, then teleport onto
+  the runway** — a ground-deaggregated campaign flight no longer taxis
+  the parking → hold-short route at all. The TakeoffModule gains
+  `wait_then_teleport` + `runway_wait_s` (default 45 s): the flight
+  holds brakes at parking for the dwell, then publishes a new
+  `RunwayTeleportRequest`, and the HOST (Simulation — the owner of the
+  flight model + the per-airbase airfield data) snaps the airframe
+  onto its field's runway threshold, lined up on the runway heading,
+  via the new `FlightModelComponent::snap_to_ground()` (the FM's NED
+  kinematics are the authoritative write — a transform-only write
+  would snap back on the next FM → transform sync). From the threshold
+  the unchanged FSM runs HoldShort → TakeoffClearance → lineup (the
+  alignment gate passes on its first check) → roll → FlyOut → Done.
+  FreeFalcon provenance: imminent-slot deaggregated flights are placed
+  DIRECTLY ON THE RUNWAY (`GetVehicleDeagData`'s TakeoffPt branch →
+  `ATCBrainClass::FindTakeoffPt`) — the teleport is that placement,
+  applied after a configurable wait instead of at deagg time. The ATC
+  protocol (TaxiRequest/TakeoffRequest/clearances) is untouched, and
+  scenario-list spawns (hand-authored parking + taxi routes, the
+  kunsan-style fixtures) keep the full taxi behavior. Spawn paths
+  arming the mode: `spawn_aircraft_for_flight` + `spawn_aircraft_for_intent`
+  (every ground spawn, `air_pose == nullptr`).
+- **DEFAULT-FIELD — the world backs the ATC's default airfield too** —
+  in ScenarioList mode `Simulation::apply_world_default_airfield()` now
+  derives the DEFAULT airfield (the one airbase_id = 0 aircraft
+  resolve — scenario-list spawns never tag a home base) from the
+  world's registered per-base fields, choosing the one nearest the
+  scenario aircraft's parking centroid. A hand-authored scenario
+  airfield (a real taxi route) always wins; session-generated
+  scenario_list scenarios keep their self-consistent origin field.
+- The ScenarioAirfield → AirfieldConfig copy the three registration
+  sites performed by hand is one shared `to_atc_airfield()` helper now.
+- **Numbers** — the showcase world's 449-flight full-fidelity QC: the
+  old behavior left 441/449 airborne after a 20-minute session (8
+  still crawling in the ground regime); DEAGG-RWY puts 449/449 in the
+  air within ~2.5 sim minutes of their deagg, every one walking
+  Taxi → HoldShort → Takeoff → FlyOut → Done → ToWaypoint at the
+  production 45 s dwell.
+- Tests: `test_deagg_takeoff` — the session-level spawn → takeoff chain
+  (ground flight holds at parking, jumps > 1000 ft to the threshold,
+  reaches TakeoffState::Done — the first end-to-end takeoff regression
+  the repo has) and the DEFAULT-FIELD pin (a world-backed scenario_list
+  config with no hand-authored airfield answers TaxiRequest from the
+  world's own base, not the origin).
 
 ## SVG-HAIRLINE-1 — the hairline pen stops rendering as a half-symbol bar
 

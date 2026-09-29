@@ -251,6 +251,15 @@ AIControlOutput TakeoffModule::update([[maybe_unused]] double dt,
         sm_.process(ev);
     }
 
+    // DEAGG-RWY: the wait-then-teleport dwell accumulates while Taxi is
+    // the current state (the state is entered the same tick the
+    // TaxiClearance arrives — initialize() drains the latched event — so
+    // the "set time" starts when the aircraft is actually cleared to
+    // move, not at entity spawn).
+    if (wait_then_teleport && sm_.current() == TakeoffState::Taxi) {
+        runway_wait_elapsed_s_ += dt;
+    }
+
     // Fire any pending transitions based on the current state and aircraft
     // state. We loop up to a small bound because some transitions chain
     // (e.g. Taxi -> HoldShort -> PrepToTakeRunway in one tick when the
@@ -261,7 +270,11 @@ AIControlOutput TakeoffModule::update([[maybe_unused]] double dt,
         const auto before = sm_.current();
         switch (sm_.current()) {
             case TakeoffState::Taxi:
-                check_taxi_progress();
+                if (wait_then_teleport) {
+                    check_runway_wait();
+                } else {
+                    check_taxi_progress();
+                }
                 break;
             case TakeoffState::PrepToTakeRunway:
                 check_runway_alignment();
@@ -380,6 +393,34 @@ void TakeoffModule::check_taxi_progress()
     }
 }
 
+void TakeoffModule::check_runway_wait()
+{
+    // DEAGG-RWY: hold at parking until the dwell expires, then hand the
+    // placement to the host and continue as if the taxi had just
+    // completed (RunwayAssigned -> HoldShort -> TakeoffRequest ->
+    // TakeoffClearance). Idempotent: the request publishes once.
+    if (runway_teleport_requested_) return;
+    if (runway_wait_elapsed_s_ < runway_wait_s) return;
+
+    if (bus_) {
+        atc::RunwayTeleportRequest req;
+        req.aircraft_id = ownship_id_;
+        req.airbase_id = airbase_id;
+        bus_->publish(req);
+    }
+    runway_teleport_requested_ = true;
+
+    // The host's placement lands this tick (the bus delivers inline, or
+    // at the tick's flush — both before the next update reads the
+    // aircraft state). Fire the transition so HoldShort requests the
+    // takeoff clearance: the TakeoffClearance then supplies the
+    // threshold + runway heading the lineup gate needs, and at the
+    // threshold the alignment passes on its first check.
+    if (sm_.current() == TakeoffState::Taxi) {
+        sm_.process(TakeoffEvent::RunwayAssigned);
+    }
+}
+
 void TakeoffModule::check_runway_alignment()
 {
     // Compute lateral distance from the runway centerline.
@@ -437,6 +478,13 @@ AIControlOutput TakeoffModule::controls_for_request_taxi() const {
 AIControlOutput TakeoffModule::controls_for_taxi() const {
     AIControlOutput output;
     output.gear_handle_down = true;
+
+    // DEAGG-RWY: in wait-then-teleport mode the route is never flown —
+    // the aircraft holds brakes at parking until check_runway_wait()
+    // fires the teleport and moves the FSM to HoldShort.
+    if (wait_then_teleport) {
+        return ground_steering.hold();
+    }
 
     if (taxi_route_.empty() || taxi_wp_index_ >= taxi_route_.size()) {
         // Reached end of taxi route — hold brakes at the hold-short point.

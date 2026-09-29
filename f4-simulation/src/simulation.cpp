@@ -103,6 +103,28 @@ namespace {
     return out;
 }
 
+// DEAGG-RWY (shared mapping): the ScenarioAirfield -> AirfieldConfig copy
+// every ATC registration performs. wire_atc (the default field),
+// register_campaign_airbase_airfields (the per-base registry), and
+// apply_world_default_airfield (the world-derived default) all answer
+// requests from the same shape — one writer keeps them honest.
+f4::ai::atc::AirfieldConfig to_atc_airfield(const ScenarioAirfield& src) {
+    f4::ai::atc::AirfieldConfig cfg;
+    cfg.active_runway_id = src.active_runway_id;
+    cfg.active_runway_name = src.active_runway_name;
+    cfg.runway_heading_rad = src.runway_heading_rad;
+    cfg.threshold_position = src.threshold_position;
+    cfg.threshold_altitude_ft = src.threshold_altitude_ft;
+    cfg.departure_altitude_ft = src.departure_altitude_ft;
+    // Pattern altitude: 1500 ft above the threshold (typical radar pattern).
+    cfg.pattern_altitude_ft = src.threshold_altitude_ft + 1500.0;
+    cfg.taxi_route = src.taxi_route;
+    cfg.runway_end_position = src.runway_end_position;
+    cfg.runway_width_ft = src.runway_width_ft;
+    cfg.runway_length_ft = src.runway_length_ft;
+    return cfg;
+}
+
 } // namespace
 
 Simulation::Simulation(Scenario scenario, std::filesystem::path asset_dir)
@@ -171,6 +193,25 @@ void Simulation::initialize() {
     // tick (which publishes a TaxiRequest). The brain's initialize() runs
     // lazily on first update(), so we just need StubATC alive before tick().
     wire_atc();
+    // STOCK-SAVE ATC FIX: the ScenarioList spawn path (every CampaignSession
+    // over a stock save — the save decodes no Flight-class units until the
+    // ladder tasks squadrons) used to leave the ATC with ONLY the fallback
+    // default field, so every ground-deaggregated aircraft got a taxi route
+    // to the theater origin and never took off. Register the world's real
+    // per-base fields here, right after wire_atc() created the ATC and
+    // BEFORE any aircraft can publish a TaxiRequest. The CampaignFlights
+    // path registers the same way from spawn_from_campaign_flights() (the
+    // method is member-cached and idempotent, so the double call is a
+    // no-op the second time).
+    if (scenario_.spawn_mode == SpawnMode::ScenarioList) {
+        register_campaign_airbase_airfields();
+        // DEAGG-RWY follow-up (DEFAULT-FIELD): airbase_id=0 aircraft (the
+        // scenario-list spawns) resolve the ATC's DEFAULT airfield. When
+        // the scenario didn't hand-author one, derive it from the world
+        // too — otherwise those aircraft still taxi/teleport toward the
+        // empty theater-origin field even after the per-base fix.
+        apply_world_default_airfield();
+    }
     load_aircraft_config();
     // Load the class table ONCE, before every consumer: the spawn
     // paths below and the BubbleManager (init_bubble_manager) borrow
@@ -1881,6 +1922,119 @@ void Simulation::derive_campaign_airfield() {
     // with the specific "no airbase objective" message.
 }
 
+void Simulation::register_campaign_airbase_airfields(
+    const f4::world::WorldState* preloaded_world) {
+    if (!atc_ || scenario_.world_json_path.empty()) return;
+
+    // Derive once (the member is the SAME map the bulk spawn path and the
+    // deferred-spawn gate use); a second call only re-registers.
+    if (airbase_airfields_.empty()) {
+        f4::world::WorldState local_ws;
+        const f4::world::WorldState& ws = preloaded_world != nullptr
+            ? *preloaded_world
+            : (local_ws.load(scenario_.world_json_path), local_ws);
+        for (const auto& obj : ws.objectives) {
+            if (auto af = derive_airfield_from_objective(obj, 36)) {
+                if (obj.id_num != 0) {
+                    airbase_airfields_[obj.id_num] = std::move(*af);
+                }
+            }
+        }
+    }
+
+    // Register every derived airbase with the ATC (B.3+): the StubATC
+    // answers TaxiRequest/TakeoffRequest per airbase_id, falling back
+    // to the default airfield wire_atc() configured. Without this, the
+    // per-flight home-base tag would arrive at an ATC that can't
+    // resolve it. (FID: registered BEFORE the deferred-spawn gate —
+    // an ops-window deagg spawns on the ground and needs the ATC.)
+    for (const auto& [vu, af] : airbase_airfields_) {
+        atc_->set_airbase_airfield(vu, to_atc_airfield(af));
+    }
+}
+
+void Simulation::apply_world_default_airfield() {
+    if (!atc_ || airbase_airfields_.empty()) return;
+    // A hand-authored scenario airfield (a real taxi route) always wins —
+    // the fixtures author them deliberately.
+    if (!scenario_.airfield.taxi_route.empty()) return;
+
+    // Target: the centroid of the scenario aircraft's parking spots (the
+    // aircraft that will actually resolve the default field). A single-
+    // aircraft scenario lands exactly on its own base; a spread-out
+    // theater falls back to the geometric middle, which beats the
+    // theater-origin default it replaces.
+    double cx = 0.0, cy = 0.0;
+    for (const auto& ac : scenario_.aircraft) {
+        cx += ac.parking_spot.x;
+        cy += ac.parking_spot.y;
+    }
+    const double n = static_cast<double>(scenario_.aircraft.size());
+    const double tx = n > 0.0 ? cx / n : 0.0;
+    const double ty = n > 0.0 ? cy / n : 0.0;
+
+    const ScenarioAirfield* best = nullptr;
+    double best_d2 = std::numeric_limits<double>::max();
+    for (const auto& [/*vu*/ _, af] : airbase_airfields_) {
+        const double dx = af.threshold_position.x - tx;
+        const double dy = af.threshold_position.y - ty;
+        const double d2 = dx * dx + dy * dy;
+        if (d2 < best_d2) {
+            best_d2 = d2;
+            best = &af;
+        }
+    }
+    if (best == nullptr) return;
+    atc_->set_airfield(to_atc_airfield(*best));
+}
+
+void Simulation::teleport_aircraft_to_runway(std::uint64_t aircraft_id,
+                                             std::uint64_t airbase_id) {
+    entities::EntityHandle h(entities::EntityId{aircraft_id}, &world_);
+    auto* fm = h.get<f4::flight::FlightModelComponent>();
+    if (fm == nullptr) return;
+
+    // Runway resolution mirrors the ATC's own (resolve_airfield): the
+    // aircraft's registered home-base field, else the default (scenario)
+    // airfield.
+    const ScenarioAirfield* field = &scenario_.airfield;
+    if (airbase_id != 0) {
+        const auto it = airbase_airfields_.find(
+            static_cast<std::uint32_t>(airbase_id));
+        if (it != airbase_airfields_.end()) field = &it->second;
+    }
+
+    // The ground pose: the threshold, lined up on the runway heading.
+    const auto& thr = field->threshold_position;
+    f4::terrain::TerrainSource* ts =
+        terrain_source_ ? terrain_source_ : &default_terrain_;
+    const double ground_z = ts->elevation_at_ft(thr.x, thr.y);
+
+    // The FM write is the authoritative one (the per-tick sync copies
+    // FM -> transform; a transform-only write would snap back).
+    fm->set_ground(ground_z, f4::math::Vec3d{0.0, 0.0, -1.0});
+    // NED: kin.x = north (ENU y), kin.y = east (ENU x) — the spawn
+    // path's own convention.
+    fm->snap_to_ground(/*north_ft=*/thr.y, /*east_ft=*/thr.x, ground_z,
+                       field->runway_heading_rad);
+
+    // Snap the renderer-facing transform to the same pose so same-tick
+    // consumers (viewer, bubble, QC harnesses) agree with the FM.
+    if (auto* tf = h.get<entities::TransformComponent>(); tf != nullptr) {
+        tf->position = f4::geo::WorldPosition(thr.x, thr.y, ground_z);
+        tf->vx = 0.0;
+        tf->vy = 0.0;
+        tf->vz = 0.0;
+        const auto& q = fm->state().kin.quat;
+        const f4::simulation::QuatD q_enu = f4::simulation::ned_quat_to_enu(
+            {q.w, q.x, q.y, q.z});
+        tf->qw = q_enu.w;
+        tf->qx = q_enu.x;
+        tf->qy = q_enu.y;
+        tf->qz = q_enu.z;
+    }
+}
+
 void Simulation::spawn_from_campaign_flights() {
     // Phase 2 campaign-derivation path. Loads the world JSON referenced by
     // scenario_.world_json_path, populates the EntityWorld with teams +
@@ -1949,15 +2103,11 @@ void Simulation::spawn_from_campaign_flights() {
     //    its ScenarioAirfield derived up front and passed down, so each
     //    flight's aircraft taxis/departs on ITS OWN squadron's runway —
     //    the first-airbase-only route the pre-fix code handed to every
-    //    aircraft sent them taxiing across the theater (QC catch).
-    airbase_airfields_.clear();
-    for (const auto& obj : ws.objectives) {
-        if (auto af = derive_airfield_from_objective(obj, 36)) {
-            if (obj.id_num != 0) {
-                airbase_airfields_[obj.id_num] = std::move(*af);
-            }
-        }
-    }
+    //    aircraft sent them taxiing across the theater (QC catch). The
+    //    derivation + ATC registration live in
+    //    register_campaign_airbase_airfields(&ws) below (shared with the
+    //    ScenarioList path — see initialize(); the already-loaded world
+    //    skips the redundant re-read inside the method).
 
     // 4b. The weapon class table (A-G tranche): the campaign spawn arms
     //     every flight's decoded loadout through it (wire stations +
@@ -1976,29 +2126,7 @@ void Simulation::spawn_from_campaign_flights() {
 
     const auto& template_ac = scenario_.aircraft.front();
 
-    // 6. Register every derived airbase with the ATC (B.3+): the StubATC
-    //    answers TaxiRequest/TakeoffRequest per airbase_id, falling back
-    //    to the default airfield wire_atc() configured. Without this, the
-    //    per-flight home-base tag would arrive at an ATC that can't
-    //    resolve it. (FID: registered BEFORE the deferred-spawn gate —
-    //    an ops-window deagg spawns on the ground and needs the ATC.)
-    if (atc_ && !airbase_airfields_.empty()) {
-        for (const auto& [vu, af] : airbase_airfields_) {
-            f4::ai::atc::AirfieldConfig cfg;
-            cfg.active_runway_id = af.active_runway_id;
-            cfg.active_runway_name = af.active_runway_name;
-            cfg.runway_heading_rad = af.runway_heading_rad;
-            cfg.threshold_position = af.threshold_position;
-            cfg.threshold_altitude_ft = af.threshold_altitude_ft;
-            cfg.departure_altitude_ft = af.departure_altitude_ft;
-            cfg.pattern_altitude_ft = af.threshold_altitude_ft + 1500.0;
-            cfg.taxi_route = af.taxi_route;
-            cfg.runway_end_position = af.runway_end_position;
-            cfg.runway_width_ft = af.runway_width_ft;
-            cfg.runway_length_ft = af.runway_length_ft;
-            atc_->set_airbase_airfield(vu, cfg);
-        }
-    }
+    register_campaign_airbase_airfields(&ws);
 
     if (scenario_.campaign_flights_deferred) {
         // FID-1 (Docs/FIDELITY_TIERS_PLAN.md): the fidelity-tier
@@ -2278,20 +2406,17 @@ void Simulation::wire_atc() {
     } else {
         atc_ = std::make_unique<f4::ai::atc::StubATC>(bus_);
     }
-    f4::ai::atc::AirfieldConfig af;
-    af.active_runway_id = scenario_.airfield.active_runway_id;
-    af.active_runway_name = scenario_.airfield.active_runway_name;
-    af.runway_heading_rad = scenario_.airfield.runway_heading_rad;
-    af.threshold_position = scenario_.airfield.threshold_position;
-    af.threshold_altitude_ft = scenario_.airfield.threshold_altitude_ft;
-    af.departure_altitude_ft = scenario_.airfield.departure_altitude_ft;
-    // Pattern altitude: 1500 ft above the threshold (typical radar pattern).
-    af.pattern_altitude_ft = scenario_.airfield.threshold_altitude_ft + 1500.0;
-    af.taxi_route = scenario_.airfield.taxi_route;
-    af.runway_end_position = scenario_.airfield.runway_end_position;
-    af.runway_width_ft = scenario_.airfield.runway_width_ft;
-    af.runway_length_ft = scenario_.airfield.runway_length_ft;
-    atc_->set_airfield(af);
+    atc_->set_airfield(to_atc_airfield(scenario_.airfield));
+    // DEAGG-RWY: ground-deaggregated flights skip the taxi crawl — after
+    // a set hold at parking the TakeoffModule publishes
+    // RunwayTeleportRequest and THIS sim places the airframe on its
+    // field's runway threshold (FreeFalcon's imminent-slot placement).
+    // The host executes the placement because it owns the flight model
+    // state + the per-airbase airfield data the target pose comes from.
+    bus_.subscribe<f4::ai::atc::RunwayTeleportRequest>(
+        [this](const f4::ai::atc::RunwayTeleportRequest& msg) {
+            teleport_aircraft_to_runway(msg.aircraft_id, msg.airbase_id);
+        });
     // AAR redesign: the stub's tanker config is set in initialize() after
     // the tanker entity is found (wire_atc runs before spawn_aircraft).
 }
