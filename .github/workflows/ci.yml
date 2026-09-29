@@ -1,4 +1,4 @@
-# Continuous integration — two jobs:
+# Continuous integration — four jobs:
 #
 # 1. headless — every GUI/viewer target OFF, full test suite. Mirrors the
 #    local verification workflow used throughout the worklog (e.g.
@@ -12,6 +12,19 @@
 #    software GL (llvmpipe supports GL 3.3+, which raylib 5.0 needs); on
 #    a display-less runner they self-skip via display_guard.hpp instead
 #    of segfaulting.
+# 3. windows — the MSVC headless build + test. The primary development
+#    platform (F4.runsettings, export-game-data.bat, the Windows-path
+#    subtleties throughout the CHANGELOG) had NO CI coverage: an
+#    MSVC-only compile break (or a /std:c++20 conformance drift) landed
+#    untested. This job is the headless shape over the Visual Studio
+#    generator — the GUI targets stay off (no DirectX/raylib surface on
+#    the runner needed for the libraries the suite exercises).
+# 4. sanitize — the headless suite under ASan + UBSan. The
+#    ScopedSubscriptions UAF the FID-OPT-1 speed-up exposed was caught
+#    by a LOCAL sanitizer run; nothing in CI would have caught the same
+#    leak class landing on main. Debug info on, frame pointers kept, the
+#    whole fast-tier suite (the slow 1x war harnesses are excluded the
+#    same way the default ctest run excludes them).
 #
 # Notes:
 # - Debug build: the suite's value is precisely in the assertions and
@@ -136,3 +149,82 @@ jobs:
           cmake -B build
           -DCMAKE_BUILD_TYPE=Debug
           -DF4_ENFORCE_BOUNDARY=ON
+
+  windows:
+    name: MSVC headless build + test (Debug)
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Data/ hygiene gate — the same invariant the Linux jobs check.
+      # `python` (not python3) is the interpreter name on Windows runners.
+      - name: Data/ manifest hygiene check
+        run: python scripts/generate_manifest.py --check --output Data/
+
+      - name: Configure (headless, MSVC default generator, boundary gate ON)
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DF4_ENFORCE_BOUNDARY=ON
+          -DF4_BUILD_RENDERER=OFF
+          -DF4_BUILD_MODEL_VIEWER=OFF
+          -DF4_BUILD_VIEWER=OFF
+          -DF4_BUILD_SCENARIO_PLAYER=OFF
+
+      - name: Build
+        run: cmake --build build --config Debug -j
+
+      # ctest needs the config spelled out for multi-config generators.
+      - name: Test
+        run: ctest --test-dir build --build-config Debug --output-on-failure -j
+
+  sanitize:
+    name: ASan + UBSan headless suite (GCC 14, Debug)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      CC: gcc-14
+      CXX: g++-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Data/ manifest hygiene check
+        run: python3 scripts/generate_manifest.py --check --output Data/
+
+      - name: Install toolchain (g++-14)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-14
+
+      # The sanitizer flags ride CMAKE_CXX_FLAGS so FetchContent deps
+      # (gtest, nlohmann/json) pick them up too — an unsanitized gtest
+      # would still run the sanitized test bodies, but the flags here
+      # keep every translation unit honest. Leak detection is on by
+      # default on Linux; the sim's static clocks are function-local
+      # statics (never freed by design), which LSan does not report.
+      - name: Configure (headless, ASan + UBSan, boundary gate ON)
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DF4_ENFORCE_BOUNDARY=ON
+          -DF4_BUILD_RENDERER=OFF
+          -DF4_BUILD_MODEL_VIEWER=OFF
+          -DF4_BUILD_VIEWER=OFF
+          -DF4_BUILD_SCENARIO_PLAYER=OFF
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Test (fast tier under the sanitizers)
+        run: ctest --test-dir build --output-on-failure -j"$(nproc)"
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0

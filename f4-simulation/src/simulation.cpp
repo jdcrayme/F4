@@ -554,7 +554,8 @@ bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
         sig_ctx ? &*sig_ctx : nullptr,
         scenario_.combat.countermeasures,
         scenario_.combat.passive_sensors,
-        /*ecm=*/false);
+        /*ecm=*/false,
+        &ir_seeker_data_);
     if (!result.armed) {
         // Not a candidate (no origin/brain/store) or already armed —
         // EXCEPT the doctrine-failure shapes, which are misconfigurations
@@ -885,7 +886,8 @@ void Simulation::spawn_from_scenario_list() {
                                   &sig_ctx,
                                   scenario_.combat.countermeasures,
                                   scenario_.combat.passive_sensors,
-                                  scenario_.combat.ecm && sc.ecm);
+                                  scenario_.combat.ecm && sc.ecm,
+                                  &ir_seeker_data_);
 
             // The gun's ammo ledger: the store's gun station (attached
             // just above; 511 for a standard M61A1 load). The brain's

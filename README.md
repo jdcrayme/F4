@@ -221,7 +221,7 @@ sm.set_trace(&trace);
 - `trace.hpp` — bounded ring buffer + `to_text()` / `summary()`
 - `serialize.hpp` — `to_text(sm)` table dump (no JSON dependency)
 
-**Tests**: 41 unit tests (core SM behavior, stall SM lifecycle, ATC/landing
+**Tests**: 30 unit tests (core SM behavior, stall SM lifecycle, ATC/landing
 SM with payload-carrying variant events, layered priority preemption, trace
 recording and text emission, serialization round-trip). Zero dependencies.
 
@@ -263,7 +263,7 @@ auto nearby = world.within_radius(0, 0, 0, 50000.0);
 `CampaignIdentityComponent`), `spatial_index.hpp` (3D hash grid for radius
 queries, cell-sized to the typical query radius).
 
-**Tests**: 95 (entity lifecycle, generation bump on destroy, component
+**Tests**: 99 (entity lifecycle, generation bump on destroy, component
 add/get/has/remove, tag filtering, within-radius, spatial index
 insert/query/update/remove across cell boundaries). Links f4-geo (PUBLIC) —
 the strong-typed position is the design decision made concrete.
@@ -440,7 +440,7 @@ FreeFalcon's `LZSS_Expand`), `cam_archive.hpp` (`.cam` container parser),
 `CurrentTime`, TE block, `team_name[8][20]`/`team_motto[8][200]`),
 `world_json.hpp` (JSON emitter with base64 preservation of undecoded sub-files).
 
-**Tests**: 179 (LZSS byte-exactness against real `.cmp` payload, container
+**Tests**: 166 (LZSS byte-exactness against real `.cmp` payload, container
 manifest parsing, campaign header decode, team-name extraction, JSON emit).
 Validated against a real Korea-theater `save1.cam` fixture.
 
@@ -467,7 +467,7 @@ auto team_ids = populate_teams(ew, ws);   // 7 entities (skips empty slot 0)
 auto rok = ew.with_tag(tags::TEAM, TagValue::from(std::string("ROK")));
 ```
 
-**Tests**: 94 (JSON field loading, team-slot parsing, entity creation with
+**Tests**: 95 (JSON field loading, team-slot parsing, entity creation with
 correct tags/identity, tag-based queries). End-to-end test loads the real
 `save1.cam`-derived JSON and verifies all 8 team names (ROK, Japan, PRC,
 DPRK, U.S., CIS, Gorn) round-trip from binary → JSON → typed structs.
@@ -557,7 +557,7 @@ flight-lead behavior) are named in the plan's Appendix A.
 commands through the flight API, never the FM directly), f4-entities,
 f4-messaging, f4-state-machine, f4-geo, f4-data, f4-math, f4-recorder.
 
-**Tests**: 311 (takeoff/landing/navigation lifecycles, BVR/WVR engagement
+**Tests**: 321 (takeoff/landing/navigation lifecycles, BVR/WVR engagement
 selection, missile/gun employment, wingman roles, refuel/tanker join,
 ground avoidance, collision avoidance, strike routing, tower ATC protocol,
 sensor fusion, layered-priority DigiMode preemption, trace verification).
@@ -661,7 +661,7 @@ host, so f4-sensors stays a leaf library with no AI/weapons dependency.
 - `rwr.hpp` — `RwrModel`, `RwrComponent`, `update_rwr()`, `RwrWarningMessage`
 - `messages.hpp` — radar track acquired/dropped bus events
 
-**Tests**: 74 (radar detection geometry + clutter/range gates, track
+**Tests**: 83 (radar detection geometry + clutter/range gates, track
 acquire/drop hysteresis, RWR warning emission, IR/visual component
 detection over the SIGDATA grids, dispenser/decoy deployment and
 seeker-seduction consumption).
@@ -811,7 +811,7 @@ the build — no preparation tools to run by hand. The viewer's
 "Start Session" verifies both exist up front and reports the rebuild
 command rather than a bare path when a stale build tree loses them.
 
-**Tests**: 357 (session/tick orchestration, combat chain integration, weather
+**Tests**: 391 (session/tick orchestration, combat chain integration, weather
 system, scenario loading, campaign session hosting + the client event
 stream, command journal + tick-exact replay, spawner/materialization,
 ATC modes, fidelity-tier sessions + the --accel certificate gates,
@@ -929,7 +929,7 @@ own field limits; no RNG anywhere. Draw/loss NETTING (C2): a drawn
 aircraft's death consumes its draw — the pool debits once, the debrief
 counts the loss; a parked aircraft's death debits the pool directly.
 
-**Tests**: 253 (tasking cycles + FindBestAir scoring, package build/escort
+**Tests**: 282 (tasking cycles + FindBestAir scoring, package build/escort
 staggering, ledger draw/recovery/reinforcement netting, threat map + A*
 route planning, mission profiles, RoE doctrine, retask/abort/priority,
 ACTION tables, create-from-parameters byte-identity, victory scoring,
@@ -953,7 +953,7 @@ Smaller modules with their own test suites (counts = TEST macros):
 | `f4-lzss` | FreeFalcon's LZSS decompressor — byte-exact against real `.cmp` payloads | 45 |
 | `f4-terrain` | Theater terrain runtime: near/far tile databases, post levels, theater geometry, the terrain source adapter behind the viewer's ground | 43 |
 | `f4-terrain-convert` | CLI: `THEATER.*` binary terrain files → `korea.terrain.json` (the only converter without a test suite yet) | — |
-| `f4-world-types` | Shared world vocabulary types: class table, day/night, weather, AII config, layout/campaign names, objective/feature types | 32 |
+| `f4-world-types` | Shared world vocabulary types: class table, day/night, weather, AII config, layout/campaign names, objective/feature types | 45 |
 | `f4-xml` | XML reading on pugixml (vendored) — the SVG military-symbol importer's substrate | 5 |
 | `f4-gltf` | Minimal glTF reader/writer for the model pipeline (hierarchy emit, textures) | 28 |
 | `f4-models` | KoreaObj BSP model parsing: LODs, materials, the raw DX node stream (full DX parsing deferred) | 36 |
@@ -961,8 +961,8 @@ Smaller modules with their own test suites (counts = TEST macros):
 | `f4-assets` | Data/ asset identity + integrity: SHA-256/FNV-1a fingerprints, the `@asset:` id derivation, the manifest reader behind Data/manifest.json | 58 |
 | `f4-import` | `f4import` CLI: install doctor, models/textures import into Data/, per-file emit | 46 |
 | `f4-recorder` | Input/state recorder — the AI demos' flight traces and the viewer's replay format | 59 |
-| `f4-renderer` | Raylib-backed renderer: camera, lit shaders, texture cache, 3D draw, feature meshes, SVG symbol library (GPU-context tests self-skip without a display) | 233 |
-| `f4-world-viewer` | The interactive world viewer (raylib + Dear ImGui): V-CAMP live campaign sessions, hex inspector, class-table browser. Also hosts the scenario player (`--scenario <path>` mode — fly a scenario template live, follow cam, speed; `--record` for a FlightRecorder trace; `--screenshot`/`--harness` for headless QC) | 88 |
+| `f4-renderer` | Raylib-backed renderer: camera, lit shaders, texture cache, 3D draw, feature meshes, SVG symbol library (GPU-context tests self-skip without a display) | 249 |
+| `f4-world-viewer` | The interactive world viewer (raylib + Dear ImGui): V-CAMP live campaign sessions, hex inspector, class-table browser. Also hosts the scenario player (`--scenario <path>` mode — fly a scenario template live, follow cam, speed; `--record` for a FlightRecorder trace; `--screenshot`/`--harness` for headless QC) | 99 |
 | `f4-models-viewer` | The interactive 3D model viewer (BSP/glTF, LOD switching, animation preview) | — |
 
 ## Building

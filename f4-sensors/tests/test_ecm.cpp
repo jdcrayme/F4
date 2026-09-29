@@ -48,19 +48,26 @@ struct World {
 /// Radar at origin (own_team "blue"), target due north at `range_ft`
 /// flying south (head-on, closing). `jam_on_target`: the target carries
 /// a live pod; `jam_params` shapes it.
+///
+/// Jam sits at namespace scope: a default argument (`Jam jam = {}`)
+/// inside the enclosing class would need the nested aggregate's
+/// defaulted constructor while `HeadOn` is still incomplete — MSVC and
+/// Clang allow it, GCC 14 rejects it ("default member initializer ...
+/// required before the end of its enclosing class"). Hoisted, every
+/// compiler reads the same file.
+struct Jam {
+    bool on = false;
+    double strength = 1.0;
+    double burn_through_nm = 20.0;
+    const char* team = "red";
+    bool dead = false;
+    bool enabled = true;
+};
+
 struct HeadOn {
     World w;
     entities::EntityHandle radar;
     entities::EntityHandle target;
-
-    struct Jam {
-        bool on = false;
-        double strength = 1.0;
-        double burn_through_nm = 20.0;
-        const char* team = "red";
-        bool dead = false;
-        bool enabled = true;
-    };
 
     explicit HeadOn(double range_ft, Jam jam = {}) {
         radar = w.world.create();

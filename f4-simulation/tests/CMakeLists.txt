@@ -102,6 +102,13 @@ f4_simulation_add_test(test_sensor_fidelity        test_sensor_fidelity.cpp)
 target_compile_definitions(test_sensor_fidelity PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
 )
+# The passive-fusion blind-spot geometry companion (drives the full
+# Simulation::tick over the generated F-16 config — same fixture shape
+# as the combat integration tests).
+f4_simulation_add_test(test_passive_fusion         test_passive_fusion.cpp)
+target_compile_definitions(test_passive_fusion PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
 f4_simulation_add_test(test_countermeasure_e2e     test_countermeasure_e2e.cpp)
 target_compile_definitions(test_countermeasure_e2e PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"

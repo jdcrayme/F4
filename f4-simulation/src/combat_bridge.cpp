@@ -76,6 +76,26 @@ void apply_signature_grid(entities::EntityHandle& aircraft,
     }
 }
 
+/// The passive-fusion data hook: resolve the AIRFRAME IRST card (the
+/// library's "generic" row — the row the plan designates as the
+/// airframe sensor; the other rows are the missile seekers the
+/// countermeasure model consumes) onto the freshly attached
+/// IrstComponent. No library, or a library without the row, keeps the
+/// component's defaults — which are themselves the shipped generic card
+/// (az 120 / el 60 / 10 NM / gf 1.0), so a data-free host flies the
+/// same shape. flare_chance is NOT applied: it is the missile-seeker
+/// consumption number, meaningless for the airframe sensor.
+void apply_irst_airframe_card(sensors::IrstComponent& irst,
+                              const f4::data::IrstSensorData* cards) {
+    if (cards == nullptr) return;
+    const auto* entry = cards->find("generic");
+    if (entry == nullptr) return;
+    irst.params.az_limit_deg = entry->data.az_limit_deg;
+    irst.params.el_limit_deg = entry->data.el_limit_deg;
+    irst.params.nominal_range_nm = entry->data.nominal_range_nm;
+    irst.params.ground_factor = entry->data.ground_factor;
+}
+
 /// The BVR weapon: the LONGEST-RANGE air-to-air missile class in the
 /// table (AIM-120C over AIM-9M). find_by_category would return the FIRST
 /// A/A record — the Sidewinder — and the whole BVR doctrine (envelope,
@@ -239,7 +259,9 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
                            const SignatureContext* signatures,
                            bool countermeasures,
                            bool passive_sensors,
-                           bool ecm) {
+                           bool ecm,
+                           const f4::data::IrstSensorData*
+                               ir_airframe_cards) {
     // Identity first: the TEAM tag drives IFF (TrackStore), RWR emitter
     // role checks, and launch_missile's team copy. CampaignIdentity
     // carries the callsign the radar's NCTR resolves after a few scans.
@@ -320,6 +342,9 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
         irst.rng_seed = seed_base +
             static_cast<std::uint32_t>(0x2000 + aircraft_index);
         irst.own_team = ac.team;
+        // The airframe card from the host's library (no-op without one —
+        // the component defaults mirror the shipped generic card).
+        apply_irst_airframe_card(irst, ir_airframe_cards);
         auto& visual = aircraft.add<sensors::VisualComponent>();
         visual.own_team = ac.team;
     }
@@ -1006,7 +1031,8 @@ CampaignCombatArmament arm_campaign_combat(
     const SignatureContext* signatures,
     bool countermeasures,
     bool passive_sensors,
-    bool ecm) {
+    bool ecm,
+    const f4::data::IrstSensorData* ir_airframe_cards) {
     CampaignCombatArmament out;
 
     // 0. The candidate contract: a campaign aircraft (origin stamped) with
@@ -1116,6 +1142,9 @@ CampaignCombatArmament arm_campaign_combat(
             irst.rng_seed = seed_base +
                 static_cast<std::uint32_t>(0x2000 + arm_index);
             irst.own_team = team;
+            // The airframe card from the host's library (no-op without
+            // one — the component defaults mirror the shipped card).
+            apply_irst_airframe_card(irst, ir_airframe_cards);
             out.components_attached = true;
         }
         if (aircraft.get<sensors::VisualComponent>() == nullptr) {

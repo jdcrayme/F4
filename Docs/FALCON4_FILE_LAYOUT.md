@@ -333,10 +333,10 @@ of which is a typed binary record stream:
 | Inner file | Records                       | F4 parser                       |
 |------------|-------------------------------|---------------------------------|
 | `.cmp`     | CampaignClass                 | `campaign_decoder.cpp`          |
-| `.tea`     | TeamClass + ATMAirbaseClass   | `team_decoder.cpp` (partial — ATM block not yet decoded) |
+| `.tea`     | TeamClass + ATMAirbaseClass   | `team_decoder.cpp` (teams + the ATM block: manager headers, mission requests, airbase schedules — the DOM-4 slot face consumes it) |
 | `.obj`     | ObjectiveClass + features     | `objective_decoder.cpp`         |
 | `.unit`    | UnitClass                     | `unit_decoder.cpp`              |
-| `.pilot`   | PilotClass                    | (not yet parsed)                |
+| `.pilot`   | PilotClass                    | `unit_decoder.cpp` (the squadron's 48-pilot roster — 10-byte PilotClass records; the DOM-3 personnel face consumes it) |
 | `.team`    | (team bits)                   | `team_decoder.cpp`              |
 | `.victory` | VictoryClass                  | (not yet parsed)                |
 | `.oob`     | Order-of-battle               | (not yet parsed)                |
@@ -344,8 +344,10 @@ of which is a typed binary record stream:
 
 **Curated**: the EXPOSE-1 task (see `worklog.md`) added `fstatus[]`,
 `RadarRangeClass.detect_ratio[]`, `waypoints[]`, `airbase_id`, `roster`, and
-team-name resolution. Still-missing `.cam` subdata: ATM airbase schedule
-(`.tea` post-TeamClass block), pilot roster, OOB tree, victory conditions.
+team-name resolution. Since landed: the ATM airbase schedule (the `.tea`
+post-TeamClass block, CAMP-ATM-1) and the pilot roster (the DOM-3
+personnel face). Still-missing `.cam` subdata: OOB tree, victory
+conditions.
 
 ---
 
@@ -368,7 +370,7 @@ by index.
 | `Falcon4.FCD`     | `FeatureClassDataType[]`      | feature class definitions (name, hit points, repair time) | ✅ **PARSED** — `theater_data.hpp` (verified) |
 | `Falcon4.OTD`     | `ObjectiveTypeData[]`         | objective type table (may be absent in some installs) | **NOT PARSED** — low priority |
 | `Falcon4.ORD`     | `ObjectiveRadarData[]`        | per-objective radar data (may be absent) | **NOT PARSED** — low priority |
-| `Falcon4.RCD`     | `RadarClassData[]`            | radar class definitions (range + detection ratios) | **NOT PARSED** — 56 records × 60 bytes confirmed in snapshot |
+| `Falcon4.RCD`     | `RadarClassData[]`            | radar class definitions (range + detection ratios) | ✅ **PARSED** — `theater_data.cpp` (`load_radar_data`; the emitter side of the sensor chain) |
 
 ### 3.1 `Falcon4.PHD` — PtHeaderDataType
 
@@ -633,7 +635,7 @@ state of every building/runway/feature on every objective.
 
 | File             | Format          | Contents                                | F4 status                  |
 |------------------|-----------------|-----------------------------------------|----------------------------|
-| `Falcon4.AII`    | INI (text)      | `SIM_BUBBLE_SIZE`, `GROUND_BUBBLE_SIZE`, bubble scale factors, ATC tuning | **NOT PARSED** — referenced from FreeFalcon source but not yet loaded |
+| `Falcon4.AII`    | INI (text)      | `SIM_BUBBLE_SIZE`, `GROUND_BUBBLE_SIZE`, bubble scale factors, ATC tuning | ✅ **PARSED** — `f4-world-types` `aii_config` (GetPrivateProfileString semantics over the real file) |
 | `Falcon4.AIL`    | binary (table)  | AI logic table (skill modifiers, target priorities) | **NOT PARSED** — low priority |
 | `Falcon4.SAI`    | binary          | Strategic AI weights                    | **NOT PARSED** — low priority |
 

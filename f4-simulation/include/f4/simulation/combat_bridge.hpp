@@ -126,7 +126,17 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
                            /// when the scenario turned the fidelity on
                            /// AND this aircraft opted in (the per-aircraft
                            /// "ecm" field, ANDed by the caller).
-                           bool ecm = false);
+                           bool ecm = false,
+                           /// The passive-fusion data hook: the host's
+                           /// loaded IRST card library — the airframe
+                           /// card resolves from its "generic" row onto
+                           /// the freshly attached IrstComponent (null,
+                           /// or a library without the row, keeps the
+                           /// component defaults — which mirror the
+                           /// shipped generic card). Non-owning; the
+                           /// host owns the parse.
+                           const f4::data::IrstSensorData*
+                               ir_airframe_cards = nullptr);
 
 /// SensorFusion::DetectionPolicy backed by the ownship's radar tracks and
 /// RWR picture. This is the M2 integration point (SensorFusion::
@@ -518,6 +528,10 @@ struct CampaignCombatArmament {
     /// The ECM gate (see attach_combat_loadout). The campaign arm's
     /// caller keeps this false — no per-unit ECM data exists; the
     /// parameter shapes both arm paths identically.
-    bool ecm = false);
+    bool ecm = false,
+    /// The passive-fusion data hook (see attach_combat_loadout):
+    /// the airframe IRST card resolves from the library's "generic"
+    /// row when the passive legs attach here.
+    const f4::data::IrstSensorData* ir_airframe_cards = nullptr);
 
 } // namespace f4::simulation

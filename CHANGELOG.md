@@ -5,6 +5,64 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## SENSOR-FUSION-2 — the airframe card resolves, the blind spot is pinned, and CI grows the Windows + sanitizer legs
+
+- **The airframe IRST card resolves from the host's library** — the
+  fusion tranche attached the IrstComponent with the component's
+  hard-coded defaults (which mirror the shipped generic card); now
+  `attach_combat_loadout` / `arm_campaign_combat` take the host's
+  loaded `IrstSensorData` (the scenario path and the campaign arm both
+  pass `&ir_seeker_data_` — the library the missile-seeker side
+  already parses) and `apply_irst_airframe_card` overlays its
+  "generic" row onto the fresh component (az/el/range/ground factor;
+  `flare_chance` deliberately NOT applied — that is the missile-seeker
+  consumption number, meaningless for the airframe sensor). No
+  library, or a library without the row, keeps the defaults —
+  byte-identical, the golden identity. A host that points
+  `ir_seeker_data_path` at a different card set now re-shapes every
+  airframe's IRST eyes with the data, not a recompile.
+- **The blind-spot geometry is pinned end to end** —
+  `test_passive_fusion` (8 tests) drives the full `Simulation::tick`
+  over the tranche's named shape: both C6-boresighted radar bars miss
+  the bandit by 55° while the IRST/eyeball hold it (6 NM aft-quarter),
+  the fold lights `detected_by_visual` with the radar leg false, the
+  spawned brain makes the bandit its threat target sampled at FIRST
+  contact (the passive-first ordering is part of the contract), the
+  gate-off twin of the same geometry stays exactly the pre-FUSE
+  silence, the airframe card test proves the library hookup, and the
+  corpse rule covers both passive legs. `test_sensor_fidelity` pins
+  the tranche's semantics over a hand-rolled policy world; this file
+  pins its geometry over the real host.
+- **CI-WIDE: the suite gains the windows (MSVC headless) and sanitize
+  (ASan+UBSan) jobs** — the dev platform and the leak class the
+  FID-OPT-1 UAF exposed were both uncovered: an MSVC-only conformance
+  break landed untested, and nothing in CI would have caught the same
+  leak class on main. Both jobs fly the headless shape (GUI targets
+  off, boundary gate ON) with the Data/ manifest hygiene check up
+  front; the sanitizer flags ride `CMAKE_CXX_FLAGS` so the FetchContent
+  deps sanitize too.
+- **BUILD-FIX: test_ecm compiles on GCC 14** — the `HeadOn` harness's
+  default argument (`Jam jam = {}`) needed the nested aggregate's
+  defaulted constructor while `HeadOn` was still incomplete; MSVC and
+  Clang allow that, GCC 14 rejects it — the test did not compile on
+  the repo's own CI toolchain. `Jam` hoists to namespace scope, every
+  compiler reads the same file.
+- **DATA-MANIFEST: the committed manifest matches the committed tree
+  again** — the manifest had been regenerated on a machine where
+  `f4import` had produced the gitignored `Models/koreaobj` files: it
+  listed 3,962 files absent on every clone (both the CI hygiene step
+  and `Sha256.ReproducesCommittedManifestFingerprints` failed on
+  fresh checkouts of main) and missed the committed
+  `Theater/korea/tables.json`. Regenerated against the committed
+  tree: absent entries dropped, `tables.json` listed
+  (`theater:korea`), fresh clones check green.
+- **DOC-DRIFT: README per-library test counts re-pinned to actual TEST
+  macros (11 stale rows; `scripts/check_readme_counts.py` added —
+  pure-Python, exits 1 on drift)**, and FALCON4_FILE_LAYOUT rows
+  corrected (`.tea` ATM block, `.pilot` roster, RCD, AII — all
+  verified parsed in the current tree; the not-yet-parsed claims had
+  drifted back over landed work).
+
 ## THREAT-TABLES-1 — the converted UCD paints the threat map
 
 - **The C3 threat-map coverage gap closes with the data CAMP-SCALE-1
