@@ -102,6 +102,10 @@ CampaignSessionOptions make_opts(const std::filesystem::path& world) {
     o.reinforce_period_sec = 0;   // off: the air cadence is not this file's
     o.max_flights = 8;
     o.atm_pipeline = false;
+    // The supply/mirror rig pins the pre-FID spawn-at-init behavior —
+    // keep FullFidelity EXPLICITLY now that the session default is
+    // Tiered.
+    o.fidelity_policy = FidelityPolicy::FullFidelity;
     return o;
 }
 

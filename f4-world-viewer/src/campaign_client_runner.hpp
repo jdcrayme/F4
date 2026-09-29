@@ -28,10 +28,15 @@
 // fed WALL seconds to an accumulator that drained whole ticks; the
 // contract's step(ticks) is tick-granular. The worker therefore converts
 // its wall×speed slice to a tick count itself, carrying the sub-tick
-// fraction batch to batch, and honors the same DILATION rule as before —
-// when the adaptive budget caps a batch, the excess is DROPPED (never
-// queued; the UI surfaces it via time_dilated(), the plan §2.2 "debt is
-// dropped" discipline).
+// fraction batch to batch. Dilation is now a GOVERNOR, not a silent
+// drop (the HandleCampaignThread lesson — freefalcon-central
+// campaign.cpp:2680 "Slow things down"): when a batch hits the cap, the
+// runner halves its DELIVERY SCALE (an AIMD multiplier under the preset)
+// so the next batches feed what the CPU can actually drain — the war's
+// clock slows and every fed tick lands. When delivery runs clean again,
+// the scale doubles back toward the preset (the reference's "Back to
+// full speed"). The preset stays the ceiling REQUEST; time_dilated()
+// now means even the fully de-rated feed outran the CPU (drops resumed).
 //
 // Pause semantics: the runner's paused flag is the UI's clock switch —
 // the worker stops stepping but KEEPS waking (cheap), and the session's
@@ -120,13 +125,26 @@ public:
     /// The wall-clock multiplier (speed presets: 1x/10x/60x/240x).
     /// Clamped to [0.0, 1024.0]. The tick dt itself NEVER scales (the
     /// FM's tuned 1/60 s discretization) — only how much sim time the
-    /// worker feeds per wall second.
+    /// worker feeds per wall second. A new preset resets the delivery
+    /// governor to full feed (the reference's SetTimeCompression — a
+    /// new ratio is TRIED, then the CPU says what it sustains).
     void set_speed(double s) noexcept;
     [[nodiscard]] double speed() const noexcept { return speed_.load(); }
 
-    /// True when the last step batch hit the adaptive tick cap — the UI
-    /// surfaces "time dilated" (the debt is dropped, the preset outran
-    /// the CPU).
+    /// The governor's current delivery scale in (0, 1] — the fraction
+    /// of the preset the worker is FEEDING while dilated (AIMD: halved
+    /// per capped batch, doubled back per clean streak, clamped to the
+    /// preset). 1.0 = the full preset is being fed. Diagnostics: the
+    /// UI can show "240x (delivering 6.2x)" — the preset is the
+    /// request, this is the governor's answer.
+    [[nodiscard]] double delivery_scale() const noexcept {
+        return delivery_scale_.load();
+    }
+
+    /// True when a step batch hit the cap EVEN AFTER the governor
+    /// de-rated the feed — the UI surfaces "time dilated" (only the
+    /// residual case drops ticks now; steady-state overload slows the
+    /// clock instead, like the reference's compression halving).
     [[nodiscard]] bool time_dilated() const noexcept {
         return time_dilated_.load();
     }
@@ -186,6 +204,8 @@ private:
     std::atomic<bool> stop_{false};
     std::atomic<bool> paused_;
     std::atomic<double> speed_{1.0};
+    std::atomic<double> delivery_scale_{1.0};   // AIMD governor, (0, 1]
+    std::atomic<int> clean_batches_{0};         // governor's recover streak
     std::atomic<bool> time_dilated_{false};
     std::atomic<double> advanced_sim_s_{0.0};
     std::atomic<double> effective_speed_{0.0};

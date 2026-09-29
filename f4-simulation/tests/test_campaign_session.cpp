@@ -89,6 +89,10 @@ CampaignSessionOptions make_opts(const std::filesystem::path& world) {
     // family wins the pool; both readings are honest, the fixtures
     // were built for the legacy one).
     o.atm_pipeline = false;
+    // This rig predates the tiers and pins the pre-FID spawn-at-init
+    // behavior — it keeps FullFidelity EXPLICITLY now that the session
+    // default is Tiered.
+    o.fidelity_policy = FidelityPolicy::FullFidelity;
     return o;
 }
 

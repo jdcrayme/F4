@@ -70,6 +70,9 @@ CampaignSessionOptions make_opts(bool pilot_assignment,
     o.atm_pipeline = true;
     o.pilot_assignment = pilot_assignment;
     o.rating_decay = rating_decay;
+    // The personnel rig pins the pre-FID spawn-at-init behavior — keep
+    // FullFidelity EXPLICITLY now that the session default is Tiered.
+    o.fidelity_policy = FidelityPolicy::FullFidelity;
     return o;
 }
 

@@ -36,6 +36,22 @@ constexpr double kMaxWallSliceSec = 0.25;
 // batch — the engine's own max-steps-per-advance league.
 constexpr int kMaxTickBudget = 4096;
 
+// The delivery GOVERNOR (the HandleCampaignThread lesson: the reference
+// halves gameCompressionRatio when the campaign falls behind and
+// restores it on catch-up — the clock slows, the CPU never pegs). The
+// worker feeds preset × delivery_scale_; a capped batch halves the
+// scale (multiplicative decrease — one cap halves, it does not
+// inch down), a clean streak doubles it back. The floor keeps a Debug
+// build's residual drops bounded: below kMinDeliveryScale the feed is
+// already tiny, and time_dilated_ honestly reports whatever remains.
+constexpr double kMinDeliveryScale = 1.0 / 64.0;
+
+// Clean batches required before the scale doubles back (AIMD's additive
+// patience: ~0.1-0.2 s of fully-delivered feed per doubling at the
+// worker's ~7-13 ms iteration period — quick to recover, slow to
+// oscillate at the capacity edge).
+constexpr int kCleanBatchesPerRecover = 16;
+
 } // namespace
 
 CampaignClientRunner::CampaignClientRunner(
@@ -77,6 +93,12 @@ void CampaignClientRunner::set_paused(bool p) {
 void CampaignClientRunner::set_speed(double s) noexcept {
     constexpr double kMaxSpeed = 1024.0;
     speed_.store(std::clamp(s, 0.0, kMaxSpeed));
+    // A new preset is TRIED at full feed (the reference's
+    // SetTemporaryCompression on a ratio change): the governor then
+    // finds what the CPU sustains — the preset is the request, not a
+    // promise.
+    delivery_scale_.store(1.0);
+    clean_batches_.store(0);
 }
 
 void CampaignClientRunner::worker_loop_() {
@@ -99,7 +121,14 @@ void CampaignClientRunner::worker_loop_() {
         last = now;
         if (wall_sec < 0.0) wall_sec = 0.0;                 // clock weirdness
         if (wall_sec > kMaxWallSliceSec) wall_sec = kMaxWallSliceSec;
-        const double sim_seconds = wall_sec * speed_.load();
+        // The GOVERNORED feed: preset × delivery_scale — the scale is
+        // 1.0 until the CPU says otherwise, then AIMD keeps the fed
+        // ticks just inside what a batch can fully drain (no dropped
+        // time in steady state; the war slows, it does not lose
+        // seconds).
+        const double sim_seconds =
+            wall_sec * speed_.load() * delivery_scale_.load();
+        int clean_batches = clean_batches_.load(std::memory_order_relaxed);
 
         {
             std::lock_guard<FairMutex> lock(session_mutex_);
@@ -125,6 +154,9 @@ void CampaignClientRunner::worker_loop_() {
                     // The adaptive budget caps the batch: the excess is
                     // DROPPED, never queued (the dilation discipline —
                     // the UI surfaces it, the clock does not catch up).
+                    // The governor below reacts: the NEXT batches feed
+                    // inside this batch's demonstrated capacity, so
+                    // steady-state runs stop dropping entirely.
                     ticks = static_cast<double>(budget);
                     capped = true;
                     tick_carry_ = 0.0;
@@ -141,6 +173,27 @@ void CampaignClientRunner::worker_loop_() {
             const double sim_advanced = ticks * tick_sec_;
             advanced_sim_s_.store(advanced_sim_s_.load() + sim_advanced);
             time_dilated_.store(capped);
+
+            // The governor's AIMD update. A capped batch halves the
+            // feed (the reference's "Slow things down"); a clean streak
+            // doubles it back toward the preset ("Back to full speed").
+            // The drops this batch already made are the signal — the
+            // NEXT batches feed what the CPU just demonstrated it can
+            // drain.
+            if (capped) {
+                const double cur = delivery_scale_.load();
+                delivery_scale_.store(
+                    std::max(kMinDeliveryScale, cur * 0.5));
+                clean_batches = 0;
+            } else if (ticks >= 1.0) {
+                ++clean_batches;
+                if (clean_batches >= kCleanBatchesPerRecover) {
+                    delivery_scale_.store(
+                        std::min(1.0, delivery_scale_.load() * 2.0));
+                    clean_batches = 0;
+                }
+            }
+            clean_batches_.store(clean_batches, std::memory_order_relaxed);
 
             // Measured delivery rate — an EMA over the batches (see
             // effective_speed()). wall_sec is this iteration's wall

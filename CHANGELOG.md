@@ -5,6 +5,35 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## FID-DEF-GOV — Tiered is the default fidelity policy; the runner's dilation becomes an AIMD delivery governor
+
+- **The acceleration verdict becomes the default** — `CampaignSessionOptions::fidelity_policy`
+  now defaults to `Tiered` (FID-6's certificate: 58.1× tiered vs 25.3×
+  FullFidelity on the same war; FullFidelity's whole-war FM walk is the
+  CPU limit the presets outrun long before 60×). This is the original
+  game's own economics — aggregates everywhere, the flight model only
+  near the eye — and the viewer's "fidelity tiers" checkbox already
+  read this way. FullFidelity stays a first-class mode: every rig that
+  pins the pre-FID spawn-at-init shape (test_campaign_session,
+  test_strategy_layer, test_campaign_supply,
+  test_campaign_personnel_session, test_flight_state_diag) now sets it
+  EXPLICITLY, so intent is pinned rather than inherited.
+- **The delivery governor (the HandleCampaignThread lesson)** — the
+  viewer runner fed `wall × preset` and DROPPED whatever a capped
+  batch couldn't drain: every unsustainable preset silently moved the
+  clock at the same CPU-bound rate. The reference instead halves its
+  compression when the campaign falls behind and restores it on
+  catch-up ("Slow things down" / "Back to full speed",
+  freefalcon-central campaign.cpp:2680). The runner now does the same
+  with an AIMD delivery scale in (0, 1] under the preset: a capped
+  batch halves the feed, `kCleanBatchesPerRecover` clean batches
+  doubles it back, `set_speed` resets to full feed (a new preset is
+  TRIED, then the CPU says what it sustains). Steady-state overload
+  now SLOWS the clock instead of losing seconds; `time_dilated()`
+  honestly reports only the residual case (drops resumed at the
+  floor), and the new `delivery_scale()` readout gives the UI the
+  governor's answer ("240x — delivering 6.2x").
+
 ## DEAGG-RWY-1 — deaggregated flights hold, teleport to the runway, and the stock-save ATC knows every field
 
 - **The campaign takeoff fix, twice over** — the user report

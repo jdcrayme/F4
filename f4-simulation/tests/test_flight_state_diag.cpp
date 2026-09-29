@@ -56,6 +56,11 @@ TEST(FlightStateDiag, ShowcaseSessionAirborneTrace) {
         o.mission_profiles = profiles;
     }
     o.max_flights = 48;
+    // The flight-state diagnostics pin the pre-FID spawn-at-init
+    // behavior — keep FullFidelity EXPLICITLY now that the session
+    // default is Tiered.
+    o.fidelity_policy =
+        f4::simulation::FidelityPolicy::FullFidelity;
     o.aa_combat = true;
     o.initial_tasking_cycle = true;
     o.atm_pipeline = true;

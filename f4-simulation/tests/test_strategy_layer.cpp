@@ -84,6 +84,9 @@ CampaignSessionOptions make_opts(const std::filesystem::path& world) {
     o.reinforce_period_sec = 0;
     o.max_flights = 8;
     o.atm_pipeline = true;
+    // The strategy layer pins the pre-FID spawn-at-init behavior — keep
+    // FullFidelity EXPLICITLY now that the session default is Tiered.
+    o.fidelity_policy = FidelityPolicy::FullFidelity;
     return o;
 }
 

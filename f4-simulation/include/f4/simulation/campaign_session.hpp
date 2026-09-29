@@ -87,18 +87,24 @@ namespace f4::simulation {
 /// FIDELITY_TIERS_PLAN (Docs/FIDELITY_TIERS_PLAN.md): how much of the
 /// war runs at sim fidelity.
 ///
-///   FullFidelity — TODAY's behavior, bit for bit: every spawned
-///     aircraft runs the full FM + AI + sensors at 60 Hz from spawn to
-///     recovery. Every existing golden pins this mode.
-///   Tiered — the save's flights stay campaign AGGREGATES
+///   Tiered — DEFAULT (the acceleration verdict, FID-6/FID-OPT): the
+///     save's flights stay campaign AGGREGATES
 ///     (f4-campaign::FlightAggregateEngine: route-leg propagation at a
 ///     coarse cadence, cruise fuel burn) until an observer bubble (the
 ///     camera, V-3DLIVE semantics), an airfield-ops window (takeoff /
 ///     recovery), or an explicit request deaggregates them into real
-///     per-flight aircraft. Time compression becomes a fidelity
-///     problem, not a clock problem — the FIXED-dt discipline forbids
-///     dt scaling, so the number of full-fidelity entities is the only
-///     lever.
+///     per-flight aircraft. This is the original game's own economics —
+///     aggregates everywhere, the flight model only near the eye — and
+///     it is what makes the high speed presets deliver (the FID-6
+///     certificate: 58.1x tiered vs 25.3x full-fidelity on the same
+///     war; the CPU ceiling is the number of full-fidelity entities,
+///     because the FIXED-dt discipline forbids dt scaling).
+///   FullFidelity — every spawned aircraft runs the full FM + AI +
+///     sensors at 60 Hz from spawn to recovery: the pre-FID shape,
+///     kept as the pinned baseline/test mode (the FM divergence and
+///     goldens that pin it set this policy explicitly). Running a
+///     whole war this way is the measured CPU limit the tiers exist
+///     to remove — a diagnostic, not a default.
 enum class FidelityPolicy {
     FullFidelity,
     Tiered,
@@ -357,12 +363,14 @@ struct CampaignSessionOptions {
     bool gci_ground_sites = false;
 
     /// FID-1: the fidelity policy (see FidelityPolicy above). Default
-    /// FullFidelity — the session is byte-identical to the pre-FID
-    /// shape with it (the same contract aa_combat / ground_war /
-    /// unit_strike keep). Tiered arms the aggregate flight engine,
-    /// defers the saved flights' aircraft spawn, and drives the
-    /// deagg/reagg machinery below.
-    FidelityPolicy fidelity_policy = FidelityPolicy::FullFidelity;
+    /// Tiered — the acceleration verdict (FID-6: 25.3x full-fidelity
+    /// vs 58.1x tiered on the same war; the walk plus 449 flight
+    /// models is the CPU limit the presets outrun long before 60x).
+    /// The aggregate engine arms, the saved flights' aircraft spawn is
+    /// deferred, and the deagg/reagg machinery below drives the eye.
+    /// FullFidelity is the pinned baseline/test mode — every golden
+    /// that wants the pre-FID shape sets it EXPLICITLY.
+    FidelityPolicy fidelity_policy = FidelityPolicy::Tiered;
 
     /// FID-2: the aggregate advance cadence (campaign seconds; 60 =
     /// the ground war's update precedent).
