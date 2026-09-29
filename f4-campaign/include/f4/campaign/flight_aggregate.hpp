@@ -99,6 +99,17 @@ struct FlightAggregateConfig {
     /// cruise-specific figure is data (f4-data) in a later tranche;
     /// this constant is the v1 divergence, documented and pinned.
     int fuel_burn_lbs_per_min = 70;
+
+    /// The wire's credibility floor (grid/min). A TIME-mode route
+    /// whose computable legs ALL imply a crawl below this (the stock
+    /// saves' waypoint times are the ATO planner's multi-day horizon —
+    /// legs crossing Korea at 0.01 grid/min, weeks per leg) cannot
+    /// drive motion; such a route flies SPEED mode at the cruise
+    /// instead, and a route with no computable leg at all does too.
+    /// Sane wires (hand-authored fixtures, the tests' schedules) keep
+    /// the TIME-mode identity. 0 disables the fallback (the wire is
+    /// always trusted).
+    double min_leg_speed_grid_per_min = 1.0;
 };
 
 /// Which flights the engine aggregates. Same vocabulary and matching
@@ -149,6 +160,12 @@ struct FlightAggregateState {
     std::int32_t fuel_burnt = 0;        ///< per-aircraft lbs consumed
     std::size_t wp_index = 0;           ///< waypoint being flown TOWARD
     std::int32_t last_move = 0;         ///< absolute time of last advance
+    /// SPEED-mode cruise for THIS row (grid/min). 0 = the config
+    /// default (the ATM's campaign-move constant). The fold books the
+    /// lead's actual ground speed here — a folded flight keeps the
+    /// pace the viewer just watched instead of braking to the global
+    /// estimate.
+    double cruise_grid_per_min = 0.0;
     bool dirty = false;                 ///< moved/burned since last sync
     bool suspended = false;             ///< deaggregated: sim owns truth
     bool arrived = false;               ///< reached the last waypoint
@@ -198,9 +215,19 @@ public:
     /// schedule RE-ANCHORS at the fold (see reanchor_schedule_) so the
     /// wire schedule passes through the folded position at the fold
     /// time — the fold never snaps the flight back to a stale schedule
-    /// point. Unknown vu = no-op.
+    /// point. `cruise_grid_per_min` (0 = keep the config default)
+    /// books the lead's ACTUAL ground speed as this row's SPEED-mode
+    /// cruise: a flight that just flew 400 kts past the camera resumes
+    /// its aggregate at the pace the viewer watched, not at the global
+    /// 121-kt estimate (the visual brake that read as "the flight
+    /// stopped"). `lead_airborne` lets an AIRBORNE lead re-anchor even
+    /// with the wire's takeoff gate still closed — it already flew off
+    /// the wire; a grounded complement keeps the wire. Unknown vu =
+    /// no-op.
     void reaggregate(std::uint32_t vu, double fx, double fy,
-                     float altitude_ft, std::int32_t fuel_burnt);
+                     float altitude_ft, std::int32_t fuel_burnt,
+                     double cruise_grid_per_min = 0.0,
+                     bool lead_airborne = false);
 
     /// Track a SUSPENDED flight's live position/fuel into its row (the
     /// session calls this per tier pass from the lead aircraft's
@@ -291,6 +318,23 @@ public:
     [[nodiscard]] double cruise_grid_per_min() const noexcept {
         return cfg_.cruise_grid_per_min;
     }
+    /// A row's EFFECTIVE SPEED-mode cruise: its folded ground speed
+    /// when the fold booked one, else the config default. The combat
+    /// trigger's convergence prediction reads this per row.
+    [[nodiscard]] double effective_cruise_grid_per_min(
+        std::size_t index) const noexcept {
+        if (index >= flights_.size()) return cfg_.cruise_grid_per_min;
+        const double own = flights_[index].cruise_grid_per_min;
+        return own > 0.0 ? own : cfg_.cruise_grid_per_min;
+    }
+    /// The row's mode as constructed (TIME = the wire's own schedule
+    /// drives it; SPEED = the cruise walk). A timed route whose legs
+    /// all imply a crawl below min_leg_speed_grid_per_min constructs
+    /// as SPEED (the stock saves' multi-day wires cannot drive
+    /// motion). Unknown index = false.
+    [[nodiscard]] bool is_time_mode(std::size_t index) const noexcept {
+        return index < time_mode_.size() && time_mode_[index];
+    }
 
     /// Seconds until the flight's first waypoint departs (> 0 pending,
     /// <= 0 departed/no time). The takeoff-ops window query.
@@ -372,12 +416,14 @@ private:
     /// aircraft actually is, so the fold-back never snaps the flight
     /// back to a stale schedule point (the live window flew at real
     /// speeds while the wire modeled slower progress; the delta can be
-    /// tens of grids). A no-op for a pre-departure fold (the takeoff
-    /// gate still owns the schedule) and for routes without at least
-    /// two scheduled anchors.
+    /// tens of grids). A grounded pre-departure fold keeps the wire
+    /// (the takeoff gate still owns the schedule); an AIRBORNE lead
+    /// re-anchors regardless — it already flew off the wire, and the
+    /// shift lands the gate in the past (the sortie is flying). A
+    /// no-op for routes without at least two scheduled anchors.
     void reanchor_schedule_(FlightAggregateState& f,
                             std::vector<f4::entities::WaypointState>& route,
-                            std::int64_t now_abs);
+                            std::int64_t now_abs, bool lead_airborne);
 
     FlightAggregateConfig cfg_;
     std::vector<FlightAggregateState> flights_;

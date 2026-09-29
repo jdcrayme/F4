@@ -777,3 +777,142 @@ TEST(FlightAggregate, TimeModeArrivesPastAnUnscheduledTail) {
     EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 10.0);
     EXPECT_EQ(rig.engine->stats().arrived, 1);
 }
+
+// ── 13. CAMP-SAVE-WIRE — the stock saves' multi-day wires ──────────────────
+//
+// The stock campaign saves' waypoint times are the ATO planner's
+// horizon: computable legs at ~0.01 grid/min (weeks per leg). Strict
+// TIME-mode interpolation froze the whole war into imperceptible
+// creep — the "none of the flights move" report. A timed route whose
+// computable legs all crawl below the floor constructs as SPEED mode;
+// sane wires and mixed wires (a slow loiter leg inside a fast route)
+// keep the TIME identity.
+
+TEST(FlightAggregate, GarbageWireConstructsAsSpeedMode) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    // 60 grid across 600,000 s = 0.006 grid/min: the stock-save shape.
+    rig.ws->units = {flight(1, 2, 0, 0, 13,
+                            {wp(0, 0, 0, 0, kEpoch + 600),
+                             wp(60, 0, 8000, kEpoch + 600600)},
+                            {group(1)})};
+    rig.make();
+    EXPECT_FALSE(rig.engine->is_time_mode(0));
+    // The depart gate on wp0 still owns a SPEED route (the wire's slot
+    // survives the mode fallback): gated at E+60, walking the cruise
+    // (12 grid per update) once E+600 passes — and never a 0.006-grid
+    // TIME-mode crawl.
+    rig.engine->tick(60);
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 0.0);
+    rig.engine->tick(600);   // clock E+660: the E+600 boundary update fires
+    EXPECT_NEAR(rig.engine->flights()[0].fx, 24.0, 1e-9);
+}
+
+TEST(FlightAggregate, SaneAndMixedWiresStayTimeMode) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    // Sane: 60 grid in 600 s = 6 grid/min.
+    // Mixed: a fast leg + one slow "loiter" leg — the loiter is a
+    // schedule, not garbage; the wire stays trusted.
+    rig.ws->units = {
+        flight(1, 2, 0, 0, 13,
+               {wp(0, 0, 0, 0, kEpoch + 600),
+                wp(60, 0, 8000, kEpoch + 1200)},
+               {group(1)}),
+        flight(2, 2, 0, 50, 13,
+               {wp(0, 50, 0, 0, kEpoch + 600),
+                wp(60, 50, 8000, kEpoch + 1200),
+                wp(62, 50, 8000, kEpoch + 4800)},   // 2 grid in 3600 s
+               {group(1)})};
+    rig.make();
+    EXPECT_TRUE(rig.engine->is_time_mode(0));
+    EXPECT_TRUE(rig.engine->is_time_mode(1));
+
+    // The fallback is configurable: 0 trusts every wire.
+    Rig rig2;
+    rig2.ws = std::make_unique<WorldState>(Rig::base());
+    rig2.ws->units = {flight(1, 2, 0, 0, 13,
+                             {wp(0, 0, 0, 0, kEpoch + 600),
+                              wp(60, 0, 8000, kEpoch + 600600)},
+                             {group(1)})};
+    FlightAggregateConfig cfg;
+    cfg.min_leg_speed_grid_per_min = 0.0;
+    rig2.make(cfg);
+    EXPECT_TRUE(rig2.engine->is_time_mode(0));
+}
+
+// ── 14. The fold's pace — a folded flight keeps the speed it flew ─────────
+
+TEST(FlightAggregate, FoldBooksTheLeadPace) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    rig.ws->units = {flight(1, 2, 0, 0, 13, {wp(200, 0, 5000)}, {group(1)})};
+    rig.make();
+
+    // The lead flew past the camera at ~360 kts (609.6 fps = 35.7
+    // grid/min); the fold books it (clamped into [config, 40]).
+    rig.engine->set_suspended(1, true);
+    rig.engine->reaggregate(1, 10.0, 0.0, 5000.0f, 100, 35.7, true);
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].cruise_grid_per_min, 35.7);
+
+    // The walk and the display move at the BOOKED pace (35.7 grid/min
+    // × 60 s = 35.7 grid per update), not the 12-grid default. The
+    // fold stamped last_move at clock 0 — the display extrapolates
+    // from there.
+    rig.engine->tick(60);
+    EXPECT_NEAR(rig.engine->flights()[0].fx, 45.7, 1e-9);
+    double fx = -1, fy = -1;
+    float alt = -1;
+    rig.engine->display_position(0, kEpoch + 90, fx, fy, alt);
+    EXPECT_NEAR(fx, 63.55, 1e-9);   // 45.7 + 30 s × 35.7/60
+
+    // A fold without a booking resets the row to the config default.
+    rig.engine->set_suspended(1, true);
+    rig.engine->reaggregate(1, 70.0, 0.0, 5000.0f, 200);
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].cruise_grid_per_min, 0.0);
+    rig.engine->display_position(0, kEpoch + 90, fx, fy, alt);
+    EXPECT_NEAR(fx, 76.0, 1e-9);   // 70 + 30 s × 12/60
+}
+
+// ── 15. The airborne fold re-anchors past a still-closed gate ──────────────
+//
+// A bubble/ops deagg can take an unlaunched (wire-gated) flight off the
+// ramp early; when it folds back, the wire's depart is still in the
+// future. A grounded complement keeps the wire (the gate owns the
+// schedule) — but an AIRBORNE lead already flew off the wire, so the
+// re-anchor proceeds and lands the gate in the past: the folded glyph
+// keeps flying from where the aircraft is, not frozen on the ramp.
+
+TEST(FlightAggregate, AirborneFoldReanchorsPastTheClosedGate) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    rig.ws->units = {flight(1, 2, 0, 0, 13,
+                            {wp(0, 0, 0, 0, kEpoch + 600),
+                             wp(60, 0, 8000, kEpoch + 1200),
+                             wp(120, 0, 8000, kEpoch + 2400)},
+                            {group(1)})};
+    rig.make();
+    EXPECT_TRUE(rig.engine->is_time_mode(0));
+
+    // E+100: the wire says the flight is still on the ramp (depart at
+    // E+600). The sim materialized it early and the lead is at (30,0).
+    rig.engine->set_suspended(1, true);
+    rig.engine->reaggregate(1, 30.0, 0.0, 8000.0f, 0, 0.0, true);
+
+    // The schedule now passes through (30,0) AT the fold (clock 0):
+    // the gate slid into the past (E+600 − 900 s of shift), and the
+    // serving face reads the folded position — no snap back to the
+    // ramp, no freeze until E+600.
+    const auto& r = rig.engine->routes()[0];
+    EXPECT_LT(r[0].depart, kEpoch);   // the gate is OPEN (in the past)
+    double fx = -1, fy = -1;
+    float alt = -1;
+    rig.engine->display_position(0, kEpoch, fx, fy, alt);
+    EXPECT_NEAR(fx, 30.0, 1e-9);
+    // The leg's own pace survives: 60 grid in 600 s = 0.1 grid/s —
+    // 160 s after the fold the walk is 16 more grid along it.
+    rig.engine->tick(60);   // the E+60 boundary update lands at 36
+    EXPECT_NEAR(rig.engine->flights()[0].fx, 36.0, 1e-9);
+    rig.engine->display_position(0, kEpoch + 160, fx, fy, alt);
+    EXPECT_NEAR(fx, 46.0, 1e-9);
+}

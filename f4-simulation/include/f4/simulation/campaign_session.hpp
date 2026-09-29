@@ -425,6 +425,19 @@ struct CampaignSessionOptions {
     /// byte-identical to the pre-bridge shape with it off (the same
     /// opt-in contract the other arms keep).
     bool synthesize_airbases = false;
+    /// Stock-save bridge, second half: the INITIAL tasking cycle's wave
+    /// (the intents filed at ladder time 0) launches inside the first
+    /// ops window — its synthetic flights' takeoff gates clamp to
+    /// now + 600 s — instead of the ATM's own TOT midpoints (the
+    /// profile windows file deliveries at a median 2 h out, and the
+    /// gate rides TOT − 1200 s: a freshly loaded stock save's map sat
+    /// dead for that first hour and a half, ~100 filed missions and
+    /// not one launching). The delivery TOTs stay the planner's — the
+    /// wave takes off, streams across the map as aggregates, and the
+    /// TOT window still arms each delivery. Default false (byte-stable
+    /// with the pre-clamp identity); the viewer arms it with
+    /// initial_tasking_cycle.
+    bool near_initial_wave = false;
 };
 
 /// The live campaign session. Create via create(); destroy to reset —
@@ -1222,6 +1235,9 @@ private:
     // Everything below is inert unless the Tiered policy armed flights_
     // AND the corresponding option is on.
     bool synthetic_as_aggregates_ = true;
+    /// CAMP-SAVE-WAVE: the initial cycle's wave launches near (the
+    /// options' near_initial_wave doc — the stock-save first-hour fix).
+    bool near_initial_wave_ = false;
     bool combat_deagg_ = true;
     double combat_envelope_ft_ = 30000.0;
     /// CAMP-SCALE-1: the pilot-skill flow gate (the tables ride

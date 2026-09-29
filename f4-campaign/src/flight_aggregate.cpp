@@ -97,6 +97,46 @@ FlightAggregateEngine::FlightAggregateEngine(
                 break;
             }
         }
+        // CAMP-SAVE-WIRE — the stock saves' waypoint times are the ATO
+        // planner's multi-day horizon: computable legs cross Korea at
+        // ~0.01 grid/min (weeks per leg). The wire cannot drive
+        // motion — strict TIME-mode interpolation freezes the whole
+        // war into imperceptible creep. A timed route whose
+        // computable legs ALL imply a crawl below the floor (or that
+        // has no computable leg at all) flies SPEED mode at the
+        // campaign cruise instead — the DEAGG-RWY precedent (remove
+        // the crawl for the population that suffered it). Sane wires
+        // keep the TIME identity; mixed wires keep theirs (a slow
+        // loiter leg is a schedule, not garbage — the walk honors
+        // each leg's own times).
+        if (timed && cfg_.min_leg_speed_grid_per_min > 0.0) {
+            const auto& r = routes_.back();
+            int computable = 0;
+            bool all_crawl = true;
+            for (std::size_t i = 1; i < r.size(); ++i) {
+                const std::int64_t dep = r[i - 1].depart > 0
+                                             ? r[i - 1].depart
+                                             : r[i - 1].arrive;
+                if (r[i].arrive <= 0 || dep <= 0 ||
+                    r[i].arrive <= dep) {
+                    continue;
+                }
+                const double len = std::sqrt(
+                    std::pow(static_cast<double>(r[i].x) - r[i - 1].x,
+                             2) +
+                    std::pow(static_cast<double>(r[i].y) - r[i - 1].y,
+                             2));
+                if (len <= 0.0) continue;
+                ++computable;
+                if (len / (static_cast<double>(r[i].arrive - dep) /
+                           60.0) >=
+                    cfg_.min_leg_speed_grid_per_min) {
+                    all_crawl = false;
+                    break;
+                }
+            }
+            if (computable == 0 || all_crawl) timed = false;
+        }
         time_mode_.push_back(timed);
 
         // The TIME-mode schedule's terminal: the last waypoint carrying
@@ -223,11 +263,16 @@ void FlightAggregateEngine::advance_flight_(
             f.arrived = true;
         }
     } else {
-        // SPEED mode — walk the legs at the cruise speed toward the
-        // current cursor waypoint. Start position → wp[0] → wp[1] → …
-        // The cursor names the waypoint being flown TOWARD; altitude
-        // lerps toward the target's z by the same distance fraction.
-        double remaining = cfg_.cruise_grid_per_min *
+        // SPEED mode — walk the legs at this row's cruise toward the
+        // current cursor waypoint (the fold may have booked the lead's
+        // real ground speed; 0 rides the config default). Start
+        // position → wp[0] → wp[1] → … The cursor names the waypoint
+        // being flown TOWARD; altitude lerps toward the target's z by
+        // the same distance fraction.
+        const double gpm = f.cruise_grid_per_min > 0.0
+                               ? f.cruise_grid_per_min
+                               : cfg_.cruise_grid_per_min;
+        double remaining = gpm *
                            (static_cast<double>(
                                 std::min<CampaignTime>(cfg_.update_sec, 3600)) /
                             60.0);
@@ -296,7 +341,9 @@ void FlightAggregateEngine::set_suspended(std::uint32_t vu, bool suspended) {
 
 void FlightAggregateEngine::reaggregate(std::uint32_t vu, double fx,
                                         double fy, float altitude_ft,
-                                        std::int32_t fuel_burnt) {
+                                        std::int32_t fuel_burnt,
+                                        double cruise_grid_per_min,
+                                        bool lead_airborne) {
     const std::size_t idx = index_of(vu);
     if (idx == static_cast<std::size_t>(-1)) return;
     FlightAggregateState& f = flights_[idx];
@@ -306,12 +353,16 @@ void FlightAggregateEngine::reaggregate(std::uint32_t vu, double fx,
     // Monotonic fuel: the sim can only have burned more (the fold-back
     // never resurrects fuel the aggregate already booked).
     f.fuel_burnt = std::max(f.fuel_burnt, fuel_burnt);
+    // The fold's pace: the lead's actual ground speed when the caller
+    // booked one (0 = back to the config default).
+    f.cruise_grid_per_min = std::max(0.0, cruise_grid_per_min);
     // The schedule re-anchor runs BEFORE the cursor reset so the cursor
     // derives from the shifted wire (the fold's whole point: the
     // schedule now passes through the folded position — reset_cursor_'s
     // TIME-mode walk reads the shifted arrives).
     if (time_mode_[idx]) {
-        reanchor_schedule_(f, routes_[idx], epoch_ + clock_);
+        reanchor_schedule_(f, routes_[idx], epoch_ + clock_,
+                           lead_airborne);
     }
     reset_cursor_(f, routes_[idx], epoch_ + clock_);
     f.suspended = false;
@@ -495,12 +546,18 @@ void FlightAggregateEngine::reset_cursor_(
 void FlightAggregateEngine::reanchor_schedule_(
         FlightAggregateState& f,
         std::vector<f4::entities::WaypointState>& route,
-        std::int64_t now_abs) {
+        std::int64_t now_abs, bool lead_airborne) {
     if (route.size() < 2) return;
-    // A pre-departure fold keeps the wire: the flight has not started
-    // flying the schedule, so the takeoff gate still owns it.
+    // A GROUNDED pre-departure fold keeps the wire: the flight has not
+    // started flying the schedule, so the takeoff gate still owns it.
+    // An AIRBORNE lead re-anchors regardless — it already flew off the
+    // wire (a bubble/ops deagg took it off the ramp early), and the
+    // shift below lands the gate in the past, exactly where a flying
+    // sortie's gate belongs.
     const std::int64_t first_depart = route.front().depart;
-    if (first_depart > 0 && now_abs < first_depart) return;
+    if (!lead_airborne && first_depart > 0 && now_abs < first_depart) {
+        return;
+    }
 
     // Along-route distances (grids) of the waypoints.
     std::vector<double> dist(route.size(), 0.0);
@@ -738,7 +795,8 @@ void FlightAggregateEngine::display_position(
         return;
     }
 
-    // SPEED mode — walk forward from the last advance at the cruise.
+    // SPEED mode — walk forward from the last advance at this row's
+    // cruise (the fold's booked ground speed, else the config default).
     // The anchor is the LAST MOVE — an ABSOLUTE campaign stamp (every
     // mutation that touches position writes epoch_+clock_ into it: the
     // updates, the fold-back, the retask, the registration) — clamped
@@ -752,7 +810,10 @@ void FlightAggregateEngine::display_position(
     if (first_depart > 0 && first_depart > anchor) anchor = first_depart;
     const double elapsed = static_cast<double>(now_abs - anchor);
     if (elapsed <= 0.0) return;
-    double remaining = cfg_.cruise_grid_per_min * (elapsed / 60.0);
+    const double gpm = f.cruise_grid_per_min > 0.0
+                           ? f.cruise_grid_per_min
+                           : cfg_.cruise_grid_per_min;
+    double remaining = gpm * (elapsed / 60.0);
     double px = fx, py = fy;
     float pz = altitude_ft;
     std::size_t wp = f.wp_index < route.size() ? f.wp_index : route.size();

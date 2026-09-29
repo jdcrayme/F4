@@ -530,6 +530,7 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     // is read at handle() time; inert unless the Tiered policy armed
     // the engine below (the intent handler checks flights_ itself).
     session->synthetic_as_aggregates_ = opts.synthetic_as_aggregates;
+    session->near_initial_wave_ = opts.near_initial_wave;
     session->combat_deagg_ = opts.combat_deagg;
     session->combat_envelope_ft_ = opts.combat_envelope_ft;
     session->pilot_skill_flow_ = opts.pilot_skill_flow;
@@ -2532,6 +2533,22 @@ void CampaignSession::handle_mission_intent_(
                                            std::max(0, ops_window_sec_)),
                          earliest);
         }
+        // CAMP-SAVE-WAVE: the INITIAL cycle's wave (intents filed at
+        // ladder time 0) launches inside the first ops window. The
+        // stock saves carry zero flight entities — the whole visible
+        // war is generated — and the ATM's TOT midpoints file its
+        // deliveries a median 2 h out, gates riding TOT − 1200 s: a
+        // freshly loaded save1 sat dead, ~100 filed missions and not
+        // one launching, for that first hour and a half. The delivery
+        // TOT stays the planner's; only the LAUNCH comes near (the
+        // aggregate streams the route; the TOT window still arms the
+        // delivery at the target).
+        if (near_initial_wave_ && intent.issued_time == 0) {
+            depart = std::min(depart,
+                              campaign_time() +
+                                  static_cast<std::int64_t>(
+                                      std::max(0, ops_window_sec_)));
+        }
         seed.route.front().depart = static_cast<std::int32_t>(
             std::clamp<std::int64_t>(depart, 1, 2147483647));
     }
@@ -2553,8 +2570,6 @@ void CampaignSession::rebuild_aggregate_feed_() {
     if (flights_ == nullptr || !combat_deagg_) return;
     const auto& fleet = flights_->flights();
     aggregate_contacts_.reserve(fleet.size());
-    const double cruise_fps =
-        flights_->cruise_grid_per_min() * kFtPerGrid / 60.0;
     for (std::size_t i = 0; i < fleet.size(); ++i) {
         const auto& f = fleet[i];
         // The picture rule (§4.6, the walk's own clutter semantics made
@@ -2573,8 +2588,11 @@ void CampaignSession::rebuild_aggregate_feed_() {
             f.fx * kFtPerGrid, f.fy * kFtPerGrid,
             static_cast<double>(f.altitude_ft)};
         // Cruise velocity along the leg: the aggregate's own heading ×
-        // the engine's cruise constant. Compass → ENU (0 = north/+y).
+        // ITS OWN effective cruise (the fold may have booked the lead's
+        // real ground speed). Compass → ENU (0 = north/+y).
         const double hdg = flights_->current_heading_rad(i);
+        const double cruise_fps =
+            flights_->effective_cruise_grid_per_min(i) * kFtPerGrid / 60.0;
         c.velocity = f4::geo::WorldPosition{
             std::sin(hdg) * cruise_fps, std::cos(hdg) * cruise_fps, 0.0};
         // The sim's own team vocabulary (blue/red/green) — the same
@@ -2617,8 +2635,6 @@ void CampaignSession::evaluate_combat_() {
     // deaggregate and the fight runs in-sim. Wire order, deterministic.
     if (combat_envelope_ft_ <= 0.0 || combat_lookahead_sec_ <= 0) return;
     const double T = static_cast<double>(combat_lookahead_sec_);
-    const double cruise_fps =
-        flights_->cruise_grid_per_min() * kFtPerGrid / 60.0;
     // The eligible set: airborne, progressing, opposing-team aggregates
     // (the same rule the picture feed applies, plus the belligerent
     // gate — the belligerents are the war's combatant slots).
@@ -2644,8 +2660,10 @@ void CampaignSession::evaluate_combat_() {
         const auto& fi = fleet[i];
         if (fi.suspended) continue;   // a trigger-A deagg this pass
         const double hdg_i = flights_->current_heading_rad(i);
-        const double vx_i = std::sin(hdg_i) * cruise_fps;
-        const double vy_i = std::cos(hdg_i) * cruise_fps;
+        const double cruise_i =
+            flights_->effective_cruise_grid_per_min(i) * kFtPerGrid / 60.0;
+        const double vx_i = std::sin(hdg_i) * cruise_i;
+        const double vy_i = std::cos(hdg_i) * cruise_i;
         const double px_i = fi.fx * kFtPerGrid + vx_i * T;
         const double py_i = fi.fy * kFtPerGrid + vy_i * T;
         for (std::size_t b = a + 1; b < eligible.size(); ++b) {
@@ -2660,13 +2678,20 @@ void CampaignSession::evaluate_combat_() {
             const double rz = static_cast<double>(fi.altitude_ft) -
                               static_cast<double>(fj.altitude_ft);
             const double hdg_j = flights_->current_heading_rad(j);
-            const double vx_j = std::sin(hdg_j) * cruise_fps;
-            const double vy_j = std::cos(hdg_j) * cruise_fps;
+            const double cruise_j =
+                flights_->effective_cruise_grid_per_min(j) * kFtPerGrid /
+                60.0;
+            const double vx_j = std::sin(hdg_j) * cruise_j;
+            const double vy_j = std::cos(hdg_j) * cruise_j;
             const double rvx = vx_i - vx_j;
             const double rvy = vy_i - vy_j;
             const double r_now =
                 std::sqrt(rx * rx + ry * ry + rz * rz);
-            if (r_now > combat_envelope_ft_ + cruise_fps * T) continue;
+            if (r_now >
+                combat_envelope_ft_ +
+                    std::max(cruise_i, cruise_j) * T) {
+                continue;
+            }
             if (rx * rvx + ry * rvy >= 0.0) continue;   // opening
             const double px_j = fj.fx * kFtPerGrid + vx_j * T;
             const double py_j = fj.fy * kFtPerGrid + vy_j * T;
@@ -2783,9 +2808,12 @@ void CampaignSession::deaggregate_flight_(
                 f.fx * kFtPerGrid, f.fy * kFtPerGrid,
                 static_cast<double>(f.altitude_ft)};
             pose.heading_rad = flights_->current_heading_rad(index);
-            // Cruise: the engine's speed-mode constant (grid/min → ft/s).
+            // Cruise: the row's OWN effective cruise (a folded flight's
+            // booked ground speed; else the engine constant) — grid/min
+            // → ft/s. The spawn starts at the pace the aggregate wore.
             pose.vt_fps =
-                flights_->cruise_grid_per_min() * kFtPerGrid / 60.0;
+                flights_->effective_cruise_grid_per_min(index) *
+                kFtPerGrid / 60.0;
             const double capacity = cfg_.geometry.internalFuel.value();
             pose.fuel_lbs = std::max(
                 0.0, capacity - static_cast<double>(f.fuel_burnt));
@@ -2812,8 +2840,10 @@ void CampaignSession::deaggregate_flight_(
             f.fx * kFtPerGrid, f.fy * kFtPerGrid,
             static_cast<double>(f.altitude_ft)};
         pose.heading_rad = flights_->current_heading_rad(index);
-        // Cruise: the engine's speed-mode constant (grid/min → ft/s).
-        pose.vt_fps = flights_->cruise_grid_per_min() * kFtPerGrid / 60.0;
+        // Cruise: the row's OWN effective cruise (grid/min → ft/s).
+        pose.vt_fps =
+            flights_->effective_cruise_grid_per_min(index) * kFtPerGrid /
+            60.0;
         // The handoff's fuel: capacity − the aggregate's per-aircraft
         // burnt. ≤ 0 (exhausted or capacity-less configs) keeps the
         // config default — the scenario path's own rule.
@@ -2907,9 +2937,27 @@ bool CampaignSession::reaggregate_flight_(std::uint32_t vu) {
             const double capacity = cfg_.geometry.internalFuel.value();
             const std::int32_t burnt = static_cast<std::int32_t>(
                 std::max(0.0, capacity - fm->fuel_lbs()));
+            // The fold's pace: an AIRBORNE lead's actual ground speed
+            // books as the row's SPEED-mode cruise — the folded flight
+            // keeps the pace the viewer just watched instead of
+            // braking to the global 121-kt estimate (the "it moved,
+            // then it stopped" read). Clamped to [the config default,
+            // ~460 kts]; a grounded complement keeps the default (its
+            // ground speed is taxi/zero — booking it would freeze the
+            // row). The airborne flag also lets a TIME-mode re-anchor
+            // proceed past a still-closed wire gate: the sortie is
+            // already flying it.
+            const bool airborne = fm->model().state().gear.inAir;
+            double cruise = 0.0;
+            if (airborne) {
+                cruise = std::clamp(
+                    fm->ground_speed_fps() * 60.0 / kFtPerGrid,
+                    flights_->cruise_grid_per_min(), 40.0);
+            }
             flights_->reaggregate(vu, lead_pos.x / kFtPerGrid,
                                   lead_pos.y / kFtPerGrid,
-                                  static_cast<float>(lead_pos.z), burnt);
+                                  static_cast<float>(lead_pos.z), burnt,
+                                  cruise, airborne);
             folded_live = true;
         }
     }

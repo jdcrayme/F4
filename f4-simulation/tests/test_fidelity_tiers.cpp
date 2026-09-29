@@ -459,6 +459,14 @@ TEST(FidelityTiers, LiveRowTracksTheLeadAndTheFoldSticks) {
     const auto& folded = rig.session->flight_engine()->flights()[0];
     EXPECT_NEAR(folded.fx, lead_gx, 0.05);
     EXPECT_NEAR(folded.fy, lead_gy, 0.05);
+
+    // FID-P1B pace: the AIRBORNE lead's real ground speed books as the
+    // row's cruise — the folded flight keeps the pace the viewer
+    // watched, clamped into [the config cruise, ~460 kts]. The spawn's
+    // minimum 100 fps (5.86 grid/min) puts the floor at the config's
+    // 12; the FM has had 20 s to accelerate past it.
+    EXPECT_GE(folded.cruise_grid_per_min, 12.0);
+    EXPECT_LE(folded.cruise_grid_per_min, 40.0);
 }
 
 // ── 9. FID-P0b — a dead lead folds on the NEXT tier pass ───────────────────
@@ -502,4 +510,59 @@ TEST(FidelityTiers, DeadLeadFoldsOnTheNextPass) {
     ASSERT_EQ(tiers.size(), 1u);
     EXPECT_TRUE(tiers[0].destroyed);
     EXPECT_EQ(rig.session->sim().aircraft_entities().size(), 0u);
+}
+
+// ── 10. CAMP-SAVE-WAVE — the initial cycle's wave launches near ────────────
+//
+// The stock saves carry zero flight entities: the whole visible war is
+// the tasking ladder's, and the ATM's TOT midpoints file its
+// deliveries a median 2 h out, takeoff gates riding TOT − 1200 s. A
+// freshly loaded save1 sat dead — ~100 filed missions, not one
+// launching — for that first hour and a half. With the flag, the
+// INITIAL cycle's intents (issued at ladder time 0) gate inside the
+// first ops window; later cycles keep the planner's schedule.
+
+TEST(FidelityTiers, InitialWaveLaunchesNear) {
+    if (!std::filesystem::exists(f16_config_path())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    auto opts = base_opts();
+    opts.fidelity_policy = FidelityPolicy::Tiered;
+    opts.near_initial_wave = true;
+    auto rig = TierRig::make(opts);
+    ASSERT_NE(rig.session, nullptr);
+
+    const auto publish = [&rig](std::uint32_t flight_id,
+                                std::int64_t issued) {
+        f4::campaign::MissionIntent in;
+        in.synthetic = true;
+        in.flight_id = flight_id;
+        in.package_id = flight_id;
+        in.team = 2;
+        in.mission_byte = 20;   // AMIS_CAS
+        in.aircraft_count = 2;
+        in.issued_time = issued;
+        in.time_on_target = 7200;   // the ATM's median horizon: +2 h
+        in.route.push_back(f4::campaign::RouteWaypoint{390, 455, 0, 1});
+        in.route.push_back(f4::campaign::RouteWaypoint{420, 460, 8000, 17});
+        rig.session->sim().bus().publish(in);
+    };
+    publish(1, 0);      // the initial cycle's wave (ladder time 0)
+    publish(2, 1800);   // a later cycle: the planner's schedule stands
+
+    const auto& rows = rig.session->flight_engine()->flights();
+    ASSERT_EQ(rows.size(), 3u);   // the world flight + the two intents
+
+    // The initial wave gates inside the first ops window (600 s) even
+    // though its TOT is two hours out.
+    EXPECT_LE(rows[1].wp_index, 1u);
+    const std::int32_t a_depart =
+        rig.session->flight_engine()->seconds_to_depart(1);
+    ASSERT_GT(a_depart, 0);
+    EXPECT_LE(a_depart, 600);
+
+    // The later cycle keeps the ATM's own schedule: TOT − 1200 s.
+    const std::int32_t b_depart =
+        rig.session->flight_engine()->seconds_to_depart(2);
+    EXPECT_NEAR(b_depart, 6000, 1);
 }

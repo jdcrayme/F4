@@ -714,7 +714,31 @@ follow-up refinement, documented here.
   test_fidelity_tiers' LiveRowTracksTheLeadAndTheFoldSticks +
   DeadLeadFoldsOnTheNextPass. The DEAGG-RWY-1 takeoff contract (the
   45 s ramp hold, the runway-threshold teleport) stays DESIGNED — it
-  is the remaining deliberate pause-and-jump on the map.
+  is the remaining deliberate pause-and-jump on the map. The companion
+  "none of the flights move until I click / they move for a bit then
+  stop" report closed the same day (CAMP-SAVE-WIRE, same tranche):
+  every real-world save's waypoint times are the ATO planner's
+  multi-day horizon (computable legs at ~0.01 grid/min — median
+  first arrival 14.5 days out), so strict TIME-mode interpolation was
+  imperceptible creep for the whole war, and a folded flight braked
+  from the live ~400 kts to the 121-kt aggregate estimate. A timed
+  route whose computable legs all crawl below
+  `FlightAggregateConfig::min_leg_speed_grid_per_min` now constructs
+  as SPEED mode (sane and mixed wires keep TIME), and the fold books
+  the airborne lead's actual ground speed as the row's own cruise
+  (spawn pose, air picture, and the convergence trigger read the same
+  per-row figure); an AIRBORNE lead also re-anchors past a still-
+  closed wire gate — a grounded complement keeps the wire. And the
+  second half of the report (CAMP-SAVE-WAVE): the stock saves decode
+  ZERO flight entities — the user's save1 is 683 units (524
+  battalions, 85 brigades, 72 squadrons) and not one flight — so the
+  whole visible war is generated, and the ATM's profile-midpoint TOTs
+  (median +120 min, gates riding TOT − 1200 s) left it dead for the
+  first hour and a half (`cycles 1, missions 100, live 1` two minutes
+  into a running save1 on the real install). `near_initial_wave` (the
+  viewer arms it) launches the initial cycle's wave inside the first
+  ops window — `live 49 (48 airborne)` at +2 min after — while the
+  deliveries keep the planner's schedule.
 - **Per-action altitude shaping** (C3): lands with its consumer (the
   fuel tranche) — documented in route_builder.hpp. (Package-shared
   ingress and TOT slotting landed with C4's package composition —

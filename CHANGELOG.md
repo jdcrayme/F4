@@ -54,13 +54,59 @@ read that frozen position.
   a wreck cross sized with the glyph (the old fixed 3-px, 59%-alpha
   speck read as "vanished"), and aborted (scrubbed) rows dim like
   HOME; the viewer's FlightRow parses the row's additive `aborted` key.
+- **CAMP-SAVE-WIRE — the stock saves' multi-day wires cannot drive
+  motion** — the "none of the flights move until I click" report:
+  every real-world save's waypoint times are the ATO planner's
+  horizon, not a motion schedule (computable legs cross Korea at
+  ~0.01 grid/min — weeks per leg; median first arrival 14.5 days
+  out). Strict TIME-mode interpolation turned that into imperceptible
+  creep for the whole war. A timed route whose computable legs ALL
+  imply a crawl below `FlightAggregateConfig::
+  min_leg_speed_grid_per_min` (1.0) — or that has no computable leg —
+  now constructs as SPEED mode at the campaign cruise; sane wires and
+  mixed wires (a slow loiter leg inside a fast route) keep the
+  TIME-mode identity, and 0 disables the fallback. Pinned by
+  GarbageWireConstructsAsSpeedMode + SaneAndMixedWiresStayTimeMode.
+- **The fold keeps the pace the viewer watched** — the fold books the
+  AIRBORNE lead's actual ground speed (clamped to [the config cruise,
+  ~460 kts]) as the row's own SPEED-mode cruise (`reaggregate`'s
+  `cruise_grid_per_min`; 0 = the config default). A flight that flew
+  past the camera at 400 kts resumes its aggregate at that pace
+  instead of braking to the 121-kt estimate — the "it moved for a bit,
+  then it stopped" read. The deagg spawn pose, the air picture's
+  contact velocities, and the convergence trigger's predictions all
+  read the same per-row effective cruise.
+- **An airborne lead re-anchors past a still-closed wire gate** — a
+  bubble/ops deagg can take an unlaunched flight off the ramp early;
+  when it folds back, the wire's depart is still in the future and
+  the old guard froze the glyph at the fold point until the gate.
+  `reaggregate` takes `lead_airborne`: a grounded complement keeps
+  the wire, an airborne lead re-anchors (the shift lands the gate in
+  the past — exactly where a flying sortie's gate belongs).
+- **CAMP-SAVE-WAVE — the initial cycle's wave launches near** — the
+  deeper half of the same report: the stock saves (save0/1/2 +
+  Instant) decode ZERO flight entities (the user's save1: 683 units —
+  524 battalions, 85 brigades, 72 squadrons — and not one flight), so
+  the whole visible war is the tasking ladder's, and the ATM's TOT
+  rule (the profile midpoints, median +120 min) filed the first
+  wave's deliveries two hours out with gates riding TOT − 1200 s.
+  Measured on the real install: `cycles 1, missions 100, live 1` two
+  minutes into a running save1. `CampaignSessionOptions::
+  near_initial_wave` (the viewer arms it with initial_tasking_cycle)
+  clamps the INITIAL cycle's intents (issued at ladder time 0) to
+  launch inside the first ops window; the delivery TOTs stay the
+  planner's and later cycles keep the profile schedule. Same run
+  after: `live 49 (48 airborne)` at campaign +2 min. Pinned by
+  InitialWaveLaunchesNear (the bus-published initial-cycle intent
+  gates ≤ 600 s; a later cycle's keeps TOT − 1200 s).
 - **Pins**: 4 new engine tests (live tracking, the re-anchor + its
-  pre-departure guard, the unscheduled-tail arrival), 2 new session
-  tests (the row tracks the lead and the fold sticks; a booked kill
-  closes inside one pass through a live ops pin), and the A/B
-  divergence's suspended-row fuel pin re-locked to the tracking
-  contract. FullFidelitySpawnsAndHasNoEngine now requests the policy
-  explicitly (the FID-DEF-GOV sweep missed it).
+  pre-departure guard, the unscheduled-tail arrival) plus the
+  wire-fallback / fold-pace / airborne-reanchor trio, 2 new session
+  tests (the row tracks the lead and the fold sticks at the booked
+  pace; a booked kill closes inside one pass through a live ops pin),
+  and the A/B divergence's suspended-row fuel pin re-locked to the
+  tracking contract. FullFidelitySpawnsAndHasNoEngine now requests the
+  policy explicitly (the FID-DEF-GOV sweep missed it).
 
 ## FID-DEF-GOV — Tiered is the default fidelity policy; the runner's dilation becomes an AIMD delivery governor
 

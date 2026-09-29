@@ -185,6 +185,13 @@ void ViewerApp::start_campaign_session() {
     // full 30-minute cycle, which read as "the campaign never
     // generates missions").
     opts.initial_tasking_cycle = true;
+    // CAMP-SAVE-WAVE: the stock saves carry zero flight entities — the
+    // whole visible war is the tasking ladder's — and the ATM's TOT
+    // midpoints file the first wave's deliveries ~2 h out. Launch the
+    // initial wave inside the first ops window instead, so a freshly
+    // loaded save is ALIVE from the first minutes (the deliveries keep
+    // the planner's schedule; only the launches come near).
+    opts.near_initial_wave = true;
     opts.reinforce_period_sec = 43200;  // the QC's armed 12 h
     // G1/DOM-2: the ground war runs in viewer sessions — the supply
     // picture (objective stocks, battalion cut-off), the FLOT, and the
