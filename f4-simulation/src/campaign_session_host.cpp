@@ -342,6 +342,9 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
             // CAMP-DOM-4: the scheduled takeoff slot (0 = never
             // slotted) — the additive tail's newest key.
             v.takeoff = mi.takeoff;
+            // RECOV: the recovery deadline rides the tail too (the
+            // flights table's to_mission_over is this booking's face).
+            v.mission_over = mi.mission_over;
             rows.push_back(v);
             if (spec.limit > 0 && rows.size() >= spec.limit) break;
         }

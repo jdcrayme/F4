@@ -162,6 +162,15 @@ struct MissionIntent {
     /// delivery-latency divergence closes).
     CampaignTime takeoff{0};
 
+    /// RECOV — the flight's recovery deadline (the ATM's own
+    /// FlightTasking::mission_over, campaign-relative seconds; 0 when
+    /// the flight carries none — the save's own intents, the legacy
+    /// ladder's). The session threads it into the synthetic seed so the
+    /// aggregate's recovery-ops window arms for generated flights
+    /// exactly as it does for save flights (they come home instead of
+    /// parking on the target).
+    CampaignTime mission_over{0};
+
     /// Element-wise equality (tests assert bus content == recorded intents).
     bool operator==(const MissionIntent&) const = default;
 };

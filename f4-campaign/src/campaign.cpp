@@ -700,6 +700,12 @@ void Campaign::run_tasking_cycle_atm_() {
             // intent carries 0 (the session keeps the TOT-anchored gate
             // for it).
             intent.takeoff = ft.airbase_vu != 0 ? ft.takeoff : 0;
+            // RECOV — the recovery deadline (the ATM's own books, the
+            // same relative clock as the TOT). The session threads it
+            // into the synthetic seed: the aggregate's recovery-ops
+            // window arms and the flight comes home instead of parking
+            // on its last waypoint.
+            intent.mission_over = ft.mission_over;
 
             // The route: the package's copy (main built it; escorts
             // carry the same shape with their own TOT). P7: support

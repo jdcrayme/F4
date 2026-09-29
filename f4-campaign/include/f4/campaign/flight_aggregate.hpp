@@ -122,6 +122,11 @@ struct SyntheticFlightSeed {
     std::uint8_t mission = 0;           ///< mission byte (the intent's)
     int aircraft_count = 1;             ///< the intent's package size
     std::int32_t time_on_target = 0;    ///< ABSOLUTE campaign time
+    /// ABSOLUTE campaign time the mission's recovery books (the ATM's
+    /// own mission_over, threaded through the intent). 0 = none — the
+    /// documented v1 gap (a seed without it never opens the
+    /// recovery-ops window and parks on its last waypoint).
+    std::int32_t mission_over_time = 0;
     /// The intent's planned route (takeoff → ingress → target → egress →
     /// landing). May be empty — a route-less synthetic flight is a
     /// parked aggregate (has_route false, nothing advances).
@@ -290,6 +295,20 @@ public:
     /// before departure.
     [[nodiscard]] double current_heading_rad(std::size_t index) const;
 
+    /// The flight's DISPLAY position at now_abs — a PURE query (no
+    /// state mutation, the GetRealPosition analogue: coarse simulation,
+    /// smooth display). TIME mode re-derives the wire's own schedule
+    /// interpolation at now_abs; SPEED mode walks the current leg
+    /// forward from the last advance at the cruise speed (anchored at
+    /// the departure gate for a flight whose first update has not fired
+    /// yet), clamped at the route's end. Suspended/arrived/destroyed/
+    /// scrubbed flights and route-less rows report their stored
+    /// position (a suspended flight's truth is its live aircraft — the
+    /// session overlays the lead's transform on top of this).
+    void display_position(std::size_t index, std::int64_t now_abs,
+                          double& fx, double& fy,
+                          float& altitude_ft) const;
+
     /// One-frame counters (the session's stats panel + the tests).
     struct Stats {
         int updates = 0;      ///< update ticks fired
@@ -318,6 +337,17 @@ private:
     void reset_cursor_(FlightAggregateState& f,
                        const std::vector<f4::entities::WaypointState>& route,
                        std::int64_t now_abs);
+
+    /// FID-P1: catch one flight's stored position up to now_abs along
+    /// its CURRENT route (position/altitude only — fuel stays
+    /// quanta-granular, booked at the update boundaries). The retask
+    /// mutation anchors at the flight's true position — the one the
+    /// serving face extrapolates — not at the last 60-s quanta point;
+    /// without it a mid-quanta retask would snap the flight BACK to the
+    /// quanta point. A no-op at quanta-aligned calls (elapsed 0) and
+    /// for suspended flights (the sim owns the truth).
+    void catch_up_(FlightAggregateState& f, std::size_t index,
+                   std::int64_t now_abs);
 
     FlightAggregateConfig cfg_;
     std::vector<FlightAggregateState> flights_;

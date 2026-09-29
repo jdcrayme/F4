@@ -269,6 +269,11 @@ struct IntentView {
     // the other times here). 0 = never slotted (the legacy ladder's
     // intents, the save's own flights, a base-less filing).
     std::int64_t takeoff{0};
+    // RECOV (additive, at the END per the header rule): mission_over —
+    // the flight's recovery deadline (the ATM's own books, the same
+    // relative axis). 0 = none; the flights table's to_mission_over is
+    // this booking's aggregate-side face.
+    std::int64_t mission_over{0};
 };
 
 inline void encode_intent(f4::json::Writer& w, const IntentView& m) {
@@ -304,6 +309,8 @@ inline void encode_intent(f4::json::Writer& w, const IntentView& m) {
     w.number(m.flight_role);
     w.raw(",\"takeoff\":");
     w.number(static_cast<long long>(m.takeoff));
+    w.raw(",\"mission_over\":");
+    w.number(static_cast<long long>(m.mission_over));
     w.put('}');
 }
 

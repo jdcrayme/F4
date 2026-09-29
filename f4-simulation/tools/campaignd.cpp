@@ -9,6 +9,7 @@
 //             [--mission-profiles MissionProfiles.json] \
 //             [--policy tiered|full] [--max-flights N] \
 //             [--tasking-cycle-sec S] [--reinforce-period-sec S] \
+//             [--synthesize-airbases] \
 //             [--no-atm] [--aa-combat] [--ground-war] [--strategy] \
 //             [--max-steps-per-advance N]
 //             [--journal war.jsonl | --verify-journal golden.jsonl]
@@ -109,6 +110,7 @@ struct Args {
     bool aa_combat = false;
     bool ground_war = false;
     bool strategy_layer = false;
+    bool synthesize_airbases = false;
     int max_steps = 240;
     std::filesystem::path journal;        // --journal (record)
     std::filesystem::path verify_journal; // --verify-journal (replay)
@@ -132,6 +134,10 @@ void usage(std::ostream& os) {
           "  --aa-combat              arm the campaign flights for A/A (C6)\n"
           "  --ground-war             the ground war engine (G1)\n"
           "  --strategy               the ATM strategy layer (P7)\n"
+          "  --synthesize-airbases    link base-less squadrons to objectives\n"
+          "                           (the viewer's own default — a stock save\n"
+          "                           standalone: the squadrons carry\n"
+          "                           airbase_id == 0 on the wire)\n"
           "  --max-steps-per-advance N (the dilation cap, default 240)\n"
           "  --journal PATH           record the event stream (JSONL)\n"
           "  --verify-journal PATH    replay-assert against a golden (exit 23 on drift)\n"
@@ -188,6 +194,8 @@ void usage(std::ostream& os) {
             a.aa_combat = true;
         } else if (k == "--ground-war") {
             a.ground_war = true;
+        } else if (k == "--synthesize-airbases") {
+            a.synthesize_airbases = true;
         } else if (k == "--strategy") {
             a.strategy_layer = true;
         } else if (k == "--max-steps-per-advance") {
@@ -245,6 +253,7 @@ int main(int argc, char** argv) {
     opts.aa_combat = args.aa_combat;
     opts.ground_war = args.ground_war;
     opts.strategy_layer = args.strategy_layer;
+    opts.synthesize_airbases = args.synthesize_airbases;
     opts.max_steps_per_advance = args.max_steps;
 
     std::string err;

@@ -315,6 +315,12 @@ bool FlightAggregateEngine::retask(
     if (f.arrived || f.destroyed || f.scrubbed) return false;
     if (route.empty()) return false;   // loud: a retask flies SOMEWHERE
 
+    // FID-P1: anchor the swap at the flight's TRUE position (the one
+    // the serving face extrapolates) — the caller built the new route's
+    // head from the same display position, so head == position and the
+    // flight never snaps back to its last 60-s quanta point.
+    catch_up_(f, idx, epoch_ + clock_);
+
     routes_[idx] = std::move(route);
     f.mission = mission;
     f.time_on_target = time_on_target_abs;
@@ -366,10 +372,11 @@ std::size_t FlightAggregateEngine::register_synthetic(
     f.mission = seed.mission;
     f.aircraft_count = seed.aircraft_count > 0 ? seed.aircraft_count : 1;
     f.time_on_target = seed.time_on_target;
-    // Synthetic missions carry no mission-over time (the ATM's recovery
-    // books on the ladder's own clock; the recovery-ops window is the
-    // save flights' landing-phase behavior — a documented v1 gap).
-    f.mission_over_time = 0;
+    // The recovery deadline rides the seed now (the ATM's own
+    // mission_over, threaded through the intent): the recovery-ops
+    // window arms for generated flights exactly as it does for the
+    // save's own. 0 stays the no-window marker (an intent that never
+    // carried one — the legacy ladder's).
     routes_.push_back(seed.route);
     const auto& route = routes_.back();
     // The flight holds at its route's first waypoint — the takeoff
@@ -383,12 +390,27 @@ std::size_t FlightAggregateEngine::register_synthetic(
     f.last_move = static_cast<std::int32_t>(
         std::min<std::int64_t>(epoch_ + clock_, 2147483647));
     f.has_route = !route.empty();
+    f.mission_over_time = seed.mission_over_time;
     // SPEED mode always: the intent's route carries no leg times (the
     // ATM's own takeoff estimate is the TOT anchor, not a wire schedule).
     time_mode_.push_back(false);
     flights_.push_back(f);
     refresh_stats();
     return flights_.size() - 1;
+}
+
+void FlightAggregateEngine::catch_up_(FlightAggregateState& f,
+                                      std::size_t index,
+                                      std::int64_t now_abs) {
+    if (f.suspended) return;   // the sim owns the truth; the fold anchors
+    double fx = f.fx, fy = f.fy;
+    float alt = f.altitude_ft;
+    display_position(index, now_abs, fx, fy, alt);
+    f.fx = std::clamp(fx, -32768.0, 32767.0);
+    f.fy = std::clamp(fy, -32768.0, 32767.0);
+    f.altitude_ft = alt;
+    f.last_move = static_cast<std::int32_t>(
+        std::min<std::int64_t>(now_abs, 2147483647));
 }
 
 void FlightAggregateEngine::reset_cursor_(
@@ -504,6 +526,110 @@ double FlightAggregateEngine::current_heading_rad(std::size_t index) const {
     // Compass bearing (0 = north = +grid-y), radians — the same
     // convention enu_quat_from_compass consumes at the spawn.
     return std::atan2(dx, dy);
+}
+
+void FlightAggregateEngine::display_position(
+        std::size_t index, std::int64_t now_abs, double& fx, double& fy,
+        float& altitude_ft) const {
+    if (index >= flights_.size()) return;
+    const auto& f = flights_[index];
+    fx = f.fx;
+    fy = f.fy;
+    altitude_ft = f.altitude_ft;
+
+    // A row that is not flying its route as an aggregate reports its
+    // stored position: suspended (the sim owns the truth — the session
+    // overlays the lead's transform), arrived/destroyed/scrubbed
+    // (terminal), route-less (parked).
+    if (f.suspended || f.arrived || f.destroyed || f.scrubbed ||
+        !f.has_route) {
+        return;
+    }
+    const auto& route = routes_[index];
+    if (route.empty()) return;
+
+    // The takeoff gate (advance_flight_'s own rule): a flight holds at
+    // its save position until its first waypoint's depart.
+    const std::int64_t first_depart = route.front().depart;
+    if (first_depart > 0 && now_abs < first_depart) return;
+
+    if (time_mode_[index]) {
+        // TIME mode — the wire's schedule is a pure function of now_abs:
+        // re-derive the leg interpolation read-only (advance_flight_'s
+        // walk, minus the state writes). Past legs override in order;
+        // the first upcoming leg interpolates; before it, hold.
+        for (std::size_t i = 1; i < route.size(); ++i) {
+            const auto& from = route[i - 1];
+            const auto& to = route[i];
+            if (to.arrive <= 0) continue;   // leg without a schedule
+            if (now_abs >= to.arrive) {
+                fx = static_cast<double>(to.x);
+                fy = static_cast<double>(to.y);
+                altitude_ft = static_cast<float>(to.z);
+                continue;
+            }
+            if (now_abs > from.depart) {
+                const double t = frac(now_abs, from.depart, to.arrive);
+                fx = static_cast<double>(from.x) +
+                     t * (static_cast<double>(to.x) - from.x);
+                fy = static_cast<double>(from.y) +
+                     t * (static_cast<double>(to.y) - from.y);
+                altitude_ft = static_cast<float>(
+                    static_cast<double>(from.z) +
+                    t * (static_cast<double>(to.z) - from.z));
+            }
+            break;   // mid-leg or still holding at route[i-1]
+        }
+        return;
+    }
+
+    // SPEED mode — walk forward from the last advance at the cruise.
+    // The anchor is the LAST MOVE — an ABSOLUTE campaign stamp (every
+    // mutation that touches position writes epoch_+clock_ into it: the
+    // updates, the fold-back, the retask, the registration) — clamped
+    // forward to the departure gate so a flight whose first update has
+    // not fired yet does not extrapolate from a pre-departure stamp (it
+    // would race a full hold's worth of distance ahead of the engine's
+    // own first step). NOT epoch_+last_move: the stamp already carries
+    // the epoch — doubling it pushes the anchor into the future and the
+    // extrapolation never fires (elapsed ≤ 0 forever).
+    std::int64_t anchor = f.last_move;
+    if (first_depart > 0 && first_depart > anchor) anchor = first_depart;
+    const double elapsed = static_cast<double>(now_abs - anchor);
+    if (elapsed <= 0.0) return;
+    double remaining = cfg_.cruise_grid_per_min * (elapsed / 60.0);
+    double px = fx, py = fy;
+    float pz = altitude_ft;
+    std::size_t wp = f.wp_index < route.size() ? f.wp_index : route.size();
+    while (remaining > 0.0 && wp < route.size()) {
+        const auto& target = route[wp];
+        const double dx = static_cast<double>(target.x) - px;
+        const double dy = static_cast<double>(target.y) - py;
+        const double dist = std::sqrt(dx * dx + dy * dy);
+        if (dist <= remaining) {
+            // Waypoint reached inside the extrapolation: land on it,
+            // spend the distance, target the next leg (a degenerate
+            // dist == 0 — the flight sits ON its cursor waypoint, the
+            // pre-departure hold's shape — advances the cursor exactly
+            // like the engine's own walk, then flies the NEXT leg).
+            px = static_cast<double>(target.x);
+            py = static_cast<double>(target.y);
+            pz = static_cast<float>(target.z);
+            remaining -= dist;
+            ++wp;
+        } else {
+            const double k = dist > 0.0 ? remaining / dist : 0.0;
+            px += k * dx;
+            py += k * dy;
+            pz = static_cast<float>(static_cast<double>(pz) +
+                                    k * (static_cast<double>(target.z) -
+                                         static_cast<double>(pz)));
+            remaining = 0.0;
+        }
+    }
+    fx = px;
+    fy = py;
+    altitude_ft = pz;
 }
 
 } // namespace f4::campaign

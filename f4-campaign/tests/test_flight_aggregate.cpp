@@ -519,3 +519,114 @@ TEST(FlightAggregateCmd, ScrubIsTerminalAndSkipsEveryWindow) {
     EXPECT_FALSE(rig.engine->scrub(5005));
     EXPECT_FALSE(rig.engine->retask(5005, 20, {wp(1, 1, 0), wp(2, 2, 0)}, 1, 2));
 }
+
+// ── 9. Display position (FID-P1) — the GetRealPosition analogue ────────────
+//
+// The serving face extrapolates BETWEEN the engine's 60-s quanta so a
+// UI never sees the pause-then-jump: pre-departure holds, mid-quanta
+// SPEED walks from the departure gate / the last advance, the fold-back
+// anchor agrees with the fold, and a suspended flight reports its
+// stored position (the sim owns the truth).
+
+TEST(FlightAggregate, DisplayPositionHoldsBeforeDepartureThenExtrapolates) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    rig.make();   // no save flights — a synthetic-only war
+
+    SyntheticFlightSeed seed;
+    seed.vu = 900;
+    seed.team = 2;
+    seed.mission = 17;
+    seed.aircraft_count = 2;
+    seed.time_on_target = kEpoch + 3600;
+    seed.mission_over_time = kEpoch + 7200;   // RECOV: the recovery books
+    seed.route = {wp(0, 0, 0, 0, kEpoch + 600), wp(0, 60, 8000),
+                  wp(0, 120, 8000)};
+    const auto idx = rig.engine->register_synthetic(seed);
+    ASSERT_NE(idx, std::size_t(-1));
+
+    // The seed's recovery deadline rides into the engine (the
+    // recovery-ops window opens for generated flights now).
+    EXPECT_EQ(rig.engine->seconds_to_mission_over(idx), 7200);
+
+    double fx = -1, fy = -1;
+    float alt = -1;
+
+    // Pre-departure: the flight holds at its base regardless of when
+    // the query lands within the hold.
+    rig.engine->display_position(idx, kEpoch + 300, fx, fy, alt);
+    EXPECT_DOUBLE_EQ(fx, 0.0);
+    EXPECT_DOUBLE_EQ(fy, 0.0);
+
+    // Mid-quanta after departure (no update has fired — the engine's
+    // stored position is still the base): the display walks 30 s of
+    // cruise = 6 grid north, anchored at the DEPARTURE GATE (not at the
+    // registration — a pre-departure anchor would race a full hold's
+    // worth of distance ahead of the engine's own first step).
+    rig.engine->display_position(idx, kEpoch + 630, fx, fy, alt);
+    EXPECT_NEAR(fy, 6.0, 1e-9);
+    EXPECT_DOUBLE_EQ(fx, 0.0);
+    EXPECT_NEAR(alt, 800.0f, 1e-6);   // lerp toward wp1's 8000 by 6/60
+
+    // The engine's own updates at the 600-s and 660-s boundaries fly it
+    // 12 grid each: the display AT that boundary agrees exactly (coarse
+    // simulation, smooth display, one truth).
+    rig.engine->tick(660);
+    rig.engine->display_position(idx, kEpoch + 660, fx, fy, alt);
+    EXPECT_NEAR(fy, rig.engine->flights()[idx].fy, 1e-9);
+    EXPECT_NEAR(fy, 24.0, 1e-9);
+
+    // Between quanta the display keeps walking (the pause-then-jump is
+    // dead): 45 s past the last update = 9 more grid.
+    rig.engine->display_position(idx, kEpoch + 705, fx, fy, alt);
+    EXPECT_NEAR(fy, 33.0, 1e-9);
+}
+
+TEST(FlightAggregate, DisplayPositionFoldAnchorsAtTheFoldTime) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    rig.make();
+
+    SyntheticFlightSeed seed;
+    seed.vu = 901;
+    seed.team = 2;
+    seed.mission = 17;
+    seed.route = {wp(0, 0, 0), wp(40, 0, 5000)};   // no depart gate
+    const auto idx = rig.engine->register_synthetic(seed);
+    ASSERT_NE(idx, std::size_t(-1));
+
+    // Fly two updates (24 grid east), then the sim materializes the
+    // flight and flies the lead 6 grids further before the fold.
+    rig.engine->tick(120);
+    rig.engine->set_suspended(seed.vu, true);
+    rig.engine->tick(600);
+    rig.engine->reaggregate(seed.vu, 30.0, 0.0, 5000.0f, 500);
+
+    // The fold stamps last_move at the fold's clock (720): the display
+    // extrapolates FROM the folded position 30 s later (6 grid east) —
+    // the fold and the serving face agree, no snap.
+    double fx = 0, fy = 0;
+    float alt = 0;
+    rig.engine->display_position(idx, kEpoch + 750, fx, fy, alt);
+    EXPECT_NEAR(fx, 36.0, 1e-9);
+    EXPECT_NEAR(fy, 0.0, 1e-9);
+
+    // The display extrapolates ahead of the engine's quanta: 60 s past
+    // the fold the walk has covered the 10-grid leg and clamps at the
+    // route's end waypoint.
+    rig.engine->display_position(idx, kEpoch + 780, fx, fy, alt);
+    EXPECT_NEAR(fx, 40.0, 1e-9);
+
+    // The engine's next update lands on the same spot (one truth — the
+    // walk, engine and display, agree everywhere).
+    rig.engine->tick(60);   // clock 780: the boundary update fires
+    rig.engine->display_position(idx, kEpoch + 780, fx, fy, alt);
+    EXPECT_NEAR(fx, rig.engine->flights()[idx].fx, 1e-9);
+    EXPECT_NEAR(fx, 40.0, 1e-9);
+
+    // A suspended flight reports its stored position (the sim owns the
+    // truth — the session overlays the lead's transform).
+    rig.engine->set_suspended(seed.vu, true);
+    rig.engine->display_position(idx, kEpoch + 900, fx, fy, alt);
+    EXPECT_NEAR(fx, rig.engine->flights()[idx].fx, 1e-9);
+}

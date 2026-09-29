@@ -936,8 +936,13 @@ void ViewerApp::draw_canvas() {
     // invisible. This pass draws the aggregate air picture from the
     // session's tier snapshot — the whole war's flights moving with the
     // campaign clock (the Falcon 4 campaign map's own look):
-    //   * LIVE flights are skipped — their materialized aircraft draw
-    //     in the live pass below (per aircraft, not per flight).
+    //   * LIVE flights draw their aggregate glyph too (FID-P2): the
+    //     aggregate row tracks the lead aircraft while materialized
+    //     (one position truth — flight_tiers), so the flight marker
+    //     stays on the map for the whole deagg window. The live pass
+    //     below still draws the per-aircraft glyphs on top; zoomed out
+    //     the flight IS the marker, and a flight never vanishes from
+    //     the air picture just because it is being flown in detail.
     //   * AGG flights draw the fighter glyph at reduced size with a
     //     translucent fill (an aggregate, visibly not a sim entity).
     //   * HOME (arrived) draws dimmed, the parked dots' own treatment.
@@ -966,7 +971,8 @@ void ViewerApp::draw_canvas() {
             }
         }
         for (const auto& t : impl_->session_snap.flights) {
-            if (t.live) continue;  // materialized: the live pass draws it
+            // FID-P2: no skip — a live flight's aggregate glyph IS the
+            // flight marker (its position rides the lead aircraft now).
             const Vector2 p = impl_->world_to_screen(
                 static_cast<float>(t.x_grid),
                 static_cast<float>(t.y_grid));

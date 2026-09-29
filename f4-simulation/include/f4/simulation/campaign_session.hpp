@@ -1033,6 +1033,16 @@ private:
     /// FlightPlanComponent (only changed values write).
     void sync_flight_entities_();
 
+    /// FID-P1 — the live half of the flight mirror (per campaign
+    /// second, the tier pass's own cadence): while a flight is
+    /// deaggregated its world row tracks the lead aircraft's transform
+    /// + live fuel, so consumers that read the ENTITY (the selection
+    /// ring, the spawn/threat passes) see the flight move with the sim
+    /// instead of freezing at the deagg point. The fold-back writes the
+    /// same position — this only keeps the serving face honest between
+    /// folds.
+    void sync_live_flight_rows_();
+
     /// FID-3: one tier pass — deagg triggers (force > ops > bubble) and
     /// reagg rules (force pins; ops pins through its window; bubble
     /// obeys the hysteresis band + cooldown). Runs per campaign second.

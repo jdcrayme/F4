@@ -1195,7 +1195,9 @@ void CampaignSession::sync_flight_entities_() {
     // The engine's state is campaign truth; the sim's flight entities
     // are its mirror (the one-world rule, the ground mirror's twin).
     // Only changed values write. Deaggregated flights are skipped —
-    // their aircraft own the truth while materialized.
+    // their aircraft own the truth while materialized, and the live
+    // rows track the lead on the tier pass's own cadence instead
+    // (sync_live_flight_rows_, FID-P1).
     auto& world = sim_->world();
     for (const auto& f : flights_->flights()) {
         if (f.suspended) continue;
@@ -1223,8 +1225,47 @@ void CampaignSession::sync_flight_entities_() {
     }
 }
 
+void CampaignSession::sync_live_flight_rows_() {
+    // FID-P1 — the live half of the flight mirror. See the header doc.
+    // Read-first-write throughout (the ground mirror's own rule); a
+    // dead or reaped lead skips (the fold books the flight's fate).
+    auto& world = sim_->world();
+    for (const auto& [vu, rec] : deaggregated_) {
+        if (!rec.aircraft.valid()) continue;
+        const auto it = unit_id_map_.find(vu);
+        if (it == unit_id_map_.end()) continue;
+        f4::entities::EntityHandle lead(rec.aircraft, &world);
+        const auto alive = lead.get_tag(f4::entities::tags::ALIVE);
+        if (alive.has_value() && !alive->as_bool()) continue;
+        const auto* ltf = lead.get<f4::entities::TransformComponent>();
+        if (ltf == nullptr) continue;
+        f4::entities::EntityHandle h(it->second, &world);
+        if (auto* tf = h.get<f4::entities::TransformComponent>()) {
+            if (tf->position.x != ltf->position.x ||
+                tf->position.y != ltf->position.y ||
+                tf->position.z != ltf->position.z) {
+                tf->position = ltf->position;
+            }
+        }
+        if (auto* fp = h.get<f4::entities::FlightPlanComponent>()) {
+            if (auto* fm = lead.get<f4::flight::FlightModelComponent>()) {
+                const double capacity = cfg_.geometry.internalFuel.value();
+                const auto burnt = static_cast<std::int32_t>(
+                    std::max(0.0, capacity - fm->fuel_lbs()));
+                if (fp->fuel_burnt != burnt) {
+                    fp->fuel_burnt = burnt;
+                }
+            }
+        }
+    }
+}
+
 void CampaignSession::evaluate_tiers_() {
     if (flights_ == nullptr) return;
+    // The live rows move with the sim at the tier pass's own cadence
+    // (the aggregates move on the engine's updates; their serving face
+    // extrapolates in flight_tiers()).
+    sync_live_flight_rows_();
     const std::int64_t now = campaign_time();
     const auto& fleet = flights_->flights();
 
@@ -1960,9 +2001,12 @@ CampaignSession::CommandWriteResult CampaignSession::apply_retask_command(
     bool suspended = false;
     if (shape.aggregate) {
         const auto& st = flights_->flights()[shape.agg_index];
-        hx = st.fx;
-        hy = st.fy;
-        halt = st.altitude_ft;
+        // FID-P1: the flight's TRUE position — the stored 60-s quanta
+        // point extrapolated to now, the same face the tier view draws.
+        // The new route's head IS the flight, not its last quanta point
+        // (the engine's retask anchors the swap at the same position).
+        flights_->display_position(shape.agg_index, flights_->now(),
+                                   hx, hy, halt);
         suspended = st.suspended;
     }
     if (suspended || !shape.aggregate) {
@@ -2412,6 +2456,16 @@ void CampaignSession::handle_mission_intent_(
         epoch_ + static_cast<std::int64_t>(intent.time_on_target);
     seed.time_on_target = static_cast<std::int32_t>(
         std::clamp<std::int64_t>(tot_abs, 0, 2147483647));
+    // RECOV — the recovery deadline (same relative → absolute anchor as
+    // the TOT). With it the engine opens the recovery-ops window for
+    // generated flights: the flight deaggregates to land instead of
+    // parking on its last waypoint as a dimmed HOME row.
+    if (intent.mission_over > 0) {
+        const std::int64_t over_abs =
+            epoch_ + static_cast<std::int64_t>(intent.mission_over);
+        seed.mission_over_time = static_cast<std::int32_t>(
+            std::clamp<std::int64_t>(over_abs, 1, 2147483647));
+    }
     seed.route.reserve(intent.route.size());
     for (const auto& wp : intent.route) {
         f4::entities::WaypointState w;
@@ -2629,9 +2683,45 @@ void CampaignSession::deaggregate_flight_(
     // parked at its base); an AIR spawn at the aggregate state otherwise
     // (the bridge's AirSpawnPose: in-air FM init, the plan's Enroute
     // start phase, the handoff's fuel).
+    //
+    // FID-P1 — but only when the flight's OWN base resolves to an
+    // airfield. The synthesis links base-less squadrons to army bases
+    // too (the parking-capable vocabulary), and a base without
+    // ScenarioAirfield data makes the spawner's parking fall back to
+    // the caller's DEFAULT field — a cross-theater teleport the tier
+    // face now sees (the save1 trace: two flights staged at their own
+    // bases jumped ~100 nm to the first airbase in the map the moment
+    // they went live). The aggregate position is the truth: when the
+    // base's field does not resolve, the AIR pose spawns the aircraft
+    // exactly where the flight is (ground level for a staged or parked
+    // flight — it departs from its actual base area).
     const auto& st = flights_->flights()[index];
     const std::int32_t to_depart = flights_->seconds_to_depart(index);
-    const bool ground_spawn = to_depart > 0 || st.arrived;
+    bool base_field_resolved = false;
+    {
+        f4::entities::EntityId sq_entity{};
+        if (synthetic) {
+            const auto sq_it = unit_id_map_.find(intent_it->second.squadron_id);
+            if (sq_it != unit_id_map_.end()) sq_entity = sq_it->second;
+        } else {
+            f4::entities::EntityHandle fh(entity_it->second, &sim_->world());
+            if (auto* fp = fh.get<f4::entities::FlightPlanComponent>()) {
+                if (fp->squadron.valid()) sq_entity = fp->squadron;
+            }
+        }
+        if (sq_entity.valid()) {
+            auto* sq = f4::entities::EntityHandle(sq_entity, &sim_->world())
+                           .get<f4::entities::SquadronComponent>();
+            if (sq && sq->airbase.value != 0) {
+                const std::uint32_t base_vu =
+                    airbase_vu_id(sim_->world(), sq->airbase);
+                base_field_resolved =
+                    base_vu != 0 && airbase_airfields_.count(base_vu) != 0;
+            }
+        }
+    }
+    const bool ground_spawn =
+        (to_depart > 0 || st.arrived) && base_field_resolved;
     std::optional<f4::entities::EntityId> spawned;
     if (synthetic) {
         const auto& intent = intent_it->second;
@@ -2822,6 +2912,10 @@ CampaignSession::flight_tiers() const {
     std::vector<FlightTierView> out;
     if (flights_ == nullptr) return out;
     out.reserve(flights_->flights().size());
+    // The engine's own clock — the anchor its stored positions and the
+    // display extrapolation run on (the same value sync_flight_entities_
+    // mirrors on update boundaries).
+    const std::int64_t engine_now = flights_->now();
     for (std::size_t i = 0; i < flights_->flights().size(); ++i) {
         const auto& f = flights_->flights()[i];
         FlightTierView v;
@@ -2829,9 +2923,32 @@ CampaignSession::flight_tiers() const {
         v.team = f.team;
         v.mission = f.mission;
         v.aircraft_count = f.aircraft_count;
-        v.x_grid = f.fx;
-        v.y_grid = f.fy;
-        v.altitude_ft = f.altitude_ft;
+        // One position truth at every tier (FID-P1): an AGGREGATE row
+        // reports the engine's display position — the stored 60-s quanta
+        // point extrapolated to now (the GetRealPosition analogue: no
+        // pause-then-jump between updates). A LIVE row reports its lead
+        // aircraft's transform — the sim owns the truth while
+        // materialized, and the fold-back already writes that same
+        // position, so the row never freezes at the deagg point and the
+        // fold never snaps it back.
+        flights_->display_position(i, engine_now, v.x_grid, v.y_grid,
+                                   v.altitude_ft);
+        if (f.suspended) {
+            const auto rec = deaggregated_.find(f.vu);
+            if (rec != deaggregated_.end() && rec->second.aircraft.valid()) {
+                f4::entities::EntityHandle h(rec->second.aircraft,
+                                             &sim_->world());
+                const auto alive = h.get_tag(f4::entities::tags::ALIVE);
+                const bool is_alive =
+                    !alive.has_value() || alive->as_bool();
+                const auto* tf = h.get<f4::entities::TransformComponent>();
+                if (is_alive && tf != nullptr) {
+                    v.x_grid = tf->position.x / kFtPerGrid;
+                    v.y_grid = tf->position.y / kFtPerGrid;
+                    v.altitude_ft = static_cast<float>(tf->position.z);
+                }
+            }
+        }
         v.fuel_burnt = f.fuel_burnt;
         v.live = f.suspended;
         v.arrived = f.arrived;

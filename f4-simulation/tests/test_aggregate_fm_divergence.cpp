@@ -206,12 +206,19 @@ TEST(AggregateFmDivergence, CruiseLegBothTiersPinnedBounds) {
     constexpr double kWindowSec = 240.0;
     agg.session->advance(kWindowSec);
     fm.session->advance(kWindowSec);
+    // FID-P1: the tier row now extrapolates BETWEEN the engine's quanta
+    // (the serving face at the campaign clock), while the pin below
+    // reads per-update truth. Top the aggregate's clock up to the next
+    // whole second — the boundary update fires, the display face
+    // anchors at it, and display == stored exactly (one truth).
+    agg.session->advance(1.0);
 
     // (b) the aggregate's end state: the engine constants, exact PER
     // UPDATE. The update COUNT belongs to the clock (the session feeds
     // whole campaign seconds — a 240.0 wall advance delivers 239 whole
-    // seconds across the FP boundary), so the pin reads the engine's
-    // own counter: 12 grid of run and 70 lbs of burn per update fired.
+    // seconds across the FP boundary; the +1 s top-up above lands the
+    // 240th), so the pin reads the engine's own counter: 12 grid of run
+    // and 70 lbs of burn per update fired.
     const int updates = agg.session->stats().agg_updates;
     ASSERT_GE(updates, 1) << "the aggregate never advanced";
     const auto tiers = agg.session->flight_tiers();
