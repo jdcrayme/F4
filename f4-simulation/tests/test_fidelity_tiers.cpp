@@ -191,7 +191,12 @@ TEST(FidelityTiers, FullFidelitySpawnsAndHasNoEngine) {
     if (!std::filesystem::exists(f16_config_path())) {
         GTEST_SKIP() << "f16.json fixture not generated";
     }
-    auto rig = TierRig::make(base_opts());
+    // Explicit: the OPTIONS default is Tiered (the war starts
+    // aggregated — 38ed446), so the pre-FID shape is requested, not
+    // assumed. This test pins what FullFidelity does, not the default.
+    auto opts = base_opts();
+    opts.fidelity_policy = FidelityPolicy::FullFidelity;
+    auto rig = TierRig::make(opts);
     ASSERT_NE(rig.session, nullptr);
     EXPECT_FALSE(rig.session->tiered());
     EXPECT_EQ(rig.session->stats().agg_flights, 0);
@@ -409,4 +414,92 @@ TEST(FidelityTiers, OpsWindowDeaggsGroundSpawnForTakeoff) {
     auto* fm = h.get<f4::flight::FlightModelComponent>();
     ASSERT_NE(fm, nullptr);
     EXPECT_FALSE(fm->state().gear.inAir);   // on the ramp, waiting for ATC
+}
+
+// ── 8. FID-P1b — the engine ROW tracks a live flight ───────────────────────
+//
+// The tier rules (the reagg bubble, the deagg triggers) and the fold's
+// not-killed path read the engine ROW. A row frozen at the deagg point
+// made the machinery judge a live flight by where it MATERIALIZED —
+// folds fired by stale positions and respawn poses landed at one.
+
+TEST(FidelityTiers, LiveRowTracksTheLeadAndTheFoldSticks) {
+    if (!std::filesystem::exists(f16_config_path())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    auto opts = base_opts();
+    opts.fidelity_policy = FidelityPolicy::Tiered;
+    auto rig = TierRig::make(opts);
+    ASSERT_NE(rig.session, nullptr);
+
+    rig.session->advance(600.0);
+    rig.session->force_deaggregate_flight(rig.flight_vu());
+    ASSERT_EQ(rig.session->stats().agg_live, 1);
+
+    // Let the aircraft FLY (60 Hz FM): 20 s of cruise moves it east.
+    rig.session->advance(20.0);
+    EntityHandle h(rig.session->sim().aircraft_entities().front(),
+                   &rig.session->sim().world());
+    auto* tf = h.get<f4::entities::TransformComponent>();
+    ASSERT_NE(tf, nullptr);
+    const double lead_gx = tf->position.x / 1024.0;
+    const double lead_gy = tf->position.y / 1024.0;
+
+    // The SUSPENDED row now carries the lead's position (the tier
+    // rules' input), not the deagg point.
+    const auto& row = rig.session->flight_engine()->flights()[0];
+    EXPECT_TRUE(row.suspended);
+    EXPECT_NEAR(row.fx, lead_gx, 0.05);
+    EXPECT_NEAR(row.fy, lead_gy, 0.05);
+
+    // The fold lands exactly there — the row was already at the lead,
+    // so no fold can snap it.
+    rig.session->force_reaggregate_flight(rig.flight_vu());
+    EXPECT_EQ(rig.session->stats().agg_live, 0);
+    const auto& folded = rig.session->flight_engine()->flights()[0];
+    EXPECT_NEAR(folded.fx, lead_gx, 0.05);
+    EXPECT_NEAR(folded.fy, lead_gy, 0.05);
+}
+
+// ── 9. FID-P0b — a dead lead folds on the NEXT tier pass ───────────────────
+//
+// Nothing outranks a death: no ops pin, no bubble, no cooldown. The
+// old shape left a killed flight's row suspended at its pre-deagg
+// position until the pin expired — a paused ghost drawn where the
+// flight materialized, not where it fell — and the kill verdict only
+// closed at the fold.
+
+TEST(FidelityTiers, DeadLeadFoldsOnTheNextPass) {
+    if (!std::filesystem::exists(f16_config_path())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    auto opts = base_opts();
+    opts.fidelity_policy = FidelityPolicy::Tiered;
+    // The OPS deagg pins for 2×600 s — the old shape's whole ghost
+    // window. The death fold must ignore it.
+    auto rig = TierRig::make(opts, /*takeoff_depart=*/kNow + 120);
+    ASSERT_NE(rig.session, nullptr);
+    rig.session->advance(2.0);   // the ops window fires: GROUND spawn
+    ASSERT_EQ(rig.session->stats().agg_live, 1);
+    ASSERT_EQ(rig.session->sim().aircraft_entities().size(), 1u);
+
+    // The kill: the bus books the flight (the fold's verdict) and the
+    // ALIVE tag drops (what the tier pass reads).
+    const auto victim = rig.session->sim().aircraft_entities().front();
+    rig.session->sim().bus().publish(f4::weapons::EntityKilledMessage{
+        victim.value, 0, rig.session->sim().sim_time_s()});
+    {
+        EntityHandle h(victim, &rig.session->sim().world());
+        h.set_tag(f4::entities::tags::ALIVE,
+                  f4::entities::TagValue::from(false));
+    }
+
+    // ONE whole-second pass closes the flight: destroyed (the booked
+    // kill), not suspended, and the corpse retired. No pin waited out.
+    rig.session->advance(2.0);
+    EXPECT_EQ(rig.session->stats().agg_live, 0);
+    const auto tiers = rig.session->flight_tiers();
+    ASSERT_EQ(tiers.size(), 1u);
+    EXPECT_TRUE(tiers[0].destroyed);
+    EXPECT_EQ(rig.session->sim().aircraft_entities().size(), 0u);
 }

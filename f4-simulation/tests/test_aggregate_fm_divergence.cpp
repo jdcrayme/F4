@@ -276,9 +276,23 @@ TEST(AggregateFmDivergence, CruiseLegBothTiersPinnedBounds) {
     EXPECT_TRUE(fm_tiers[0].live) << "the deaggregated flight folded "
                                      "back mid-window (the pin governs "
                                      "the A/B's aggregate side)";
-    EXPECT_EQ(fm_tiers[0].fuel_burnt, 0)
-        << "a suspended flight's aggregate fuel moved — the sim owns "
-           "the truth while materialized";
+    // FID-P1b: the suspended ROW tracks the sim (update_live) — the
+    // tier rules and the fold read it, so it must carry the lead's
+    // burn, not a frozen deagg point. The row's figure is the fold's
+    // own expression (capacity − remaining, truncated, monotone).
+    {
+        const double capacity = 7162.0;   // f16.json internalFuel
+        const auto want = static_cast<std::int32_t>(
+            std::max(0.0, capacity - fm_fuel));
+        // Within 2 lbs: the row samples at the last whole-second tier
+        // pass, the FM read sits a sub-second tail later (240.0 lands
+        // 239 whole-second passes across the FP boundary).
+        EXPECT_GE(fm_tiers[0].fuel_burnt, want - 2)
+            << "a suspended flight's row stopped tracking the sim's "
+               "burn — the tier rules would judge it by a stale "
+               "figure";
+        EXPECT_LE(fm_tiers[0].fuel_burnt, want);
+    }
 
     // The one-line divergence report (the harness's stdout record).
     std::cout << "[ab-divergence] 240 s: aggregate 48.0 grid @ "

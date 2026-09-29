@@ -981,13 +981,18 @@ void ViewerApp::draw_canvas() {
                 continue;
             }
             if (t.destroyed) {
-                constexpr unsigned char xcol = 130;
-                DrawLineEx(Vector2{p.x - 3.0f, p.y - 3.0f},
-                           Vector2{p.x + 3.0f, p.y + 3.0f}, 1.0f,
-                           Color{xcol, xcol, xcol, 150});
-                DrawLineEx(Vector2{p.x - 3.0f, p.y + 3.0f},
-                           Vector2{p.x + 3.0f, p.y - 3.0f}, 1.0f,
-                           Color{xcol, xcol, xcol, 150});
+                // A killed flight draws a proper wreck cross — sized
+                // with the glyph and opaque enough to read. The old
+                // fixed 3-px, 59%-transparent speck was indistinguishable
+                // from "vanished": the whole point of drawing the row is
+                // that a booked loss is VISIBLE, not a hole in the map.
+                const float arm = std::max(4.0f, s * 0.45f);
+                DrawLineEx(Vector2{p.x - arm, p.y - arm},
+                           Vector2{p.x + arm, p.y + arm}, 2.0f,
+                           Color{170, 170, 170, 230});
+                DrawLineEx(Vector2{p.x - arm, p.y + arm},
+                           Vector2{p.x + arm, p.y - arm}, 2.0f,
+                           Color{170, 170, 170, 230});
                 continue;
             }
             f4::renderer::RlColor c = color_for_owner(static_cast<std::uint8_t>(t.team));
@@ -996,8 +1001,10 @@ void ViewerApp::draw_canvas() {
                 c.g = static_cast<unsigned char>(c.g * 0.3f);
                 c.b = static_cast<unsigned char>(c.b * 0.3f);
                 c.a = static_cast<unsigned char>(c.a * 0.3f);
-            } else if (t.arrived) {
-                // HOME: the ramp picture — dim like the parked dots.
+            } else if (t.arrived || t.aborted) {
+                // HOME (arrived) and ABORTED (scrubbed pre-launch): the
+                // ramp picture — dim like the parked dots, so a terminal
+                // row never reads as an aircraft still flying.
                 c.r = static_cast<unsigned char>(c.r * 0.45f);
                 c.g = static_cast<unsigned char>(c.g * 0.45f);
                 c.b = static_cast<unsigned char>(c.b * 0.45f);

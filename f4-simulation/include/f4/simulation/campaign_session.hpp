@@ -731,6 +731,15 @@ public:
     /// flights table). Called under the session lock.
     [[nodiscard]] std::vector<FlightTierView> flight_tiers() const;
 
+    /// The aggregate engine itself (null when not tiered) — the
+    /// tests' raw-row read: flight_tiers() overlays a live flight's
+    /// lead position, so only the engine's own rows show what the
+    /// tier rules actually see. Read-only by convention.
+    [[nodiscard]] const f4::campaign::FlightAggregateEngine*
+    flight_engine() const noexcept {
+        return flights_.get();
+    }
+
     /// The aggregate flight's current course (compass radians, 0 =
     /// north) — the engine's per-flight heading, the same value the
     /// deagg spawn pose uses. nullopt when not tiered / unknown vu.
@@ -1067,6 +1076,18 @@ private:
     /// state into the engine, the aircraft retired; an all-dead flight
     /// folds as destroyed. Returns true when a fold happened.
     bool reaggregate_flight_(std::uint32_t vu);
+
+    /// The live lead's roll-up read: true (and `out` filled with the
+    /// transform's ENU feet) when the record's aircraft is alive and
+    /// materialized. False for a dead lead (ALIVE tag false), a reaped
+    /// or retired one (stale id — no transform), and an invalid id.
+    /// The fold's killed-vs-vanished verdict, the tier pass's death
+    /// fold, sync_live_flight_rows_'s tracking, and flight_tiers's
+    /// position overlay all share this one definition of "the lead is
+    /// here".
+    [[nodiscard]] bool live_lead_position_(
+        const DeaggregatedFlight& rec,
+        f4::geo::WorldPosition& out) const;
 
     /// Recompute stats_ from the live objects.
     void refresh_stats_();

@@ -194,8 +194,24 @@ public:
     /// Fold the sim's truth back into the aggregate (the reagg handoff,
     /// FIDELITY_TIERS_PLAN §4.4): position/altitude/fuel from the lead
     /// aircraft, the waypoint cursor reset to the next upcoming
-    /// waypoint, suspension lifted, dirty set. Unknown vu = no-op.
+    /// waypoint, suspension lifted, dirty set. A TIME-mode flight's
+    /// schedule RE-ANCHORS at the fold (see reanchor_schedule_) so the
+    /// wire schedule passes through the folded position at the fold
+    /// time — the fold never snaps the flight back to a stale schedule
+    /// point. Unknown vu = no-op.
     void reaggregate(std::uint32_t vu, double fx, double fy,
+                     float altitude_ft, std::int32_t fuel_burnt);
+
+    /// Track a SUSPENDED flight's live position/fuel into its row (the
+    /// session calls this per tier pass from the lead aircraft's
+    /// transform). Suspension means the sim owns the truth — but the
+    /// row is what every tier rule (the reagg bubble, the deagg
+    /// triggers) and the fold's not-killed path read, so a stale row
+    /// made the machinery judge a live flight by where it MATERIALIZED,
+    /// not where it was. Fuel is monotone (the same rule as the fold).
+    /// Unknown vu, or a row that is not suspended, = no-op (an
+    /// aggregate owns its own kinematics).
+    void update_live(std::uint32_t vu, double fx, double fy,
                      float altitude_ft, std::int32_t fuel_burnt);
 
     /// Fold an all-dead flight (its aircraft were killed in-sim): the
@@ -349,6 +365,20 @@ private:
     void catch_up_(FlightAggregateState& f, std::size_t index,
                    std::int64_t now_abs);
 
+    /// Shift a TIME-mode route's arrive/depart times by one constant
+    /// so the schedule passes through the folded position (f.fx/fy) at
+    /// now_abs. The route SHAPE and every leg duration/dwell are
+    /// preserved — the wire schedule simply slides to where the
+    /// aircraft actually is, so the fold-back never snaps the flight
+    /// back to a stale schedule point (the live window flew at real
+    /// speeds while the wire modeled slower progress; the delta can be
+    /// tens of grids). A no-op for a pre-departure fold (the takeoff
+    /// gate still owns the schedule) and for routes without at least
+    /// two scheduled anchors.
+    void reanchor_schedule_(FlightAggregateState& f,
+                            std::vector<f4::entities::WaypointState>& route,
+                            std::int64_t now_abs);
+
     FlightAggregateConfig cfg_;
     std::vector<FlightAggregateState> flights_;
     std::vector<std::vector<f4::entities::WaypointState>> routes_;
@@ -360,6 +390,16 @@ private:
     /// True when the route's arrival times are usable (any arrive > 0)
     /// — TIME mode; else SPEED mode. Chosen per flight at construction.
     std::vector<bool> time_mode_;
+
+    /// Per flight: the LAST waypoint index carrying an arrival time
+    /// (size_t(-1) = none). TIME mode's arrival fires when its arrive
+    /// passes — without this, a route whose tail legs are unscheduled
+    /// (the walk skips them) never marked the flight arrived and it
+    /// sat frozen at the last scheduled waypoint forever. Routes are
+    /// only replaced by retask (which flips the flight into SPEED
+    /// mode), so a construction-time index stays valid for every
+    /// TIME-mode read.
+    std::vector<std::size_t> schedule_end_index_;
 };
 
 } // namespace f4::campaign

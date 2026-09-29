@@ -630,3 +630,150 @@ TEST(FlightAggregate, DisplayPositionFoldAnchorsAtTheFoldTime) {
     rig.engine->display_position(idx, kEpoch + 900, fx, fy, alt);
     EXPECT_NEAR(fx, rig.engine->flights()[idx].fx, 1e-9);
 }
+
+// ── 10. Live tracking (FID-P1b) — the row follows a suspended flight ───────
+//
+// The tier rules and the fold's not-killed path read the ROW, so a
+// suspended row must track the lead: a row frozen at the deagg point
+// made the machinery judge a live flight by where it materialized.
+
+TEST(FlightAggregate, UpdateLiveTracksTheSuspendedRow) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    rig.ws->units = {flight(1, 2, 0, 0, 13,
+                            {wp(30, 0, 5000, 0, kEpoch + 60)}, {group(1)})};
+    rig.make();
+
+    rig.engine->set_suspended(1, true);
+    rig.engine->update_live(1, 5.0, 7.0, 9000.0f, 200);
+    EXPECT_TRUE(rig.engine->flights()[0].suspended);
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 5.0);
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fy, 7.0);
+    EXPECT_FLOAT_EQ(rig.engine->flights()[0].altitude_ft, 9000.0f);
+    EXPECT_EQ(rig.engine->flights()[0].fuel_burnt, 200);
+
+    // Monotone fuel (the fold's own rule): a lower read never unburns.
+    rig.engine->update_live(1, 9.0, 7.0, 9000.0f, 150);
+    EXPECT_EQ(rig.engine->flights()[0].fuel_burnt, 200);
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 9.0);
+
+    // Suspended flights are still skipped by the tick (the tracking
+    // never turns the row into an aggregate again).
+    rig.engine->tick(600);
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 9.0);
+    EXPECT_TRUE(rig.engine->flights()[0].suspended);
+
+    // An AGGREGATE row refuses the write (it owns its own kinematics).
+    rig.engine->set_suspended(1, false);
+    rig.engine->update_live(1, 50.0, 50.0, 0.0f, 900);
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 9.0);
+
+    // Unknown vu: a no-op (nothing to crash on).
+    rig.engine->update_live(1234, 1.0, 1.0, 0.0f, 0);
+}
+
+// ── 11. The TIME-mode fold re-anchor (FID-P1's missing half) ───────────────
+//
+// The fold lands the lead's TRUE position — but a TIME-mode row's
+// display and advance re-derive the position from the wire schedule,
+// which still says the flight is where it was 20 live minutes ago: the
+// glyph snapped back at the first read. The re-anchor slides the whole
+// schedule (shape, leg durations, dwells preserved) so it passes
+// through the folded position at the fold time.
+
+TEST(FlightAggregate, ReaggregateReanchorsTheTimeSchedule) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    // wp0 (0,0) departs E+600; leg 0→1 (60 grid east) spans E+600..E+1200
+    // (0.1 grid/s); hold 300 s; leg 1→2 (60 more) spans E+1500..E+2700.
+    rig.ws->units = {flight(1, 2, 0, 0, 13,
+                            {wp(0, 0, 0, 0, kEpoch + 600),
+                             wp(60, 0, 8000, kEpoch + 1200, kEpoch + 1500),
+                             wp(120, 0, 8000, kEpoch + 2700)},
+                            {group(1)})};
+    rig.make();
+
+    // Fly to E+700 (the schedule says (10,0)); the sim materializes and
+    // the lead is at (40,0) — 30 grids AHEAD of the wire — at the fold.
+    rig.engine->tick(700);
+    rig.engine->set_suspended(1, true);
+    rig.engine->reaggregate(1, 40.0, 0.0, 8000.0f, 100);
+
+    // The schedule passes through (40,0) AT E+700 now: the serving face
+    // reads the folded position — no snap-back to the wire's (10,0).
+    double fx = -1, fy = -1;
+    float alt = -1;
+    rig.engine->display_position(0, kEpoch + 700, fx, fy, alt);
+    EXPECT_NEAR(fx, 40.0, 1e-9);
+    EXPECT_NEAR(fy, 0.0, 1e-9);
+
+    // Leg durations and dwells are the save's own (shape preserved):
+    // leg 0→1 still spans 600 s, the hold still 300 s, leg 1→2 still
+    // 1200 s — only the clock moved (by +300: the aircraft was ahead).
+    const auto& r = rig.engine->routes()[0];
+    EXPECT_EQ(r[1].arrive - r[0].depart, 600);
+    EXPECT_EQ(r[1].depart - r[1].arrive, 300);
+    EXPECT_EQ(r[2].arrive - r[1].depart, 1200);
+    // And the shift is the one the geometry demands (40 grid at
+    // 0.1 grid/s = 400 s after depart → t_P = E+1000, delta = +300).
+    EXPECT_EQ(r[1].arrive, kEpoch + 900);
+    EXPECT_EQ(r[2].arrive, kEpoch + 2400);
+
+    // The engine's own updates follow the shifted schedule — the next
+    // quanta point (E+720) continues from the folded position at the
+    // leg's own 0.1 grid/s (40 + 20 s × 0.1 = 42), never a jump back.
+    rig.engine->tick(60);   // clock E+760: the E+720 boundary update fires
+    EXPECT_NEAR(rig.engine->flights()[0].fx, 42.0, 1e-9);
+    // One truth: the display AT the quanta boundary equals the row, and
+    // between quanta it keeps walking the same schedule (E+760 → 46).
+    rig.engine->display_position(0, kEpoch + 720, fx, fy, alt);
+    EXPECT_NEAR(fx, rig.engine->flights()[0].fx, 1e-9);
+    rig.engine->display_position(0, kEpoch + 760, fx, fy, alt);
+    EXPECT_NEAR(fx, 46.0, 1e-9);
+}
+
+TEST(FlightAggregate, PreDepartureFoldKeepsTheWireSchedule) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    rig.ws->units = {flight(1, 2, 0, 0, 13,
+                            {wp(0, 0, 0, 0, kEpoch + 600),
+                             wp(60, 0, 8000, kEpoch + 1200)},
+                            {group(1)})};
+    rig.make();
+
+    // A fold BEFORE the first depart (a ground-staged flight the sim
+    // parked at some offset): the takeoff gate still owns the schedule.
+    rig.engine->set_suspended(1, true);
+    rig.engine->reaggregate(1, 3.0, 0.0, 0.0f, 0);
+    EXPECT_EQ(rig.engine->routes()[0][0].depart, kEpoch + 600);
+    EXPECT_EQ(rig.engine->routes()[0][1].arrive, kEpoch + 1200);
+    // The gate holds the row at the folded spot until depart.
+    double fx = -1, fy = -1;
+    float alt = -1;
+    rig.engine->display_position(0, kEpoch + 300, fx, fy, alt);
+    EXPECT_NEAR(fx, 3.0, 1e-9);
+}
+
+// ── 12. The TIME-mode arrival through an unscheduled tail ──────────────────
+//
+// Legs without an arrival are skipped by the walk — a route whose last
+// legs are unscheduled never fired the arrival, and the flight sat at
+// the last scheduled waypoint FOREVER (a frozen glyph mid-map).
+
+TEST(FlightAggregate, TimeModeArrivesPastAnUnscheduledTail) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    rig.ws->units = {flight(1, 2, 0, 0, 13,
+                            {wp(0, 0, 0, 0, kEpoch + 100),
+                             wp(10, 0, 5000, kEpoch + 200),
+                             wp(20, 0, 5000)},   // no arrive: the tail
+                            {group(1)})};
+    rig.make();
+
+    rig.engine->tick(300);   // past the last scheduled arrival
+    EXPECT_TRUE(rig.engine->flights()[0].arrived);
+    // The row holds at the last SCHEDULED waypoint (the walk snaps
+    // through scheduled legs only).
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 10.0);
+    EXPECT_EQ(rig.engine->stats().arrived, 1);
+}

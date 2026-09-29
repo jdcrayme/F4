@@ -677,20 +677,44 @@ follow-up refinement, documented here.
   (hand-authored fixtures) keep the full taxi, and the FM
   reconciliation tranche stays open for whoever wants physical taxi
   back on deaggregated flights.
-- **MAP FLIGHT DISAPPEARANCE (QC 2026-09-28, open)** — the viewer's
-  campaign map occasionally loses flight glyphs. The FID fold-back is
-  designed (reaggregate_flight_ rolls the LEAD's live position up
-  into the aggregate row, so the handoff keeps the flight visible on
-  the aggregate layer) — but a fold whose aircraft is already gone
-  (reaper-retired, scrubbed) marks the flight DESTROYED
-  (`flights_->mark_destroyed`), and destroyed rows draw on NO layer.
-  Any path that retires a live aircraft outside EntityKilled
-  (aborts, scrub complements, roster churn) can therefore make a
-  flight vanish instead of fold. Needs the user's symptom context
-  (mid-flight vs after combat vs after abort) to pin which retirement
-  path; the QC shape: a session harness sampling every fleet row per
-  minute and asserting no row leaves both layers without a booked
-  loss.
+- **MAP FLIGHT DISAPPEARANCE (QC 2026-09-28) — RESOLVED AS-BUILT BY
+  FID-P1B (2026-09-29), the whole triad** — the viewer's campaign map
+  losing flight glyphs (and the companion "pausing" and "teleporting")
+  traced to one cluster: a materialized flight's aggregate ROW froze
+  at its deagg point, and every downstream reader consumed the frozen
+  position. The FID-P0 tranche had fixed the fold's kill-vs-vanish
+  verdict (a fold that cannot produce a live roll-up no longer marks
+  DESTROYED unless the kill is booked), but three paths still dropped
+  or displaced glyphs: (1) the tier rules (the reagg bubble, the deagg
+  triggers) and the fold's not-killed path all read the row — a frozen
+  row made folds fire by stale positions, respawn poses land at one,
+  and a dead lead's glyph fall back to the spawn point (the viewer's
+  zoom-gated air bubble compounds it: zoomed out, `unobserved` is
+  unconditionally true and every live flight folded 30 s after its pin
+  expired). (2) A TIME-mode fold's anchored position was discarded on
+  the next display read — the serving face re-derives from the wire
+  schedule, so the glyph snapped back to the schedule's (slow) idea of
+  where the flight was — tens of grids, to near the base it left.
+  (3) A killed flight folded only when the tier rules allowed: the ops
+  pin (2×600 s) ignored the death, so the row sat suspended at the
+  pre-deagg point (a paused ghost) until the pin expired, then closed
+  as DESTROYED — drawn as a 3-px dim speck that read as "vanished".
+  AS-BUILT (FID-P1B): the row tracks the lead (`update_live` per tier
+  pass), the fold re-anchors a TIME-mode schedule through the folded
+  position (one constant shift; shape/durations/dwells preserved), a
+  dead lead folds on the NEXT pass before any pin/bubble/cooldown
+  (the booking or a missing live roll-up both trigger), the ALIVE-tag
+  read honors a present-FALSE value (`as_bool()` is a get_if pointer —
+  the old read took the pointer's truthiness), a TIME-mode route with
+  an unscheduled tail now ARRIVES (it used to freeze at the last
+  scheduled waypoint forever), and the canvas draws a destroyed row as
+  a wreck cross sized with the glyph (aborted rows dim like HOME).
+  The QC shape below is still the right harness; the landed pins are
+  narrower: test_flight_aggregate's live-tracking/re-anchor/tail pins,
+  test_fidelity_tiers' LiveRowTracksTheLeadAndTheFoldSticks +
+  DeadLeadFoldsOnTheNextPass. The DEAGG-RWY-1 takeoff contract (the
+  45 s ramp hold, the runway-threshold teleport) stays DESIGNED — it
+  is the remaining deliberate pause-and-jump on the map.
 - **Per-action altitude shaping** (C3): lands with its consumer (the
   fuel tranche) — documented in route_builder.hpp. (Package-shared
   ingress and TOT slotting landed with C4's package composition —

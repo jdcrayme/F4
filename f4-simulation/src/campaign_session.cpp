@@ -1226,37 +1226,47 @@ void CampaignSession::sync_flight_entities_() {
 }
 
 void CampaignSession::sync_live_flight_rows_() {
-    // FID-P1 — the live half of the flight mirror. See the header doc.
-    // Read-first-write throughout (the ground mirror's own rule); a
-    // dead or reaped lead skips (the fold books the flight's fate).
+    // FID-P1 — the live half of the flight mirror. Read-first-write
+    // throughout (the ground mirror's own rule); a dead or reaped lead
+    // skips — the tier pass's death fold (right after this walk) books
+    // the flight's fate.
+    //
+    // FID-P1b — the ENGINE ROW follows the lead too (update_live):
+    // every tier rule (the reagg bubble, the deagg triggers) and the
+    // fold's not-killed path read the row, and a row frozen at the
+    // deagg point made them judge a live flight by where it
+    // MATERIALIZED — the fold fired by a stale position, the
+    // respawn/pose landed at one, and a dead lead's glyph fell back to
+    // one (the teleport-to-spawn, the frozen ghost, the flap).
     auto& world = sim_->world();
     for (const auto& [vu, rec] : deaggregated_) {
-        if (!rec.aircraft.valid()) continue;
-        const auto it = unit_id_map_.find(vu);
-        if (it == unit_id_map_.end()) continue;
-        f4::entities::EntityHandle lead(rec.aircraft, &world);
-        const auto alive = lead.get_tag(f4::entities::tags::ALIVE);
-        if (alive.has_value() && !alive->as_bool()) continue;
-        const auto* ltf = lead.get<f4::entities::TransformComponent>();
-        if (ltf == nullptr) continue;
-        f4::entities::EntityHandle h(it->second, &world);
-        if (auto* tf = h.get<f4::entities::TransformComponent>()) {
-            if (tf->position.x != ltf->position.x ||
-                tf->position.y != ltf->position.y ||
-                tf->position.z != ltf->position.z) {
-                tf->position = ltf->position;
-            }
+        f4::geo::WorldPosition pos{};
+        if (!live_lead_position_(rec, pos)) continue;
+        auto* fm = f4::entities::EntityHandle(rec.aircraft, &world)
+                       .get<f4::flight::FlightModelComponent>();
+        std::int32_t burnt = 0;
+        if (fm != nullptr) {
+            const double capacity = cfg_.geometry.internalFuel.value();
+            burnt = static_cast<std::int32_t>(
+                std::max(0.0, capacity - fm->fuel_lbs()));
         }
-        if (auto* fp = h.get<f4::entities::FlightPlanComponent>()) {
-            if (auto* fm = lead.get<f4::flight::FlightModelComponent>()) {
-                const double capacity = cfg_.geometry.internalFuel.value();
-                const auto burnt = static_cast<std::int32_t>(
-                    std::max(0.0, capacity - fm->fuel_lbs()));
+        const auto it = unit_id_map_.find(vu);
+        if (it != unit_id_map_.end()) {
+            f4::entities::EntityHandle h(it->second, &world);
+            if (auto* tf = h.get<f4::entities::TransformComponent>()) {
+                if (tf->position.x != pos.x || tf->position.y != pos.y ||
+                    tf->position.z != pos.z) {
+                    tf->position = pos;
+                }
+            }
+            if (auto* fp = h.get<f4::entities::FlightPlanComponent>()) {
                 if (fp->fuel_burnt != burnt) {
                     fp->fuel_burnt = burnt;
                 }
             }
         }
+        flights_->update_live(vu, pos.x / kFtPerGrid, pos.y / kFtPerGrid,
+                              static_cast<float>(pos.z), burnt);
     }
 }
 
@@ -1275,6 +1285,25 @@ void CampaignSession::evaluate_tiers_() {
 
         auto rec = deaggregated_.find(f.vu);
         if (rec != deaggregated_.end()) {
+            // FID-P0b — the death fold: a lead that is dead or gone
+            // closes the flight on THIS pass. Nothing outranks a death
+            // — no pin (the ops pin ignored "the aircraft died": a
+            // killed flight's row sat suspended at its pre-deagg
+            // position until the pin expired, a paused ghost drawn
+            // where it materialized, not where it fell), no bubble, no
+            // cooldown. Two death signals: the kill booking (the
+            // EntityKilled feed — aircraft deaths never touch the ALIVE
+            // tag) and a lead that cannot produce a live roll-up (the
+            // reaper's retire, a vanished entity). The fold picks the
+            // verdict: the booking marks the flight destroyed; a
+            // vanished aircraft folds it live at its last known
+            // position.
+            f4::geo::WorldPosition lead_pos{};
+            if (deagg_killed_flights_.count(f.vu) != 0 ||
+                !live_lead_position_(rec->second, lead_pos)) {
+                reaggregate_flight_(f.vu);
+                continue;
+            }
             // --- the reagg rules (FID-3) ---
             if (rec->second.trigger ==
                     DeaggregatedFlight::Trigger::Force) {
@@ -2840,6 +2869,24 @@ void CampaignSession::deaggregate_flight_(
     }
 }
 
+bool CampaignSession::live_lead_position_(
+    const DeaggregatedFlight& rec, f4::geo::WorldPosition& out) const {
+    if (!rec.aircraft.valid()) return false;
+    f4::entities::EntityHandle h(rec.aircraft, &sim_->world());
+    const auto alive = h.get_tag(f4::entities::tags::ALIVE);
+    // TagValue::as_bool() is a get_if POINTER — its truthiness only
+    // says "the tag holds a bool", never WHICH bool. A present-false
+    // ALIVE tag (and a present non-bool one) reads DEAD here.
+    if (alive.has_value()) {
+        const bool* v = alive->as_bool();
+        if (v == nullptr || !*v) return false;
+    }
+    const auto* tf = h.get<f4::entities::TransformComponent>();
+    if (tf == nullptr) return false;
+    out = tf->position;
+    return true;
+}
+
 bool CampaignSession::reaggregate_flight_(std::uint32_t vu) {
     auto rec = deaggregated_.find(vu);
     if (rec == deaggregated_.end()) return false;
@@ -2851,23 +2898,19 @@ bool CampaignSession::reaggregate_flight_(std::uint32_t vu) {
     // DESTROYED — the flight closes in the aggregate layer; its loss
     // is already booked at the C1 sink (the EntityKilled path).
     bool folded_live = false;
-    if (rec->second.aircraft.valid()) {
-        f4::entities::EntityHandle h(rec->second.aircraft, &sim_->world());
-        auto* fm = h.get<f4::flight::FlightModelComponent>();
+    f4::geo::WorldPosition lead_pos{};
+    if (live_lead_position_(rec->second, lead_pos)) {
+        auto* fm = f4::entities::EntityHandle(rec->second.aircraft,
+                                              &sim_->world())
+                       .get<f4::flight::FlightModelComponent>();
         if (fm != nullptr) {
-            const auto alive = h.get_tag(f4::entities::tags::ALIVE);
-            const bool is_alive = !alive.has_value() || alive->as_bool();
-            auto* tf = h.get<f4::entities::TransformComponent>();
-            if (is_alive && tf != nullptr) {
-                const double capacity = cfg_.geometry.internalFuel.value();
-                const std::int32_t burnt = static_cast<std::int32_t>(
-                    std::max(0.0, capacity - fm->fuel_lbs()));
-                flights_->reaggregate(
-                    vu, tf->position.x / kFtPerGrid,
-                    tf->position.y / kFtPerGrid,
-                    static_cast<float>(tf->position.z), burnt);
-                folded_live = true;
-            }
+            const double capacity = cfg_.geometry.internalFuel.value();
+            const std::int32_t burnt = static_cast<std::int32_t>(
+                std::max(0.0, capacity - fm->fuel_lbs()));
+            flights_->reaggregate(vu, lead_pos.x / kFtPerGrid,
+                                  lead_pos.y / kFtPerGrid,
+                                  static_cast<float>(lead_pos.z), burnt);
+            folded_live = true;
         }
     }
     if (!folded_live) {
@@ -2935,18 +2978,12 @@ CampaignSession::flight_tiers() const {
                                    v.altitude_ft);
         if (f.suspended) {
             const auto rec = deaggregated_.find(f.vu);
-            if (rec != deaggregated_.end() && rec->second.aircraft.valid()) {
-                f4::entities::EntityHandle h(rec->second.aircraft,
-                                             &sim_->world());
-                const auto alive = h.get_tag(f4::entities::tags::ALIVE);
-                const bool is_alive =
-                    !alive.has_value() || alive->as_bool();
-                const auto* tf = h.get<f4::entities::TransformComponent>();
-                if (is_alive && tf != nullptr) {
-                    v.x_grid = tf->position.x / kFtPerGrid;
-                    v.y_grid = tf->position.y / kFtPerGrid;
-                    v.altitude_ft = static_cast<float>(tf->position.z);
-                }
+            f4::geo::WorldPosition pos{};
+            if (rec != deaggregated_.end() &&
+                live_lead_position_(rec->second, pos)) {
+                v.x_grid = pos.x / kFtPerGrid;
+                v.y_grid = pos.y / kFtPerGrid;
+                v.altitude_ft = static_cast<float>(pos.z);
             }
         }
         v.fuel_burnt = f.fuel_burnt;

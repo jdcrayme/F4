@@ -112,6 +112,9 @@ struct FlightRow {
     bool destroyed{false};
     std::int32_t to_depart{-1};
     std::int32_t to_mission_over{-1};
+    // CAMP-CMD-2's abort record (the row's additive tail — absent on
+    // hosts older than the key, the reader's default holds).
+    bool aborted{false};
 };
 
 [[nodiscard]] std::vector<FlightRow> fetch_flights(

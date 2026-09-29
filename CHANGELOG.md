@@ -5,6 +5,63 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## FID-P1B — the aggregate row follows a live flight; the fold re-anchors the wire; a dead lead folds on the pass
+
+The viewer's campaign-map triad — flights pausing, teleporting, and
+disappearing — traced to one cluster: while a flight was materialized,
+its aggregate ROW froze at the deagg point, and everything downstream
+read that frozen position.
+
+- **The row tracks the lead (`update_live`)** — `sync_live_flight_rows_`
+  now writes the lead's transform + monotone fuel into the suspended
+  row each tier pass (a new `FlightAggregateEngine::update_live`; an
+  aggregate row refuses the write). The reagg bubble, the deagg
+  triggers, and the fold's not-killed path all read the row: a frozen
+  row made the tier machinery judge a live flight by where it
+  MATERIALIZED — folds fired by stale positions, respawn poses landed
+  at one, and a dead lead's glyph fell back to one (the
+  teleport-to-spawn, the frozen ghost, the fold→re-deagg flap).
+- **The fold re-anchors a TIME-mode schedule (`reanchor_schedule_`)** —
+  the fold lands the lead's true position, but a TIME-mode row's
+  display/advance re-derive position from the wire schedule, so the
+  very next read snapped the glyph back to where the schedule said the
+  flight should be (the live window flew at real speeds while the wire
+  modeled ~121 kts — tens of grids backward, to near the base it
+  left). The fold now slides the whole arrive/depart schedule by one
+  constant so it passes through the folded position AT the fold time:
+  route shape, leg durations, and dwells are the save's own; only the
+  clock they run on moves. A pre-departure fold keeps the wire (the
+  takeoff gate still owns it).
+- **A dead lead folds on the NEXT tier pass (FID-P0b)** — the tier
+  pass now folds a flight whose kill is booked (the EntityKilled feed
+  — aircraft deaths never touch the ALIVE tag) or whose lead cannot
+  produce a live roll-up, BEFORE any pin/bubble/cooldown check. The
+  old shape left a killed flight's row suspended at its pre-deagg
+  position until the 2×600 s ops pin expired — a paused ghost drawn
+  where the flight materialized, then a fold to `mark_destroyed`.
+- **`ALIVE`-tag reads fixed** — `TagValue::as_bool()` is a `get_if`
+  POINTER: the old `!alive->as_bool()` read the pointer's truthiness,
+  so a present-but-FALSE tag read "alive". The shared
+  `live_lead_position_` helper (fold verdict, tier pass, row sync,
+  tier snapshot overlay) reads the value.
+- **TIME-mode arrival fires past an unscheduled tail** — legs after
+  the last scheduled waypoint have no arrival to fire; a route with an
+  unscheduled tail never marked the flight arrived and it sat frozen
+  at the last scheduled waypoint forever. The engine now pins each
+  TIME-mode route's terminal arrival (construction-time index; retask
+  flips the mode, so it stays valid) and arrives when it passes.
+- **The map reads terminal rows honestly** — a destroyed flight draws
+  a wreck cross sized with the glyph (the old fixed 3-px, 59%-alpha
+  speck read as "vanished"), and aborted (scrubbed) rows dim like
+  HOME; the viewer's FlightRow parses the row's additive `aborted` key.
+- **Pins**: 4 new engine tests (live tracking, the re-anchor + its
+  pre-departure guard, the unscheduled-tail arrival), 2 new session
+  tests (the row tracks the lead and the fold sticks; a booked kill
+  closes inside one pass through a live ops pin), and the A/B
+  divergence's suspended-row fuel pin re-locked to the tracking
+  contract. FullFidelitySpawnsAndHasNoEngine now requests the policy
+  explicitly (the FID-DEF-GOV sweep missed it).
+
 ## FID-DEF-GOV — Tiered is the default fidelity policy; the runner's dilation becomes an AIMD delivery governor
 
 - **The acceleration verdict becomes the default** — `CampaignSessionOptions::fidelity_policy`

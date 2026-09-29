@@ -99,6 +99,16 @@ FlightAggregateEngine::FlightAggregateEngine(
         }
         time_mode_.push_back(timed);
 
+        // The TIME-mode schedule's terminal: the last waypoint carrying
+        // an arrival (the unscheduled-tail arrival rule reads it).
+        std::size_t sched_end = static_cast<std::size_t>(-1);
+        if (timed) {
+            for (std::size_t j = 0; j < routes_.back().size(); ++j) {
+                if (routes_.back()[j].arrive > 0) sched_end = j;
+            }
+        }
+        schedule_end_index_.push_back(sched_end);
+
         flights_.push_back(f);
         ++taken;
     }
@@ -200,6 +210,18 @@ void FlightAggregateEngine::advance_flight_(
             }
             break;   // before this leg's departure: holding at wp[i-1]
         }
+
+        // The unscheduled tail: legs after the last scheduled waypoint
+        // have no arrival time to fire — the walk above skips them, so
+        // a route whose last legs are unscheduled never marked the
+        // flight arrived and it sat at the last scheduled waypoint
+        // forever (a frozen glyph mid-map). Once the final scheduled
+        // arrival is past, the flight IS at its route's end.
+        const std::size_t end_i = schedule_end_index_[index];
+        if (!f.arrived && end_i != static_cast<std::size_t>(-1) &&
+            now_abs >= route[end_i].arrive) {
+            f.arrived = true;
+        }
     } else {
         // SPEED mode — walk the legs at the cruise speed toward the
         // current cursor waypoint. Start position → wp[0] → wp[1] → …
@@ -284,12 +306,32 @@ void FlightAggregateEngine::reaggregate(std::uint32_t vu, double fx,
     // Monotonic fuel: the sim can only have burned more (the fold-back
     // never resurrects fuel the aggregate already booked).
     f.fuel_burnt = std::max(f.fuel_burnt, fuel_burnt);
+    // The schedule re-anchor runs BEFORE the cursor reset so the cursor
+    // derives from the shifted wire (the fold's whole point: the
+    // schedule now passes through the folded position — reset_cursor_'s
+    // TIME-mode walk reads the shifted arrives).
+    if (time_mode_[idx]) {
+        reanchor_schedule_(f, routes_[idx], epoch_ + clock_);
+    }
     reset_cursor_(f, routes_[idx], epoch_ + clock_);
     f.suspended = false;
     f.dirty = true;
     f.last_move = static_cast<std::int32_t>(
         std::min<std::int64_t>(epoch_ + clock_, 2147483647));
     refresh_stats();
+}
+
+void FlightAggregateEngine::update_live(std::uint32_t vu, double fx,
+                                        double fy, float altitude_ft,
+                                        std::int32_t fuel_burnt) {
+    const std::size_t idx = index_of(vu);
+    if (idx == static_cast<std::size_t>(-1)) return;
+    FlightAggregateState& f = flights_[idx];
+    if (!f.suspended) return;   // an aggregate owns its own kinematics
+    f.fx = std::clamp(fx, -32768.0, 32767.0);
+    f.fy = std::clamp(fy, -32768.0, 32767.0);
+    f.altitude_ft = altitude_ft;
+    f.fuel_burnt = std::max(f.fuel_burnt, fuel_burnt);
 }
 
 void FlightAggregateEngine::mark_destroyed(std::uint32_t vu) {
@@ -394,6 +436,7 @@ std::size_t FlightAggregateEngine::register_synthetic(
     // SPEED mode always: the intent's route carries no leg times (the
     // ATM's own takeoff estimate is the TOT anchor, not a wire schedule).
     time_mode_.push_back(false);
+    schedule_end_index_.push_back(static_cast<std::size_t>(-1));
     flights_.push_back(f);
     refresh_stats();
     return flights_.size() - 1;
@@ -447,6 +490,118 @@ void FlightAggregateEngine::reset_cursor_(
         }
     }
     f.wp_index = best + 1 < route.size() ? best + 1 : best;
+}
+
+void FlightAggregateEngine::reanchor_schedule_(
+        FlightAggregateState& f,
+        std::vector<f4::entities::WaypointState>& route,
+        std::int64_t now_abs) {
+    if (route.size() < 2) return;
+    // A pre-departure fold keeps the wire: the flight has not started
+    // flying the schedule, so the takeoff gate still owns it.
+    const std::int64_t first_depart = route.front().depart;
+    if (first_depart > 0 && now_abs < first_depart) return;
+
+    // Along-route distances (grids) of the waypoints.
+    std::vector<double> dist(route.size(), 0.0);
+    for (std::size_t i = 1; i < route.size(); ++i) {
+        const double dx =
+            static_cast<double>(route[i].x) - static_cast<double>(route[i - 1].x);
+        const double dy =
+            static_cast<double>(route[i].y) - static_cast<double>(route[i - 1].y);
+        dist[i] = dist[i - 1] + std::sqrt(dx * dx + dy * dy);
+    }
+
+    // Project the folded position onto the polyline — combat drift can
+    // leave the route — keeping the closest leg's touch point.
+    double d_p = 0.0;
+    double best = -1.0;
+    for (std::size_t i = 1; i < route.size(); ++i) {
+        const double ax = static_cast<double>(route[i - 1].x);
+        const double ay = static_cast<double>(route[i - 1].y);
+        const double bx = static_cast<double>(route[i].x);
+        const double by = static_cast<double>(route[i].y);
+        const double ex = bx - ax, ey = by - ay;
+        const double len2 = ex * ex + ey * ey;
+        double t = 0.0;
+        if (len2 > 0.0) {
+            t = ((f.fx - ax) * ex + (f.fy - ay) * ey) / len2;
+            t = std::clamp(t, 0.0, 1.0);
+        }
+        const double ddx = f.fx - (ax + t * ex);
+        const double ddy = f.fy - (ay + t * ey);
+        const double d2 = ddx * ddx + ddy * ddy;
+        if (best < 0.0 || d2 < best) {
+            best = d2;
+            d_p = dist[i - 1] + t * std::sqrt(len2);
+        }
+    }
+
+    // The schedule anchors: (along-route distance, absolute time).
+    // wp0's depart IS the moment the flight sits at wp0; every
+    // waypoint with an arrival is another. In order (dist increases
+    // with the index; wp0 comes first).
+    struct Anchor {
+        double d;
+        std::int64_t t;
+    };
+    std::vector<Anchor> anchors;
+    if (first_depart > 0) anchors.push_back({0.0, first_depart});
+    for (std::size_t i = 1; i < route.size(); ++i) {
+        if (route[i].arrive > 0) anchors.push_back({dist[i], route[i].arrive});
+    }
+    if (anchors.size() < 2) return;   // no speed to extrapolate with
+
+    // The schedule time at d_p: interpolate inside the anchors, use
+    // the end pair's own speed at the ends (a fold past the last
+    // waypoint, or before the first arrival).
+    std::int64_t t_p = 0;
+    const auto speed = [](const Anchor& a, const Anchor& b) {
+        const double dd = std::max(1e-9, b.d - a.d);
+        return static_cast<double>(b.t - a.t) / dd;
+    };
+    if (d_p <= anchors.front().d) {
+        const double v = speed(anchors[0], anchors[1]);
+        t_p = anchors[0].t -
+              static_cast<std::int64_t>(
+                  std::llround((anchors[0].d - d_p) * v));
+    } else if (d_p >= anchors.back().d) {
+        const double v = speed(anchors[anchors.size() - 2],
+                               anchors.back());
+        t_p = anchors.back().t +
+              static_cast<std::int64_t>(
+                  std::llround((d_p - anchors.back().d) * v));
+    } else {
+        for (std::size_t i = 1; i < anchors.size(); ++i) {
+            if (d_p <= anchors[i].d) {
+                const double k = (d_p - anchors[i - 1].d) /
+                                 std::max(1e-9, anchors[i].d -
+                                                    anchors[i - 1].d);
+                t_p = anchors[i - 1].t +
+                      static_cast<std::int64_t>(std::llround(
+                          k * static_cast<double>(anchors[i].t -
+                                                  anchors[i - 1].t)));
+                break;
+            }
+        }
+    }
+
+    // One constant shift slides the whole schedule so it passes
+    // through the folded position AT the fold time. Every leg duration
+    // and dwell survives (the route shape and its speeds are the
+    // save's own); only the clock they run on moves.
+    const std::int64_t delta = t_p - now_abs;
+    if (delta == 0) return;
+    for (auto& w : route) {
+        if (w.depart > 0) {
+            w.depart = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+                w.depart - delta, 1, 2147483647));
+        }
+        if (w.arrive > 0) {
+            w.arrive = static_cast<std::int32_t>(std::clamp<std::int64_t>(
+                w.arrive - delta, 1, 2147483647));
+        }
+    }
 }
 
 // ============================================================================

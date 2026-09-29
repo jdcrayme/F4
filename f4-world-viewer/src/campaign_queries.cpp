@@ -191,6 +191,7 @@ namespace {
             f.to_depart = static_cast<std::int32_t>(r.read_int());
         else if (key == "to_mission_over")
             f.to_mission_over = static_cast<std::int32_t>(r.read_int());
+        else if (key == "aborted") f.aborted = r.read_int() != 0;
         else return false;
         return true;
     });
