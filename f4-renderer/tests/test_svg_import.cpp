@@ -274,6 +274,49 @@ TEST(SvgImport, InkscapeResaveImports) {
     EXPECT_NEAR(def.polylines[0].width, 1.0f, 1e-3);
 }
 
+TEST(SvgImport, InkscapeHairlineWithoutStrokeWidthIsOnePx) {
+    // The unit_fighter/unit_transport frame-border bug: Inkscape's
+    // hairline pen writes vector-effect:non-scaling-stroke with NO
+    // stroke-width (the -inkscape-stroke:hairline marker rides along).
+    // The Style default (1.0) must not fall through the width math as
+    // 1 viewBox unit — add_stroke scales viewBox units by
+    // kSymbolReferenceSizePx/2, so the closed dome frame imported at
+    // 32 px and rendered as a fan of fat bars perpendicular to the
+    // arc. Hairline means one device pixel: the width is 1 screen px,
+    // same as an explicit stroke-width:1 (InkscapeResaveImports).
+    const std::string doc = svg_doc(
+        "<path"
+        " style=\"vector-effect:non-scaling-stroke;fill:none;stroke:#808080;"
+        "-inkscape-stroke:hairline\""
+        " d=\"m 0.75,0.75 h -1.5 c 0,0 0.19098301,-1.5 0.75,-1.5"
+        " 0.55901699,0 0.75,1.5 0.75,1.5 z\""
+        " sodipodi:nodetypes=\"ccac\" />");
+    const SymbolDefinition def = import_symbol_from_svg_string(doc, "hairline");
+    ASSERT_EQ(def.polylines.size(), 1u);
+    EXPECT_TRUE(def.polylines[0].closed);
+    EXPECT_EQ(def.polylines[0].points.size(), 34u);  // start + h + 2x16 cubic
+    EXPECT_NEAR(def.polylines[0].width, 1.0f, 1e-3)
+        << "a widthless hairline must import as 1 screen px, not the "
+           "1-viewBox-unit default (32 px at the reference extent)";
+}
+
+TEST(SvgImport, HairlineRespectsAnInheritedExplicitWidth) {
+    // Precedence/inheritance around the hairline seed: an explicit
+    // width later in the same style overwrites the seed, and a shape
+    // under a vector-effect <g> with no width of its own inherits the
+    // 1 px hairline (Style copies down the tree).
+    const std::string doc = svg_doc(
+        "<g style=\"vector-effect:non-scaling-stroke\">"
+        "  <path style=\"stroke-width:2\" fill=\"none\" stroke=\"#ffffff\""
+        " d=\"M -0.5 0 L 0.5 0\"/>"
+        "  <path fill=\"none\" stroke=\"#ffffff\" d=\"M -0.5 0.5 L 0.5 0.5\"/>"
+        "</g>");
+    const SymbolDefinition def = import_symbol_from_svg_string(doc, "hairline_inherit");
+    ASSERT_EQ(def.polylines.size(), 2u);
+    EXPECT_NEAR(def.polylines[0].width, 2.0f, 1e-3);   // explicit style width
+    EXPECT_NEAR(def.polylines[1].width, 1.0f, 1e-3);   // inherited hairline
+}
+
 TEST(SvgImport, StyleAttributeOverridesPresentation) {
     // CSS precedence: the style attribute wins over the attributes.
     const SymbolDefinition def = import_symbol_from_svg_string(

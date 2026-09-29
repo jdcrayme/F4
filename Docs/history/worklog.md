@@ -300,3 +300,54 @@ Tests: InitialCyclePlansAtClockZero (tick tests 10/10); GrayPaints
 updated to the both-emit rule (svg 20/20); f4-campaign 372,
 f4-simulation 387, f4-renderer 15, f4-world 405, f4-world-viewer 99 —
 all green.
+
+---
+Task ID: SVG-HAIRLINE-1
+Agent: main
+Task: "unit_fighter.svg doesn't render correctly — the closed poly of
+the frame border renders as perpendicular lines."
+
+Work Log:
+- Reproduced with the real importer: compiled svg_import.cpp (plus
+  pugixml, SymbolLibrary stubs) into a dump driver and imported the
+  checked-in symbols/*.svg overrides. unit_fighter's dome (the closed
+  squadron frame border) imported with correct geometry — 34 points,
+  closed — but width=32 px (half the 64 px reference extent); fighter's
+  third glyph stroke likewise. A 32 px stroke over the dome's ~7-15 px
+  arc segments renders as fat bars perpendicular to the curve — the
+  report's "perpendicular lines".
+- Root cause: Inkscape's hairline pen writes vector-effect:
+  non-scaling-stroke + -inkscape-stroke:hairline with NO stroke-width.
+  Style's default stroke_width (1.0, viewBox units) then fell through
+  add_stroke's stroke_width * vb_scale * (kSymbolReferenceSizePx * 0.5)
+  math = 32 px. The existing InkscapeResaveImports test only pinned the
+  explicit stroke-width:1 case.
+- Corpus scan: exactly 3 widthless-hairline paths in 75 overrides —
+  unit_fighter.svg (2) and unit_transport.svg (1, the same dome).
+- Fix in svg_import.cpp: Style gains stroke_width_set (set by BOTH the
+  presentation and style stroke-width branches); the vector-effect
+  branch seeds stroke_width = 1/(kSymbolReferenceSizePx*0.5) (1 screen
+  px) when non_scaling_px turns on and no width has arrived.
+  apply_style_attr's existing vector-effect-first ordering makes a
+  later style width overwrite the seed; presentation widths (applied
+  before the style attr) and inherited widths are respected via the
+  flag. Header subset contract updated (svg_import.hpp).
+- Verification: corpus-wide before/after import diff — all 75 import,
+  geometry identical, exactly 3 width changes 32 -> 1, max width now
+  2.5 px; pinned regressions hold (viewBox 0.1 -> 3.2 px, explicit
+  non-scaling 1 -> 1 px). Rendered before/after eye-views of the dome:
+  the 32 px blob collapses to the thin closed arc matching the
+  browser's rendering of the source SVG.
+- Also fixed unit_fighter.svg's title/desc/RDF title ("Transport" —
+  the clone the fighter was redrawn from) to Fighter/"Squadron +
+  fighter silhouette", matching the corpus JSON description (feeds
+  display_name on import).
+- Tests added to test_svg_import.cpp: InkscapeHairlineWithoutStroke
+  WidthIsOnePx, HairlineRespectsAnInheritedExplicitWidth.
+
+Stage Summary:
+- Hairline strokes (vector-effect without stroke-width) import as
+  1 screen px; the squadron dome frame renders as a hairline closed
+  arc again. Renderer-only change — no geometry, role, or exporter
+  changes; the round-trip stays lossless (exporter writes explicit
+  viewBox-unit widths).

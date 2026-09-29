@@ -227,6 +227,9 @@ struct Style {
     Paint fill = Paint::Current;    // absent fill -> Fill role (documented deviation)
     Paint stroke = Paint::None;
     float stroke_width = 1.0f;      // viewBox units
+    bool stroke_width_set = false;  // an explicit stroke-width arrived
+                                    // (presentation or style) — distinguishes
+                                    // the 1.0 default from a written 1.0
     bool evenodd = false;
     bool non_scaling_px = false;    // vector-effect:non-scaling-stroke seen:
                                     // stroke-width was written in SCREEN px
@@ -279,6 +282,7 @@ void apply_style_property(Style& s, const std::string& prop,
         s.stroke_width = s.non_scaling_px
             ? static_cast<float>(w / (kSymbolReferenceSizePx * 0.5f))
             : static_cast<float>(w);
+        s.stroke_width_set = true;
     } else if (prop == "fill-rule") {
         if (value == "evenodd") s.evenodd = true;
         else if (value == "nonzero") s.evenodd = false;
@@ -290,12 +294,28 @@ void apply_style_property(Style& s, const std::string& prop,
     } else if (prop == "vector-effect") {
         if (value == "non-scaling-stroke") {
             s.non_scaling_px = true;
+            // Inkscape's hairline pen writes vector-effect WITHOUT a
+            // stroke-width (the -inkscape-stroke:hairline marker rides
+            // along). Hairline means "one device pixel, zoom-invariant",
+            // so the non-scaling default is 1 screen px — not the SVG
+            // 1-user-unit default, which the renderer's width math would
+            // scale into a kSymbolReferenceSizePx/2-px bar (a closed
+            // frame border imported at 32 px and rendered as a fan of
+            // perpendicular bars). apply_style_attr runs vector-effect
+            // FIRST, so an explicit width later in the same style still
+            // overwrites this seed; a width already inherited from a
+            // presentation attribute (stroke_width_set) is respected.
+            if (!s.stroke_width_set) {
+                s.stroke_width =
+                    1.0f / (kSymbolReferenceSizePx * 0.5f);  // 1 screen px
+            }
         } else {
             fail("style vector-effect:" + value +
                  ": only non-scaling-stroke is supported");
         }
     } else if (prop == "-inkscape-stroke") {
-        // Editor display hint (hairline markers) — rendering-inert here.
+        // Editor display hint (hairline markers) — rendering-inert here;
+        // the width consequence is handled in the vector-effect branch.
     } else {
         fail("style property '" + prop +
              "' is outside the SVG symbol subset");
@@ -354,6 +374,7 @@ Style inherit_style(const Style& parent, const f4::xml::xml_node& n) {
             const double w = require_number(p, "for stroke-width");
             if (w < 0.0) fail("stroke-width must be >= 0");
             s.stroke_width = static_cast<float>(w);
+            s.stroke_width_set = true;
         } else if (std::strcmp(name, "fill-rule") == 0) {
             if (std::strcmp(value, "evenodd") == 0) s.evenodd = true;
             else if (std::strcmp(value, "nonzero") == 0) s.evenodd = false;

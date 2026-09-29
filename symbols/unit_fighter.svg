@@ -33,9 +33,9 @@
      inkscape:window-maximized="1"
      inkscape:current-layer="svg6" />
   <title
-     id="title1">Transport</title>
+     id="title1">Fighter</title>
   <desc
-     id="desc1">Squadron + transport silhouette</desc>
+     id="desc1">Squadron + fighter silhouette</desc>
   <path
      d="M 0,-1.5 V -1"
      fill="none"
@@ -69,7 +69,7 @@
     <rdf:RDF>
       <cc:Work
          rdf:about="">
-        <dc:title>Transport</dc:title>
+        <dc:title>Fighter</dc:title>
       </cc:Work>
     </rdf:RDF>
   </metadata>

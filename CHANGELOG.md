@@ -5,6 +5,36 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## SVG-HAIRLINE-1 — the hairline pen stops rendering as a half-symbol bar
+
+- **Widthless `vector-effect:non-scaling-stroke` imports as 1 screen px** —
+  Inkscape's hairline pen writes `vector-effect:non-scaling-stroke` +
+  `-inkscape-stroke:hairline` with NO `stroke-width`; the importer's
+  1.0-viewBox-unit Style default fell through `add_stroke`'s ×32 width
+  math, so every hairline shape imported at 32 px — half the symbol
+  extent. The user-visible face: `unit_fighter.svg`'s closed squadron
+  frame border (the dome) rendered as a fan of fat bars perpendicular
+  to the arc (and any Inkscape-drawn hairline stroke would do the
+  same). The width now seeds to 1 px at the 64 px reference when
+  `non_scaling_px` turns on and no stroke-width has arrived
+  (`Style::stroke_width_set` distinguishes the default from a written
+  1.0); an explicit width (style or presentation, inherited down the
+  tree) still wins, and `apply_style_attr` keeps applying
+  vector-effect first so a later style width overwrites the seed.
+- Blast radius was surgical: a corpus-wide import diff shows exactly
+  three width changes (32 → 1) — the squadron domes in
+  `unit_fighter.svg` + `unit_transport.svg` and the fighter's third
+  glyph stroke; geometry (points/closed/roles) identical across all 75
+  overrides, and both pinned width regressions hold (viewBox-unit
+  0.1 → 3.2 px; explicit non-scaling `stroke-width:1` → 1 px).
+- `symbols/unit_fighter.svg`'s title/desc/metadata said "Transport"
+  (the clone the fighter was redrawn from) — now "Fighter"/"Squadron +
+  fighter silhouette", matching the corpus JSON's description.
+- Tests: `InkscapeHairlineWithoutStrokeWidthIsOnePx` (the dome imports
+  closed at 34 points and 1 px) + `HairlineRespectsAnInheritedExplicitWidth`
+  (explicit style width beats the seed; a widthless sibling under a
+  vector-effect <g> inherits the 1 px hairline) in test_svg_import.
+
 ## SENSOR-FUSION-2 — the airframe card resolves, the blind spot is pinned, and CI grows the Windows + sanitizer legs
 
 - **The airframe IRST card resolves from the host's library** — the

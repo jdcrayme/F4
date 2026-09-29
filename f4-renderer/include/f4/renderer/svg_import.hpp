@@ -33,7 +33,9 @@
 //              fill-rule/fill-opacity/stroke-opacity/stroke-dasharray/
 //              vector-effect with CSS precedence over the presentation
 //              attributes. non-scaling-stroke widths are screen px at
-//              the 64 px reference. Unknown properties fail by name.
+//              the 64 px reference; vector-effect:non-scaling-stroke
+//              with NO stroke-width is Inkscape's hairline pen and
+//              imports as 1 screen px. Unknown properties fail by name.
 //   stroke:    "none" or any fill value; strokes become polylines with
 //              their own width and role (currentColor -> the team color,
 //              any editor color -> the contrast foreground). A shape
