@@ -2,8 +2,9 @@
 
 Status: **As-built** (landed with this patch — every section describes
 shipped code; §8 is the fusion tranche, landed with its gates and its
-perf certificate. §9's queue is empty — the deeper ECM tranche is named
-inline and waits on a data source).
+perf certificate. §9's queue is empty — the ECM data source landed as
+ECM-DATA-1 (the converted tables' jammer bits); what remains of the
+deeper tranche is behavior (the AI's notching response), not data).
 
 The AI_IMPLEMENTATION_PLAN's named queue item "IR/visual sensor models +
 countermeasures (the data is already in Data/SimData; radar is the
@@ -290,10 +291,21 @@ defaults and passed byte-identically):
 
 - **`EcmComponent`** (f4-sensors, pure state): `jamming_strength` (1.0
   = the reference pod), `burn_through_range_nm` (20), `own_team` (IFF),
-  `enabled`. Both must agree — the scenario gate AND the aircraft fit
-  (no unit-data source exists to decide who jams; the campaign arm
-  passes ecm=false, nobody jams in a campaign world until a data source
-  lands).
+  `enabled`. Both must agree — the scenario gate AND the aircraft fit.
+  **ECM-DATA-1 landed the campaign face of that contract**: the fit is
+  no longer scenario-only — the converted theater tables carry the two
+  upstream flag bits (VCD Flags & VEH_HAS_JAMMER 0x10000, WCD Flags &
+  WEAP_ECM 0x04 — the EA-6B/EF-111A/F-4G/bomber family + the ALQ-131
+  pod), `resolve_vehicle_ecm` (f4-world) resolves them through the
+  CT→VCD→WCD chain, the spawn paths stamp an `EcmFitComponent` (the
+  CAMP-SCALE-1 supply stamp's sibling), and the arm attaches a pod —
+  with the fit's strength/burn-through values — only where the session's
+  `ecm` gate AND the stamped fit agree. No fit (the F-16C-shaped
+  majority) or gate off → nobody jams, the golden identity. The pod's
+  burn-through seeds from its own WCD range_km (the ALQ-131's 30 km ≈
+  16.2 NM — the data's own number); built-in jammers keep the documented
+  20-NM default; upstream has no real per-unit strength field (the S.G.
+  Name[14] hack is deliberately not read), so 1.0 stands.
 - **The burn-through model** (`RadarSimComponent::perform_scan`): per
   scan, the live ENEMY pods (friendly team never, corpses never,
   disabled never) resolve to a bearing + weight — one-way noise falls
@@ -333,9 +345,13 @@ defaults and passed byte-identically):
   war).
 - ~~**ECM/jamming**: the radar burn-through model (the RWR hears
   jammers; the radar's detection range degrades).~~ — LANDED (§8,
-  `combat.ecm` + the per-aircraft fit). The deeper tranche (per-unit
-  jammer data, the AI's notching response to a Jamming strobe) needs
-  an ECM data source first.
+  `combat.ecm` + the per-aircraft fit). The data source that gated the
+  deeper tranche has since landed as **ECM-DATA-1** (the converted
+  tables' VCD/WCD jammer bits → `EcmFitComponent` → the arm's double
+  gate). **Still open**: the AI's notching response to a Jamming strobe
+  (the code half is now unblocked — nothing waits on data) and the
+  standoff-jamming arm (AMIS_ECM flights / the package `ecm_id` VU the
+  decoder already carries).
 - ~~**Throttle-driven ir_power**: the FM's power state drives the
   target's IR band (AB = ir1/ir2, idle = ir0).~~ — LANDED (§8,
   `combat.throttle_ir_power`).

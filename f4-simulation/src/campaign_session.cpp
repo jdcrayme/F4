@@ -83,7 +83,8 @@ std::string session_scenario_json(
         const std::filesystem::path& brain_data,
         const std::filesystem::path& theater_tables,
         bool pilot_skill_flow,
-        bool passive_sensors) {
+        bool passive_sensors,
+        bool ecm) {
     std::ostringstream out;
     out << "{\n";
     out << "  \"name\": \"f4_viewer_campaign_session\",\n";
@@ -145,6 +146,14 @@ std::string session_scenario_json(
                 // components; the detection policy answers the passive
                 // optical legs from their contact books.
                 out << ", \"passive_sensors\": true";
+            }
+            if (ecm) {
+                // ECM-DATA-1: the ecm gate rides the scenario's combat
+                // block. The arm attaches a pod only where the spawn-
+                // stamped EcmFitComponent (the converted tables' VCD
+                // VEH_HAS_JAMMER / WCD WEAP_ECM fit) says the airframe
+                // carries one — the data decides who jams.
+                out << ", \"ecm\": true";
             }
         }
         out << "},\n";
@@ -406,7 +415,8 @@ CampaignSession::create(const CampaignSessionOptions& opts,
                                      brain_abs,
                                      opts.theater_tables,
                                      opts.pilot_skill_flow,
-                                     opts.passive_sensors);
+                                     opts.passive_sensors,
+                                     opts.ecm);
         if (!out.good()) {
             return fail("cannot write " + scenario_path.string());
         }

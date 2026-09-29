@@ -4,6 +4,7 @@
 #include <f4/world_convert/objective_decoder.hpp>
 #include <f4/world_convert/unit_decoder.hpp>
 #include <f4/world_convert/team_decoder.hpp>
+#include <f4/world_convert/weather_decoder.hpp>
 #include <f4/json/writer.hpp>
 #include <f4/io/read_file.hpp>
 
@@ -1191,8 +1192,10 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
         }
 
         // Raw sub-files not yet decoded — preserved as base64 for future
-        // decoders (objective deltas, weather, events, ...). This is the
+        // decoders (objective deltas, events, ...). This is the
         // rosetta principle: keep verbatim, decode incrementally.
+        // (.wth now ALSO carries a decoded top-level "weather" face —
+        // WTH-CODEC-1 — and stays here for byte-identity.)
         o << ",\n  \"raw_subfiles\": {\n";
         const char* preserve_exts[] = {"obd", "tea", "evt", "plt", "pst", "wth"};
         bool first = true;
@@ -1207,6 +1210,97 @@ std::string to_world_json(const CamArchive& cam, const WorldJsonOptions& opts) {
         o << "\n  }\n";
     } else {
         o << "  \"campaign\": null\n";
+    }
+
+    // --- Decoded .wth weather face (WTH-CODEC-1) ---
+    // Rosetta: raw_subfiles."wth" (inside the campaign object above)
+    // keeps the verbatim bytes; this top-level block adds the semantic
+    // face, decoded against the upstream CampLoad layouts
+    // (campupd/weather.cpp:474). The campinit 0-byte ride and any
+    // undecodable buffer omit the block — weather absent, the JSON
+    // consumers' existing reading.
+    if (const SubFile* wth_sf = cam.find("wth")) {
+        std::optional<DecodedWeather> w;
+        try {
+            w = decode_wth(wth_sf->data.data(), wth_sf->data.size(),
+                           camp_version);
+        } catch (...) {
+            w.reset();   // never fail the world JSON on a bad .wth
+        }
+        if (w) {
+            o << ",\n  \"weather\": {\n";
+            o << "    \"layout\": \"";
+            switch (w->layout) {
+            case WthLayout::Legacy:        o << "legacy"; break;
+            case WthLayout::TaceditCompat: o << "tacedit_compat"; break;
+            case WthLayout::CobraFlat36:   o << "cobra_flat36"; break;
+            case WthLayout::CobraFlat32:   o << "cobra_flat32"; break;
+            }
+            o << "\",\n";
+            if (w->layout == WthLayout::CobraFlat36 ||
+                w->layout == WthLayout::CobraFlat32) {
+                // Cobra v75+ flat form. Units: as stored (upstream mixes
+                // knots/kph across its branches — the runtime seed owns
+                // conversion; this is the raw face).
+                o << "    \"weather_condition\": " << w->weather_condition
+                  << ",\n    \"last_check_ms\": " << w->last_check
+                  << ",\n    \"temperature\": " << w->temperature
+                  << ",\n    \"wind_speed\": " << w->wind_speed_flat
+                  << ",\n    \"wind_heading\": " << w->wind_heading_flat;
+                if (w->layout == WthLayout::CobraFlat36)
+                    o << ",\n    \"cumulus_z_ft\": " << w->cumulus_z;
+                o << ",\n    \"stratus_z_ft\": " << w->stratus_z
+                  << ",\n    \"contrail_low_ft\": " << w->contrail_low
+                  << ",\n    \"contrail_high_ft\": " << w->contrail_high
+                  << "\n  }";
+            } else if (w->layout == WthLayout::TaceditCompat) {
+                // The Tacedit-compat reinterpretation (the upstream
+                // comment table, weather.cpp:536-546).
+                o << "    \"wind_heading\": " << w->wind_heading
+                  << ",\n    \"last_check_ms\": " << w->last_check
+                  << ",\n    \"temperature_c\": "
+                  << static_cast<int>(w->todays_temp)
+                  << ",\n    \"wind_speed_kts\": "
+                  << static_cast<int>(w->todays_wind)
+                  << ",\n    \"weather_condition\": "
+                  << static_cast<int>(w->cloud_base)
+                  << ",\n    \"contrail_base_100s_ft\": "
+                  << static_cast<int>(w->con_layer_start)
+                  << ",\n    \"overcast_depth_100s_ft\": "
+                  << static_cast<int>(w->con_layer_end)
+                  << ",\n    \"cumulus_base_ft\": "
+                  << w->tacedit_cumulus_base_ft
+                  << ",\n    \"stratus_base_ft\": "
+                  << w->tacedit_stratus_base_ft
+                  << ",\n    \"stratus2_base_ft\": "
+                  << w->tacedit_stratus2_base_ft
+                  << "\n  }";
+            } else {
+                // Legacy (original F4): the 37-byte header + the cloud
+                // map. Stored units, named per the upstream variables.
+                o << "    \"wind_heading_rad\": " << w->wind_heading
+                  << ",\n    \"wind_speed_kph\": " << w->wind_speed
+                  << ",\n    \"last_check_ms\": " << w->last_check
+                  << ",\n    \"temperature_c\": " << w->temperature
+                  << ",\n    \"todays_temp\": "
+                  << static_cast<int>(w->todays_temp)
+                  << ",\n    \"todays_wind\": "
+                  << static_cast<int>(w->todays_wind)
+                  << ",\n    \"cloud_base_100s_ft\": "
+                  << static_cast<int>(w->cloud_base)
+                  << ",\n    \"con_layer_start_1000s_ft\": "
+                  << static_cast<int>(w->con_layer_start)
+                  << ",\n    \"con_layer_end_1000s_ft\": "
+                  << static_cast<int>(w->con_layer_end)
+                  << ",\n    \"x_off\": " << w->x_off
+                  << ",\n    \"y_off\": " << w->y_off
+                  << ",\n    \"map_w\": " << w->map_w
+                  << ",\n    \"map_h\": " << w->map_h
+                  << ",\n    \"cloud_cells_b64\": \""
+                  << base64_encode(w->map_raw.data(), w->map_raw.size())
+                  << "\"\n  }";
+            }
+        }
     }
 
     // --- All sub-files as base64 (save-write path) ---

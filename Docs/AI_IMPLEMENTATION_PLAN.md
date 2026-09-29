@@ -1,6 +1,6 @@
 # F4 AI Implementation Plan — f4-ai
 
-> **Status**: As-built implementation reference — Steps 1–12 LANDED (the open Part-III chapters — FAC/AWACS brain, flight-lead behavior — are named in Appendix A)
+> **Status**: As-built implementation reference — Steps 1–12 LANDED. Part III (§15) is the active design for the open chapters — the datalink tier (AWACS/GCI), the flight-lead command module, and the specialist support brains.
 > **Source of Truth**: [FreeFalcon/freefalcon-central](https://github.com/FreeFalcon/freefalcon-central) (develop branch)
 > **Companions**: [Architecture Proposal](ARCHITECTURE%20PROPOSAL.md) §12, [FreeFalcon Core Systems Reference](FreeFalcon_Core_Systems_Reference.html), [Falcon4 File Layout](FALCON4_FILE_LAYOUT.md)
 > **Predecessor Lessons**: F4Flight `digi/` module — see §1.5
@@ -23,6 +23,7 @@
 - [12. Message Types](#12-message-types)
 - [13. Directory Layout & Build](#13-directory-layout--build)
 - [14. Risks & Mitigations](#14-risks--mitigations)
+- [15. Part III — the Datalink Tier & the Specialist Brains (the open chapters)](#15-part-iii--the-datalink-tier--the-specialist-brains-the-open-chapters)
 
 ---
 
@@ -1592,6 +1593,211 @@ endif()
 | **AI↔FlightModel coupling** (which model, when) | Low | The `use_complex_model()` method is a pure function of DigiMode + threat state. No heuristics, no tuning. |
 | **F4Flight trap** (accumulation without observability) | High | Every module has a trace BEFORE it has behavior. No module is "done" until its trace is greppable and a baseline is checked in. |
 | **Injection harness drift** (test harness ≠ reality) | High | Integration tests (S1-S7) use `save1.world.json` entities. Unit tests use minimal mock EntityWorlds. No synthetic scenario between these two extremes. |
+
+---
+
+## 15. Part III — the Datalink Tier & the Specialist Brains (the open chapters)
+
+Steps 1–12 built the fighter brain: one `DigitalBrain` per aircraft, whose
+`SensorFusion` rebuilds a target list from the world (or the shared
+`AirPicture`) and whose 13 modules turn that list into `AIControlOutput`.
+Three chapters were sequenced out of those steps and are designed here:
+
+1. **The datalink tier** — today `detected_by_gci` is the legacy
+   simplification ("GCI sees everything within the theater by definition",
+   `sensor_fusion.hpp:38`). Every brain on every team holds an omniscient
+   theater rumor. Real Falcon GCI is a *network*: AWACS/JSTARS aircraft and
+   ground radar sites detect geometrically and broadcast to their team;
+   when the node dies, the picture decays. This is the largest remaining
+   fidelity delta in the air picture — it is what makes red-vs-blue
+   information asymmetry real.
+2. **The flight-lead command module** — Step 11 landed the *wingman* half
+   (`WingmanModule` from winglogic/wingactions). The *lead* half
+   (`flitlead.cpp` — `CommandFlight()`, lead-initiated orders, radio
+   responses) is unbuilt: a lead cannot rejoin its wingmen, order an
+   engagement, or answer a wingman's "splashed" call.
+3. **The specialist support brains** — `facbrain.cpp` (FAC) and
+   `tankbrn.cpp` (tanker/support) are the two upstream brains outside the
+   fighter family. The ATM strategy layer (P7) already files support
+   flights with station routes; nothing flies their stations with a brain.
+
+Landing order: **Step 13 (datalink) → Step 14 (flight lead) → Step 15
+(support brains)**. The datalink tier is first because the flight-lead and
+FAC chapters both consume its broadcasts (a lead vectoring a wingman and a
+FAC talking a strike onto a target are both *transmissions over the same
+per-team net*).
+
+### Step 13: DatalinkTier — the AWACS/GCI broadcast (replaces the omniscient leg)
+
+**FreeFalcon reference**: the GCI rule lives in the campaign's sensor nets
+(radar-bearing objectives + AWACS flights feeding the queries the digi
+brains read as `detected_by_gci`); the specialist node behavior is
+`tankbrn.cpp` (support station) + `radar.cpp:336–380` (SOJ range-cuts, out
+of scope here). The consumption side is `sfusion.cpp`'s detection-source
+flags.
+
+**Design** — the datalink is HOST-BUILT state, the `AirPicture` discipline
+(PERF-1: the host walks the world once, the brains read a snapshot):
+
+```cpp
+// f4-ai/include/f4/ai/datalink_net.hpp
+namespace f4::ai {
+
+/// One datalink node: a live entity whose radar geometry other same-team
+/// brains may borrow. v1 geometry = range by altitude band (the
+/// RadarBackedDetectionPolicy range rule, no beam physics — the node is a
+/// SENTINEL, not a fighter; it does not need the FCR model).
+struct DatalinkNode {
+    std::uint64_t entity_id{0};
+    std::int16_t  team{-1};
+    f4::geo::WorldPosition position{};
+    double range_nm{200.0};          // detection radius
+    double min_alt_ft{0.0};          // horizon clamp (v1: flat-earth simple)
+    bool   is_ground_site{false};    // objectives with UCD radar rows
+};
+
+/// The per-tick net state the host maintains. For each air-picture contact:
+/// which TEAMS' datalinks see it (bitmask over the interned team table).
+struct DatalinkNet {
+    std::vector<DatalinkNode> nodes;               // live nodes this tick
+    std::vector<std::uint32_t> contact_seen_teams; // parallel to AirPicture
+    [[nodiscard]] bool seen_by(std::size_t contact_idx, std::int16_t team) const;
+};
+
+} // namespace f4::ai
+```
+
+**Wiring**:
+
+- The host's shared-picture walk (the PERF-1 single walk over transform
+  bearing entities) additionally walks live datalink nodes (entities with
+  an `AwacsComponent` — new, pure state: `range_nm`, `station` — stamped
+  at spawn for AWACS-type aircraft; plus `is_ground_site` nodes from
+  radar-flagged objectives when `gci_ground_sites` is set) and sets the
+  per-contact team bitmask. Dead nodes leave the walk — the picture
+  decays the same tick, no staleness window in v1 (named for a v2
+  tranche: the reference's operator lag).
+- `SensorFusion` gains an optional `DatalinkNet*` beside its
+  `DetectionPolicy*`. When present AND the ownship's team index is in the
+  net, the GCI leg becomes `net.seen_by(i, own_team)` instead of
+  `true`. When absent — every existing world-query path, every test, every
+  gate-off run — the omniscient rule stands unchanged.
+- **Gate**: `combat.gci_datalink` (CombatConfig, scenario JSON
+  `"gci_datalink": true`; the campaign session arm wires it with the
+  datalink nodes' existence). Gate off OR no live nodes → the legacy leg.
+  Pre-tranche runs byte-identical (the standard twin-test).
+- **GCI vectoring** (the tactical point of the net): when the net gives a
+  brain its FIRST contact (the passive-first ordering SENSOR-FUSION-2
+  pinned), the brain may commit. v1 keeps the existing
+  threat-target-sampled-at-first-contact rule and adds nothing — the
+  asymmetry itself (red no longer auto-sees blue strikers beyond the
+  nodes' geometry) is the tranche's behavioral payload.
+
+**Tests** (f4-ai/tests/test_datalink_net.cpp + f4-simulation wiring):
+- Geometry pins: node range/horizon edges; multi-team bitmask isolation
+  (red's net never lights blue's leg).
+- Gate-off twin: same world, `gci_datalink` unset → TargetInfo tables
+  byte-identical to today (the omniscient leg).
+- Node-death: AWACS killed mid-run → next tick its team's distant contacts
+  drop off the fusion list; own-radar contacts remain.
+- E2E (session): red AWACS up → red CAP commits onto a blue low-alt strike
+  package inside net range without red fighter radar; AWACS down → no
+  commit. Mirrors the SENSOR-FUSION-2 first-contact pin.
+
+**Done when**: with the gate on, both teams' BVR behavior is driven by live
+nodes; with the gate off, the suite is byte-identical; the CI perf
+certificates (the 60× armed preset) hold — the net is one O(contacts ×
+nodes) pass inside the existing single walk.
+
+### Step 14: FlightLeadModule — the lead half of flight command
+
+**FreeFalcon reference**: `flitlead.cpp` — `CommandFlight()` (the lead's
+per-frame flight-level decision routine), `CheckLead()`; the response half
+`wingradio.cpp` — `AiMakeRadioResponse()` (~867 lines; v1 lands the message
+vocab, not 867 lines of radio prose).
+
+**Design** — a new module beside `WingmanModule` in the same
+`DigitalBrain`, active only when the brain IS the lead (flight position 1):
+
+- **Flight state input**: the flight roster (the entity's package/flight
+  cross-refs the campaign bridge already stamps — `PackageSupportComponent`
+  precedent) + per-wingman status echoes (each wingman's
+  `current_mode()` + fuel + stores snapshot, shared via the existing
+  wingman status message the Step-11 wingman already publishes).
+- **Lead decisions** (the `CommandFlight()` tranche, smallest-first):
+  1. **Rejoin**: wingman outside formation envelope → order rejoin
+     (existing `WingState` vocabulary — Step 11's states, driven from the
+     other side).
+  2. **Engage**: lead's fusion acquires a threat the wingman sees too →
+     order "engage my target" (publishes the target id on the flight bus;
+     the wingman's targeting ranks it as a hint, sensor truth still wins).
+  3. **Split/RTB**: wingman fuel below the RTB reserve (the
+     NavigationModule's bingo rule) → order RTB; lead continues or
+     departs with the survivor (v1: both RTB — the reference's
+     wingman-count thresholds are a v2 refinement).
+- **Radio responses** (wingradio v1): inbound-order acknowledgment +
+  kill/loss calls as text on `radio_log` (the combat transcript). The
+  event vocabulary is a closed enum — no string formatting from AI code.
+- **Gate**: `ai.flight_lead` (session option, default off → leads behave
+  exactly as today: the lead module never publishes).
+
+**Tests**: lead orders rejoin when the wingman drifts (slot error > the
+formation tolerance), engage on shared contact, RTB at fuel reserve;
+gate-off twin byte-identical; a two-ship E2E from the scenario harness
+(the Step-11 wingman tests' rig) exercising order → ack → state change.
+
+**Done when**: a two-ship with the gate on holds formation through a
+waypoint chain, engages a bandit as a flight, and RTBs on bingo — with
+the radio log showing the closed vocabulary.
+
+### Step 15: the specialist support brains (FAC + the station brains)
+
+**FreeFalcon reference**: `facbrain.cpp` (FACBrain — target marking,
+talk-on); `tankbrn.cpp` (the tanker/support station brain — the ATM
+strategy layer's FindSupportFlights already files these with station
+routes and the NavigationModule's station hold landed the OnStation rung).
+
+**Design** — these are BRAIN COMPOSITIONS, not new frameworks: both are
+`DigitalBrain` variants with a different module set (the Step-12
+composition point), so no new brain class hierarchy:
+
+- **SupportStationBrain** (tanker/AWACS/ECM profile): NavigationModule
+  station-hold (the racetrack from CAMP-ATM-1) + CollisionAvoid + a
+  *defensive-only* threat response (no BVR/WVR modules; missile_defeat
+  + departure only — the reference support aircraft run away). The
+  AWACS profile carries the Step-13 `AwacsComponent` so the datalink
+  node and the brain that flies the station are the same entity.
+- **FACBrain** (FAC profile): orbit station over the marked area +
+  sensor fusion + the talk-on: when the FAC's fusion holds a target
+  the assigned strike flight does not yet see, publish
+  `FacTalkOn{target_bra, target_desc}` on the flight bus; the strike
+  brain consumes it as a targeting hint (the Step-14 hint pipe, the
+  same vocabulary). v1 marks ONE target (the reference's priority
+  loop is a v2 data tranche).
+- **Gates**: the existing support-flight filing already gates on the
+  strategy layer; the brains arm with the same session options
+  (`ai.flight_lead` for the hint pipe, `combat.gci_datalink` for the
+  AWACS node). No new flags.
+
+**Tests**: tanker flies its racetrack through an AAR cycle (the
+`test_aar_e2e` rig with the tanker brain replacing the scripted tanker);
+AWACS stations + the datalink net carries it (Step-13 E2E); FAC talk-on
+drives a strike flight's targeting hint to the marked feature without the
+strike's own sensors seeing it first.
+
+**Done when**: every flight type the ATM files — strike, CAP, support,
+FAC — is flown by a composed brain from the same module library, and the
+Part-III chapters close the Appendix A index (flitlead, facbrain,
+tankbrn all mapped to landed code).
+
+### Part III risks
+
+| Risk | Severity | Mitigation |
+|------|----------|-----------|
+| **Datalink perf at 60×** (per-contact × per-node pass) | Medium | The pass rides the existing single host walk (one extra node loop); the 60× armed preset certificate is the gate — same discipline as FID-OPT-2's picture cadence. |
+| **Red AI becomes too strong/weak** | Medium | The net changes *who sees what*, not tactics. The QC war-harness verdicts (DOM-1) + the byte-identity twins bound the delta; tune range bands by data (UCD radar rows), not code. |
+| **Flight-lead/wingman message loops** | Low | One-directional command flow: lead publishes, wingman consumes; acknowledgments are status echoes, never new commands. |
+| **867-line radio vocabulary scope creep** | Low | Closed enum + text renderer in the host; new calls require an enum row + a test, no free-form strings. |
 
 ---
 

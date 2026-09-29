@@ -90,6 +90,10 @@ target_compile_definitions(test_cam_byte_identity PRIVATE
     REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../")
 gtest_discover_tests(test_cam_byte_identity PROPERTIES LABELS "f4-world-convert" TIMEOUT 60)
 
+# WTH-CODEC-1: the .wth weather sub-file codec — decode/encode across
+# all three layouts, golden fixture values, and the byte-identity pins.
+f4_add_test(test_weather_codec test_weather_codec.cpp)
+
 # Save-write tranche: CampaignSaver integration bridge.
 add_executable(test_campaign_saver test_campaign_saver.cpp)
 target_link_libraries(test_campaign_saver PRIVATE GTest::gtest_main f4-world-convert)

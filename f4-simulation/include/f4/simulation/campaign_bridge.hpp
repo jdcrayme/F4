@@ -289,6 +289,18 @@ resolve_unit_countermeasures(
     const f4::world_types::ClassTable& ct,
     f4::entities::EntityHandle unit_h) noexcept;
 
+/// ECM-DATA-1 — resolve a unit's ECM fit from the converted tables:
+/// the unit's first vehicle group's entity type → class-table
+/// DTYPE_VEHICLE row → VCD Flags & VEH_HAS_JAMMER (built-in) OR
+/// hardpoint WCD Flags & WEAP_ECM (pod). nullopt = no tables / no
+/// composition / the airframe carries no jammer — the caller stamps
+/// nothing (never throws).
+[[nodiscard]] std::optional<f4::world::EcmFit>
+resolve_unit_ecm(
+    const f4::world::TheaterTables* tables,
+    const f4::world_types::ClassTable& ct,
+    f4::entities::EntityHandle unit_h) noexcept;
+
 /// Map a campaign owner slot to the sim's TEAM-tag string vocabulary.
 ///
 /// Resolution: the campaign entity (ROLE "campaign") names the PLAYER team

@@ -169,6 +169,7 @@ void run_full_mission(Scenario scenario, bool require_pattern) {
     // --- Run the mission ---
     bool saw_liftoff = false;
     geo::WorldPosition liftoff_pos{};
+    int liftoff_tick = -1;   // GROUND-OPS-1: first-liftoff tick (the crawl gate)
     bool saw_touchdown = false;
     geo::WorldPosition touchdown_pos{};
     bool saw_pattern_downwind = false;
@@ -223,6 +224,7 @@ void run_full_mission(Scenario scenario, bool require_pattern) {
             if (!saw_liftoff && st == TakeoffState::FlyOut) {
                 saw_liftoff = true;
                 liftoff_pos = pos;
+                liftoff_tick = i;   // GROUND-OPS-1: the crawl gate's clock
             }
         } else if (brain->phase() == BrainComponent::Phase::Enroute) {
             max_wp_index = std::max(max_wp_index,
@@ -320,8 +322,29 @@ void run_full_mission(Scenario scenario, bool require_pattern) {
     EXPECT_LT(std::abs(cross_of(liftoff_pos)), 150.0)
         << "liftoff off-centerline: cross=" << cross_of(liftoff_pos);
     EXPECT_GE(along_of(liftoff_pos), -400.0);   // past the threshold
-    EXPECT_LE(along_of(liftoff_pos), rwy_len + 1000.0)  // Tranche 43: widened from 300 — heavy/slow aircraft need more runway
+    // Tranche 43: widened from 300 — heavy/slow aircraft need more runway.
+    // GROUND-OPS-1: widened 1000 → 1400 — the wheel-equation fix removed
+    // the phantom −g·sinγ rotation deceleration, so the roll distance is
+    // now set by real acceleration; the light F-16 rig measured +91 ft
+    // (4230 vs the old 4139 pin) because the old pin rode the fake
+    // climb the clamp used to allow during rotation.
+    EXPECT_LE(along_of(liftoff_pos), rwy_len + 1400.0)
         << "liftoff beyond the runway end: along=" << along_of(liftoff_pos);
+    // GROUND-OPS-1 — the crawl gate. The QC 2026-09-28 GROUND-OPS CRAWL
+    // finding (CAMPAIGN_LOOP_PLAN.md §7) measured first liftoff at
+    // minute 16-19 in the campaign QC with the ground regime's
+    // velocity-vs-position disagreement. This rig never crawled (the
+    // light fixture), so the gate bounds REGRESSION: the full loop —
+    // taxi route, prep, roll — must put the aircraft airborne well
+    // inside 4 minutes (measured ~1.9 min here). A regression toward
+    // the crawl (brake/thrust imbalance, a new ground-regime lie)
+    // fails here before any campaign QC runs.
+    ASSERT_GE(liftoff_tick, 0);
+    const double liftoff_min =
+        static_cast<double>(liftoff_tick) / (60.0 * 60.0);   // 60 Hz ticks → min
+    EXPECT_LT(liftoff_min, 4.0)
+        << "first liftoff at minute " << liftoff_min
+        << " — the ground-ops crawl signature (CAMPAIGN_LOOP_PLAN §7)";
 
     // --- Enroute: every waypoint captured ---
     EXPECT_GE(max_wp_index, dscenario.waypoints.size() - 1)

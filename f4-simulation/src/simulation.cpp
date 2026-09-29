@@ -554,7 +554,11 @@ bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
         sig_ctx ? &*sig_ctx : nullptr,
         scenario_.combat.countermeasures,
         scenario_.combat.passive_sensors,
-        /*ecm=*/false,
+        // ECM-DATA-1: the session's ecm gate — the arm attaches a pod
+        // only where the spawn-stamped EcmFitComponent (the converted
+        // tables' per-vehicle fit) says the airframe carries one.
+        // Default false = the golden identity (nobody jams).
+        scenario_.combat.ecm,
         &ir_seeker_data_);
     if (!result.armed) {
         // Not a candidate (no origin/brain/store) or already armed —

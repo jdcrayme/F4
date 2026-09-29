@@ -291,6 +291,50 @@ resolve_countermeasures(const TheaterTables& tables,
     return out;
 }
 
+std::optional<EcmFit>
+resolve_vehicle_ecm(const TheaterTables& tables,
+                    const f4::world_types::ClassTable& ct,
+                    std::uint16_t vehicle_entity_type) noexcept {
+    // Class-table row: the vehicle's own entry must point into the VCD.
+    uint8_t data_type = 0;
+    uint32_t data_ptr = 0;
+    if (!ct.data_ptr_for(vehicle_entity_type, data_type, data_ptr)) {
+        return std::nullopt;
+    }
+    if (data_type != static_cast<uint8_t>(f4::world_types::DTYPE_VEHICLE)) {
+        return std::nullopt;
+    }
+    const auto* v = tables.vehicle_at(data_ptr);
+    if (v == nullptr) return std::nullopt;
+
+    EcmFit out{};
+    // The built-in leg: the VCD's own Flags bit (vehicle.h:35
+    // VEH_HAS_JAMMER).
+    if ((v->flags & kVehHasJammer) != 0) out.builtin = true;
+
+    // The pod leg: a hardpoint weapon whose WCD Flags carry WEAP_ECM
+    // (campweap.h:34). The FIRST such hardpoint names the pod; its WCD
+    // range_km seeds the burn-through radius (km → NM, 1 km =
+    // 0.5399568 NM).
+    const std::size_t hardpoints = v->weapon.size();
+    for (std::size_t i = 0; i < hardpoints && !out.pod; ++i) {
+        const int16_t wid = v->weapon[i];
+        if (wid < 0) continue;
+        const auto* w = tables.weapon_at(static_cast<std::size_t>(wid));
+        if (w == nullptr) continue;
+        if ((w->flags & kWeapEcm) == 0) continue;
+        out.pod = true;
+        out.pod_name = w->name;
+        if (w->range_km > 0) {
+            out.burn_through_range_nm =
+                static_cast<float>(w->range_km) * 0.5399568f;
+        }
+    }
+
+    if (!out.builtin && !out.pod) return std::nullopt;
+    return out;
+}
+
 std::string
 resolve_entity_type_name(const TheaterTables& tables,
                          const f4::world_types::ClassTable& ct,

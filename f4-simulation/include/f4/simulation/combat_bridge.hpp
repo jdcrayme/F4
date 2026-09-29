@@ -76,6 +76,24 @@ struct CountermeasureSupplyComponent : entities::Component<CountermeasureSupplyC
     int flare_rounds = 0;
 };
 
+/// ECM-DATA-1 — the per-vehicle ECM fit the converted tables resolve at
+/// spawn (the CAMP-SCALE-1 supply stamp's sibling): VCD Flags &
+/// VEH_HAS_JAMMER (the built-in) or a hardpoint's WCD Flags & WEAP_ECM
+/// (the pod). Plain DATA the combat arming applies to the
+/// sensors::EcmComponent when the session's ecm gate is on. No fit →
+/// the component stamps nothing → the aircraft carries no jammer (the
+/// data decides who jams).
+struct EcmFitComponent : entities::Component<EcmFitComponent> {
+    bool builtin = false;
+    bool pod = false;
+    std::string pod_name;
+    float strength = 1.0f;
+    float burn_through_range_nm = 20.0f;
+
+    /// Either leg counts as a fit.
+    [[nodiscard]] bool carried() const noexcept { return builtin || pod; }
+};
+
 class Simulation;  // combat event recording (attach_combat_event_recorder)
 
 /// Add the combat component set to a spawned aircraft entity. Idempotent
@@ -525,9 +543,11 @@ struct CampaignCombatArmament {
     bool countermeasures = false,
     /// The passive-sensor gate (see attach_combat_loadout).
     bool passive_sensors = false,
-    /// The ECM gate (see attach_combat_loadout). The campaign arm's
-    /// caller keeps this false — no per-unit ECM data exists; the
-    /// parameter shapes both arm paths identically.
+    /// The ECM gate (see attach_combat_loadout). With the per-vehicle
+    /// fit stamped at spawn (ECM-DATA-1: EcmFitComponent from the
+    /// converted tables), the gate arms only airframes the DATA says
+    /// carry a jammer, and the fit's strength/burn-through shape the
+    /// pod. No fit on the entity → the flag jams nobody.
     bool ecm = false,
     /// The passive-fusion data hook (see attach_combat_loadout):
     /// the airframe IRST card resolves from the library's "generic"

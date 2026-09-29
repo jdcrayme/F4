@@ -648,23 +648,37 @@ follow-up refinement, documented here.
   WITH enrichment keeps it. The campaign session and the QC's
   harness path pass the context; pinned by test_threat_map's
   TablesFallback pair.
-- **GROUND-OPS CRAWL (QC 2026-09-28, instrumented)** — campaign
-  sessions' aircraft taxi for 6-18 minutes, sit 9 more in
-  PrepToTakeRunway, and first liftoff lands at minute 16-19 (a
-  20-minute showcase session: 96/96 in TakeoffState::Taxi at minute
-  5, inAir=0 until minute 15; the same crawl on the kunsan fixture —
-  universal to ground ops, not campaign spawns). The FM's velocity
-  state and its position integration DISAGREE in the ground regime:
-  vcas and ground_speed_fps both read ~19 kts (the controller's
-  equilibrium — target 15 kts, brake margin +5 → throttle 0, brake
-  pulses) while the transform integrates at ~0.2-13 fps. The
-  ground-ops controller (GroundSteering/TakeoffModule) is CORRECT
-  against its feedback; the feedback and the kinematics lie. The fix
-  is an f4-flight-model tranche: the ground-contact regime's
-  velocity-vs-position reconciliation (gear drag, brake force, the
-  integration order that lets velocity persist while the position
-  pins), with the QC catch being the timeline above (a session
-  harness asserting first-liftoff inside the designed taxi window).
+- **GROUND-OPS CRAWL (QC 2026-09-28, instrumented) — the FM leg is
+  FIXED (GROUND-OPS-1)** — campaign sessions' aircraft taxi for 6-18
+  minutes, sit 9 more in PrepToTakeRunway, and first liftoff lands at
+  minute 16-19 (a 20-minute showcase session: 96/96 in
+  TakeoffState::Taxi at minute 5, inAir=0 until minute 15; the same
+  crawl on the kunsan fixture — universal to ground ops, not campaign
+  spawns). The FM's velocity state and its position integration
+  DISAGREE in the ground regime: vcas and ground_speed_fps both read
+  ~19 kts (the controller's equilibrium — target 15 kts, brake margin
+  +5 → throttle 0, brake pulses) while the transform integrates at
+  ~0.2-13 fps. The ground-ops controller (GroundSteering/TakeoffModule)
+  is CORRECT against its feedback; the feedback and the kinematics
+  lie. **GROUND-OPS-1 landed the FM's half**: the ground-contact
+  regime's `calculateVt` no longer integrates the flight-path gravity
+  term (−g·singam) — on the ground γ is the θ−α approximation, and the
+  clamp regime drives θ to the −2° floor, which read as a standing
+  +1.12 ft/s² "downhill" velocity pump the pinned position never
+  collected (the velocity-vs-position lie), while rotation (θ→+15°,
+  still rolling) read as a phantom −8.3 ft/s² deceleration through the
+  takeoff roll. The wheel equation (xwaero − friction; gravity
+  contributes nothing along a flat runway — the FM models ground height
+  as a single scalar with no slope) returns honest kinematics; the
+  gravity term resumes the instant inAir flips. Pinned by
+  test_digi_mission's new first-liftoff-minute crawl gate (< 4 min;
+  measured ~1.9) + the liftoff-station pin's documented +400 ft
+  adjustment (the old pin rode the fake climb the clamp allowed during
+  rotation). **The campaign-context face (the 16-19-minute timeline on
+  real-data QC runs — heavier configs, the full 96-aircraft roster,
+  tower sequencing) stays open for the user's QC env**: the FM defect
+  the diagnosis named is gone and gated; re-run `campaign_qc --war` to
+  re-measure the timeline with the wheel equation in place.
 - **MAP FLIGHT DISAPPEARANCE (QC 2026-09-28, open)** — the viewer's
   campaign map occasionally loses flight glyphs. The FID fold-back is
   designed (reaggregate_flight_ rolls the LEAD's live position up

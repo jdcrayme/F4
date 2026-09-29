@@ -497,3 +497,119 @@ TEST(ArmedWar, RunsGreenArmsAircraftAndStaysDeterministic) {
     EXPECT_EQ(r.verdict.ledger_md5_run1.size(), 32u);
     EXPECT_EQ(r.verdict.ledger_md5_run0, r.verdict.ledger_md5_run1);
 }
+
+// ── ECM-DATA-1: the arm's ECM double gate ──────────────────────────────────
+//
+// The plan's contract (SENSORS_COUNTERMEASURES_PLAN §8): "both must
+// agree — the scenario gate AND the aircraft fit". With the converted
+// tables landing the fit (EcmFitComponent stamped at spawn: VCD Flags &
+// VEH_HAS_JAMMER, or a hardpoint's WCD Flags & WEAP_ECM), the arm's
+// `ecm` gate attaches a pod only where the DATA says the airframe
+// carries one, and the fit's strength/burn-through shape the pod. The
+// truth table:
+//   fit + gate  → pod (the fit's values)
+//   fit, no gate → nothing (the golden identity — pre-tranche bytes)
+//   gate, no fit → nothing (the data said this airframe is clean)
+TEST(EcmDataGate, FitPlusGateArmsThePodWithTheFitValues) {
+    f4::data::AircraftConfig cfg;
+    if (!load_f16(cfg)) GTEST_SKIP() << "f16.json fixture not generated";
+    f4::data::BrainData brains;
+    if (!load_brain_data(brains)) GTEST_SKIP()
+        << "simdata/braindata.json fixture not generated";
+
+    EntityWorld world;
+    const auto id = make_campaign_aircraft(
+        world, cfg, /*mission_byte=*/9 /* INTERCEPT */, "blue",
+        100000.0, /*bomb_stations=*/0);
+    // The spawn-stamped fit (what resolve_unit_ecm writes for an
+    // EA-6B-shaped vehicle row).
+    auto h = EntityHandle(id, &world);
+    auto& fit = h.add<EcmFitComponent>();
+    fit.builtin = true;
+    fit.strength = 1.5f;
+    fit.burn_through_range_nm = 25.0f;
+
+    const auto table = f4::weapons::WeaponClassTable::with_builtins();
+    std::unique_ptr<RadarBackedDetectionPolicy> policy;
+    const auto out = arm_campaign_combat(
+        h, table, /*seed_base=*/0x46344u, /*arm_index=*/0,
+        /*hit_points=*/25.0,
+        /*bvr_hold=*/false, /*missiles_hold=*/false, /*guns_hold=*/false,
+        &brains, &policy,
+        /*signatures=*/nullptr,
+        /*countermeasures=*/false, /*passive_sensors=*/false,
+        /*ecm=*/true);
+
+    ASSERT_TRUE(out.armed);
+    auto* pod = h.get<f4::sensors::EcmComponent>();
+    ASSERT_NE(pod, nullptr) << "fit + gate → the pod attaches";
+    EXPECT_FLOAT_EQ(pod->jamming_strength, 1.5f)
+        << "the fit's strength shapes the pod";
+    EXPECT_FLOAT_EQ(pod->burn_through_range_nm, 25.0f)
+        << "the fit's burn-through shapes the pod";
+    EXPECT_EQ(pod->own_team, "blue");
+}
+
+TEST(EcmDataGate, GateWithoutFitJamsNobody) {
+    f4::data::AircraftConfig cfg;
+    if (!load_f16(cfg)) GTEST_SKIP() << "f16.json fixture not generated";
+    f4::data::BrainData brains;
+    if (!load_brain_data(brains)) GTEST_SKIP()
+        << "simdata/braindata.json fixture not generated";
+
+    EntityWorld world;
+    // No EcmFitComponent — the tables resolved no jammer for this
+    // airframe (the F-16C-shaped majority).
+    const auto id = make_campaign_aircraft(
+        world, cfg, /*mission_byte=*/9, "blue", 100000.0,
+        /*bomb_stations=*/0);
+    auto h = EntityHandle(id, &world);
+
+    const auto table = f4::weapons::WeaponClassTable::with_builtins();
+    std::unique_ptr<RadarBackedDetectionPolicy> policy;
+    const auto out = arm_campaign_combat(
+        h, table, /*seed_base=*/0x46344u, /*arm_index=*/0,
+        /*hit_points=*/25.0,
+        /*bvr_hold=*/false, /*missiles_hold=*/false, /*guns_hold=*/false,
+        &brains, &policy,
+        /*signatures=*/nullptr,
+        /*countermeasures=*/false, /*passive_sensors=*/false,
+        /*ecm=*/true);
+
+    ASSERT_TRUE(out.armed);
+    EXPECT_EQ(h.get<f4::sensors::EcmComponent>(), nullptr)
+        << "the gate alone jams nobody — the data decides";
+}
+
+TEST(EcmDataGate, FitWithoutGateStaysGoldenIdentity) {
+    f4::data::AircraftConfig cfg;
+    if (!load_f16(cfg)) GTEST_SKIP() << "f16.json fixture not generated";
+    f4::data::BrainData brains;
+    if (!load_brain_data(brains)) GTEST_SKIP()
+        << "simdata/braindata.json fixture not generated";
+
+    EntityWorld world;
+    const auto id = make_campaign_aircraft(
+        world, cfg, /*mission_byte=*/9, "blue", 100000.0,
+        /*bomb_stations=*/0);
+    auto h = EntityHandle(id, &world);
+    auto& fit = h.add<EcmFitComponent>();
+    fit.pod = true;
+    fit.pod_name = "ALQ-131";
+    fit.burn_through_range_nm = 30.0f * 0.5399568f;
+
+    const auto table = f4::weapons::WeaponClassTable::with_builtins();
+    std::unique_ptr<RadarBackedDetectionPolicy> policy;
+    const auto out = arm_campaign_combat(
+        h, table, /*seed_base=*/0x46344u, /*arm_index=*/0,
+        /*hit_points=*/25.0,
+        /*bvr_hold=*/false, /*missiles_hold=*/false, /*guns_hold=*/false,
+        &brains, &policy,
+        /*signatures=*/nullptr,
+        /*countermeasures=*/false, /*passive_sensors=*/false,
+        /*ecm=*/false);
+
+    ASSERT_TRUE(out.armed);
+    EXPECT_EQ(h.get<f4::sensors::EcmComponent>(), nullptr)
+        << "gate off → the pre-tranche golden identity (nobody jams)";
+}

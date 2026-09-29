@@ -177,6 +177,62 @@ resolve_countermeasures(const TheaterTables& tables,
                         const f4::world_types::ClassTable& ct,
                         std::uint16_t vehicle_entity_type) noexcept;
 
+// --- ECM-DATA-1: the per-vehicle ECM/jammer fit the tables carry -----------
+//
+// Upstream "who carries a jammer" is two class-table flag bits plus a
+// unit flag (unit.h:45 U_HASECM, set by FlightClass::SetLoadout —
+// camptask/flight.cpp:4982-5010 — from the two data bits):
+//   * vehicle.h:35   VEH_HAS_JAMMER 0x10000 — VCD Flags, "has built in
+//     self protection jamming" (the EA-6B / EF-111A / F-4G / B-52G
+//     family — 13 Korea rows);
+//   * campweap.h:34  WEAP_ECM 0x04 — WCD Flags, "Used for ECM" (the
+//     ALQ-131 pod, WCD 503 in Korea).
+// The converted tables (f4.theater.tables/1) capture both flags
+// verbatim; this resolver is their first consumer.
+
+/// VCD Flags bit: the vehicle has built-in self-protection jamming.
+inline constexpr std::uint32_t kVehHasJammer = 0x10000;
+/// WCD Flags bit: the weapon is used for ECM (a jamming pod).
+inline constexpr std::uint32_t kWeapEcm = 0x04;
+
+/// The per-vehicle ECM fit the converted tables resolve.
+struct EcmFit {
+    /// VCD Flags & VEH_HAS_JAMMER — the airframe's own jammer.
+    bool builtin = false;
+    /// A hardpoint weapon whose WCD Flags carry WEAP_ECM — the pod.
+    bool pod = false;
+    /// The first ECM-flagged hardpoint weapon's name ("ALQ-131").
+    std::string pod_name;
+    /// Jammer strength (1.0 = the reference pod). Upstream has no real
+    /// per-unit strength field (the S.G. smuggled one into VCD
+    /// Name[14] & 0x7f — a community hack, deliberately not read); the
+    /// documented default stands.
+    float strength = 1.0f;
+    /// Burn-through radius (NM). Built-in jammers keep the documented
+    /// 20-NM default; a pod seeds from its WCD range_km (the ALQ-131's
+    /// 30 km ≈ 16.2 NM) — the data's own number.
+    float burn_through_range_nm = 20.0f;
+
+    /// Either leg counts as a fit.
+    [[nodiscard]] bool carried() const noexcept { return builtin || pod; }
+};
+
+/// Resolve a vehicle's ECM fit from the converted tables.
+///
+/// `vehicle_entity_type` is the VEHICLE's class-table entity type (the
+/// value the world loader puts in VehicleCompositionComponent::groups —
+/// e.g. EA-6B = 200). The chain: class-table row (DTYPE_VEHICLE) → VCD
+/// row → Flags & VEH_HAS_JAMMER (built-in) OR hardpoint weapon IDs →
+/// WCD Flags & WEAP_ECM (pod).
+///
+/// Returns std::nullopt — the airframe carries no jammer — when the
+/// tables are absent, the entity type does not resolve to a VCD row, or
+/// neither bit fires. Never throws.
+[[nodiscard]] std::optional<EcmFit>
+resolve_vehicle_ecm(const TheaterTables& tables,
+                    const f4::world_types::ClassTable& ct,
+                    std::uint16_t vehicle_entity_type) noexcept;
+
 /// Resolve a class-table entity type's DISPLAY name — the VCD vehicle
 /// name ("F-16C") or the UCD unit-class name ("Attack"), whichever row
 /// the CT entry points into. A UNIT entity type resolves through its

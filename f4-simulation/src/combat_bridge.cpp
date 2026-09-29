@@ -1153,15 +1153,23 @@ CampaignCombatArmament arm_campaign_combat(
             out.components_attached = true;
         }
     }
-    // The ECM pod: campaign aircraft carry no per-unit ECM data, so the
-    // campaign arm's `ecm` flag stays false from its caller — nobody
-    // jams in a campaign world until a data source lands. (The parameter
-    // exists so both arm paths shape identically.)
-    if (ecm && aircraft.get<sensors::EcmComponent>() == nullptr) {
+    // The ECM pod: the double gate — the session's `ecm` flag AND the
+    // per-vehicle fit the converted tables stamped at spawn (ECM-DATA-1:
+    // VCD Flags & VEH_HAS_JAMMER, or a hardpoint's WCD Flags & WEAP_ECM).
+    // No fit → the data said this airframe carries no jammer — the flag
+    // alone jams nobody. The fit's values shape the pod (strength /
+    // burn-through); without a stamped fit the documented component
+    // defaults are the reference pod, exactly as the scenario path's own
+    // "ecm" fit attaches them.
+    const auto* ecm_fit = aircraft.get<EcmFitComponent>();
+    if (ecm && ecm_fit != nullptr && ecm_fit->carried() &&
+        aircraft.get<sensors::EcmComponent>() == nullptr) {
         auto& pod = aircraft.add<sensors::EcmComponent>();
         const auto team_tag = aircraft.get_tag(entities::tags::TEAM);
         pod.own_team = (team_tag && team_tag->as_string())
             ? *team_tag->as_string() : "blue";
+        pod.jamming_strength = ecm_fit->strength;
+        pod.burn_through_range_nm = ecm_fit->burn_through_range_nm;
         out.components_attached = true;
     }
     // The dispenser (fighters and defensive roles alike — the SHIPPED

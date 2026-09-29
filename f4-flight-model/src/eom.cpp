@@ -346,13 +346,30 @@ void EquationsOfMotion::calculateVt(double dt, double muFric, double singam,
         state.vtDot = vtDot;
         state.netAccel = vtDot * dt;
     } else {
-        // On ground: add rolling friction
+        // On ground: add rolling friction.
+        //
+        // GROUND-OPS-1 — the wheel equation. The ground regime does NOT
+        // integrate the flight-path gravity term (−g·singam): γ here is
+        // the θ−α flight-path approximation, and with the ground clamp
+        // holding the body the FCS drives θ to the −2° pitch floor —
+        // sin(−2°)·g read as a standing +1.12 ft/s² "downhill" pump
+        // during taxi (the velocity state banked gravity the pinned
+        // position never collected — the velocity-vs-position
+        // reconciliation CAMPAIGN_LOOP_PLAN.md §7 named). Worse, at
+        // rotation (θ→+15°, still rolling on the wheels) the same term
+        // read as a phantom −8.3 ft/s² deceleration through the takeoff
+        // roll. Both are lies on a flat runway: the FM models ground
+        // height as the single scalar groundZ_ft (no slope data), so
+        // gravity contributes NO forward force while the wheels carry
+        // the weight. The wheel equation is xwaero − friction; the
+        // gravity term returns the instant inAir flips.
+        //
         // weightOnWheels is floored at 0.5 so braking works at high speed
         // where lift reduces the normal force.
         const double weightOnWheels = std::clamp(state.loads.nzcgs, 0.5, 1.0);
         const double fric = (muFric + std::fabs(0.3 * state.kin.sinbet))
                           * weightOnWheels * GRAVITY * dt;
-        const double vtDot = xwaero + xwprop - GRAVITY * singam;
+        const double vtDot = xwaero + xwprop;
         state.netAccel = vtDot * dt - fric;
         k.vt = std::max(0.0, k.vt + state.netAccel);
         state.vtDot = vtDot;

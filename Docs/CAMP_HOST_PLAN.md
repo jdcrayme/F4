@@ -1349,3 +1349,66 @@ two-run query determinism).
 - `CHANGELOG.md` line on landing (one line, per convention):
   `CAMP-HOST-1 — the engine contract + campaignd: f4-campaign-api (session iface, v1 query DTOs), the CampaignSession adapter, stdio host, scripted golden client; golden identity holds.`
 - Task IDs are namespaced `CAMP-*` and unique (the §Conventions rule).
+
+---
+
+## 14. SSD-CONSUME-1 — squadron munitions attrition (designed; not landed)
+
+The recon (2026-09-29) mapped the full data flow; the tranche is ready to
+implement in DOM-3's order (typed face → ledger books → drain hook →
+write-back → flag → tests). Recorded here so the design survives the
+session.
+
+**The gap**: squadron per-weapon stores are decoded (`.uni` `stores_raw`,
+200/220/600 B by camp version — `unit_decoder.cpp:206-213`; the
+Falcon4.SSD per-TYPE table is decoded separately,
+`theater_data.hpp:351-356`) but never consumed: flying sorties don't
+drain the pools, so a 6-month war shoots the same 48 AIM-9s.
+
+**Data flow (v1 — filing-time drain, the reference's
+LoadWeapons-at-BuildMission semantics)**:
+
+1. **Typed face**: `UnitState` (f4-world `world_state.hpp:288-311`) gains
+   `std::vector<std::pair<uint16_t,uint8_t>> stores` (wire weapon id →
+   count), populated by the world loader from the decoded `.uni` row —
+   the `role_ratings` precedent (presence-based JSON emission keeps
+   all-zero saves byte-stable; stocked squadrons newly carry the field).
+2. **Ledger books**: `SquadronLedger` (result_ledger.hpp:262-321) gains
+   per-squadron `map<weapon_id, spent>` run-deltas + a
+   `StoreExpenditureRecord` log (the event-family source) — the DOM-2
+   pool-book shape.
+3. **Drain hook**: `Campaign::apply_mission_draw` (campaign.cpp:423
+   legacy / :733 ATM — where the crew draw already happens) debits the
+   flight's WIRE loadout × ships (saved flights: their own decoded
+   `loadout_stations`; synthetic ATM flights: a per-category honest-
+   invention table, documented as such). Aircraft losses need no extra
+   debit (the loadout is consumed at filing — document it). Doctrine
+   A/A fills and MK-82s are not wire stores — drain only what the wire
+   named, or the books lie.
+4. **Restock**: inside `apply_reinforcements`' fire toward the seed
+   snapshot (the DOM-2 reserve-refill shape), own knob.
+5. **Write-back**: `apply_to(ledger, ws)` gains an activity-gated
+   stores face → `UnitState.stores`; `UnitSaveMutation`
+   (save_writeback.hpp:67-91) gains an optional stores payload writing
+   `rec.subclass.stores_raw` (width-preserved: 200/220/600 B by version
+   — write the decode struct, never the projection) →
+   `unit_encoder.cpp:142-150` re-encodes verbatim. Pristine squadrons
+   stay byte-identical by construction.
+6. **Flag**: `CampaignSessionOptions::squadron_stores_attrition`
+   (beside `naval_movement`, campaign_session.hpp:300-315; construction
+   gate campaign_session.cpp:606-626; QC arg/war-block/echo per the
+   DOM-6 recipe) — default off = byte-identical. campinit packs carry
+   empty `stores_raw` → honest-zero (drains nothing — the exit-19
+   "armed & drained nothing" verdict is legal there, mirroring naval
+   exit 18).
+7. **Tests**: `test_campaign_personnel.cpp`'s roster rig (the drain
+   beside the crew draw), `test_result_ledger.cpp`'s WorldWriteback
+   trio, `test_save_writeback.cpp`'s byte-identity gates, and a
+   session E2E on the kunsan rig (a stocked squadron + filed flights →
+   the stores query shows the drain; flag off → byte-identical).
+
+**Out of scope (named)**: sim-expenditure-level drain (needs
+handle→wire-id bookkeeping — only GBU-12/310 map through
+kCampaignWeaponMap today); the SSD per-TYPE table's runtime resolution
+(UnitState carries no `special_index` — an enrichment-field ride-along
+later); AMIS_ECM-style special-store tasking.

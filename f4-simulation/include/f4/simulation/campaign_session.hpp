@@ -333,6 +333,13 @@ struct CampaignSessionOptions {
     /// contact books. Only read when aa_combat. Default false: no
     /// passive component attaches — the golden identity.
     bool passive_sensors = false;
+    /// ECM-DATA-1: the ECM gate. Only read when aa_combat. Default
+    /// false — nobody jams (the golden identity). When armed, the
+    /// combat arm attaches a jammer pod ONLY where the spawn-stamped
+    /// EcmFitComponent (the converted tables' per-vehicle VCD
+    /// VEH_HAS_JAMMER / WCD WEAP_ECM fit) says the airframe carries
+    /// one, with the fit's strength/burn-through values.
+    bool ecm = false;
 
     /// FID-1: the fidelity policy (see FidelityPolicy above). Default
     /// FullFidelity — the session is byte-identical to the pre-FID

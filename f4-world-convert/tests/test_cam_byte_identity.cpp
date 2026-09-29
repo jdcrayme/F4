@@ -12,9 +12,11 @@
 //       skipped stores/schedule/rating and loadout regions — so the
 //       encoder reproduces the original bytes exactly.
 //
-// The passthrough sub-files (.evt/.plt/.pst/.wth/.pol/.ver) carry no
-// decode structs yet; they ride verbatim through CamWriter (pinned by
-// CamWriter.RoundTripIsByteIdenticalForStandardLayout).
+// The passthrough sub-files (.evt/.plt/.pst/.pol/.ver) carry no decode
+// structs yet; they ride verbatim through CamWriter (pinned by
+// CamWriter.RoundTripIsByteIdenticalForStandardLayout). .wth decoded in
+// WTH-CODEC-1 and re-encodes byte-identically below (its own golden
+// pins live in test_weather_codec.cpp).
 
 #include <gtest/gtest.h>
 
@@ -25,6 +27,8 @@
 #include <f4/world_convert/objective_encoder.hpp>
 #include <f4/world_convert/team_decoder.hpp>
 #include <f4/world_convert/team_encoder.hpp>
+#include <f4/world_convert/weather_decoder.hpp>
+#include <f4/world_convert/weather_encoder.hpp>
 #include <f4/world_convert/unit_decoder.hpp>
 #include <f4/world_convert/unit_encoder.hpp>
 #include <f4/world_convert/cam_writer.hpp>
@@ -80,7 +84,15 @@ std::optional<std::vector<uint8_t>> reencode_subfile(const SubFile& sf,
                             UnitDecodeOptions{ver, nullptr});
         return encode_uni(d, ver);
     }
-    return std::nullopt;   // passthrough (.evt/.plt/.pst/.wth/.pol/.ver)
+    if (ext == "wth") {
+        // WTH-CODEC-1: the empty campinit ride decodes to nullopt and
+        // stays passthrough (encode of an absent weather is the empty
+        // sub-file itself).
+        auto w = decode_wth(sf.data.data(), sf.data.size(), ver);
+        if (!w) return std::nullopt;
+        return encode_wth(*w);
+    }
+    return std::nullopt;   // passthrough (.evt/.plt/.pst/.pol/.ver)
 }
 
 // Decode every sub-file, re-encode, and compare against the original
@@ -126,7 +138,7 @@ TEST(CamByteIdentity, Save1EverySubfileReencodesByteIdentical) {
     check_subfiles_byte_identical(FIXTURE_DIR "save1.cam", 63, "save1",
                                   &loaded, &reencoded);
     ASSERT_TRUE(loaded);
-    ASSERT_EQ(reencoded, 5);   // cmp, obj, obd, tea, uni
+    ASSERT_EQ(reencoded, 6);   // cmp, obj, obd, tea, uni, wth (WTH-CODEC-1)
 }
 
 TEST(CamByteIdentity, TestCampEverySubfileReencodesByteIdentical) {
@@ -137,7 +149,7 @@ TEST(CamByteIdentity, TestCampEverySubfileReencodesByteIdentical) {
     check_subfiles_byte_identical(REPO_ROOT "TestCamp.cam", 71, "TestCamp",
                                   &loaded, &reencoded);
     ASSERT_TRUE(loaded);
-    ASSERT_EQ(reencoded, 4);   // cmp, obd, tea, uni (no embedded .obj)
+    ASSERT_EQ(reencoded, 5);   // cmp, obd, tea, uni, wth (no embedded .obj)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -368,3 +368,163 @@ TEST(TheaterTables, ResolveEntityTypeNameChain) {
         " \"vehicles\": [], \"weapons\": [] }");
     EXPECT_EQ(resolve_entity_type_name(empty, ct, 101), "");
 }
+
+// ── ECM-DATA-1: the per-vehicle ECM fit resolver ──────────────────────────
+//
+// Upstream "who carries a jammer" is two flag bits: VCD Flags &
+// VEH_HAS_JAMMER (0x10000 — vehicle.h:35) and WCD Flags & WEAP_ECM
+// (0x04 — campweap.h:34). The fixture: CT 201 → VCD row 1 ("EA-6B",
+// the built-in bit), CT 202 → VCD row 2 ("F-16P" with an ALQ-131 pod
+// hardpoint), CT 203 → VCD row 3 ("Truck", neither bit).
+
+namespace {
+
+std::string ecm_tables_json() {
+    std::string s = "{\n";
+    s += "  \"format\": \"f4.theater.tables/1\",\n";
+    s += "  \"counts\": {\"units\": 0, \"vehicles\": 4, \"weapons\": 4},\n";
+    s += "  \"units\": [],\n";
+    s += "  \"vehicles\": [\n";
+    auto vehicle_row = [](int idx, const char* name, uint32_t flags,
+                          int w0, int shots0) {
+        std::string r = "    {\"index\": ";
+        r += std::to_string(idx);
+        r += ", \"name\": \""; r += name; r += "\", \"nctr\": \"ECM\","
+             " \"hit_points\": 100, \"flags\": ";
+        r += std::to_string(flags);
+        r += ", \"rcs_factor\": 1.0, \"max_wt\": 0, \"empty_wt\": 0,"
+             " \"fuel_wt\": 0, \"fuel_econ\": 0, \"engine_sound\": 0,"
+             " \"high_alt\": 0, \"low_alt\": 0, \"cruise_alt\": 0,"
+             " \"max_speed\": 0, \"radar_type\": 0, \"number_of_pilots\": 1,"
+             " \"rack_flags\": 0, \"visible_flags\": 0,"
+             " \"callsign_index\": 0, \"callsign_slots\": 0,"
+             " \"hit_chance\": [0, 0, 0, 0, 0, 0, 0, 0],"
+             " \"strength\": [0, 0, 0, 0, 0, 0, 0, 0],"
+             " \"range\": [0, 0, 0, 0, 0, 0, 0, 0],"
+             " \"detection\": [0, 0, 0, 0, 0, 0, 0, 0],"
+             " \"weapon\": [";
+        r += std::to_string(w0);
+        r += ", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+             " \"weapons\": [";
+        r += std::to_string(shots0);
+        r += ", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+             " \"damage_mod\": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}";
+        return r;
+    };
+    s += vehicle_row(0, "Filler", 0, 0, 0) + ",\n";
+    s += vehicle_row(1, "EA-6B", 0x10000, 0, 0) + ",\n";   // built-in bit
+    s += vehicle_row(2, "F-16P", 0, 3, 1) + ",\n";         // ALQ-131 pod
+    s += vehicle_row(3, "Truck", 0, 0, 0) + "\n";
+    s += "  ],\n";
+    // WCD rows are POSITIONAL: weapon id 3 is row 3 — the ALQ-131, the
+    // one Korea WCD row carrying WEAP_ECM (flags 4, range_km 30).
+    s += "  \"weapons\": [\n";
+    s += "    {\"index\": 0, \"name\": \"Filler0\", \"strength\": 0,"
+         " \"damage_type\": 0, \"range_km\": 0, \"flags\": 0,"
+         " \"fire_rate\": 0, \"rarity\": 0, \"guidance_flags\": 0,"
+         " \"collective\": 0, \"simweap_index\": 0, \"weight\": 0,"
+         " \"drag_index\": 0, \"blast_radius\": 0, \"radar_type\": 0,"
+         " \"sim_data_idx\": 0, \"max_alt\": 0},\n";
+    s += "    {\"index\": 1, \"name\": \"Filler1\", \"strength\": 0,"
+         " \"damage_type\": 0, \"range_km\": 0, \"flags\": 0,"
+         " \"fire_rate\": 0, \"rarity\": 0, \"guidance_flags\": 0,"
+         " \"collective\": 0, \"simweap_index\": 0, \"weight\": 0,"
+         " \"drag_index\": 0, \"blast_radius\": 0, \"radar_type\": 0,"
+         " \"sim_data_idx\": 0, \"max_alt\": 0},\n";
+    s += "    {\"index\": 2, \"name\": \"Filler2\", \"strength\": 0,"
+         " \"damage_type\": 0, \"range_km\": 0, \"flags\": 0,"
+         " \"fire_rate\": 0, \"rarity\": 0, \"guidance_flags\": 0,"
+         " \"collective\": 0, \"simweap_index\": 0, \"weight\": 0,"
+         " \"drag_index\": 0, \"blast_radius\": 0, \"radar_type\": 0,"
+         " \"sim_data_idx\": 0, \"max_alt\": 0},\n";
+    s += "    {\"index\": 3, \"name\": \"ALQ-131\", \"strength\": 0,"
+         " \"damage_type\": 0, \"range_km\": 30, \"flags\": 4,"
+         " \"fire_rate\": 0, \"rarity\": 0, \"guidance_flags\": 0,"
+         " \"collective\": 0, \"simweap_index\": 0, \"weight\": 659,"
+         " \"drag_index\": 0, \"blast_radius\": 0, \"radar_type\": 0,"
+         " \"sim_data_idx\": 13, \"max_alt\": 0}\n";
+    s += "  ]\n";
+    s += "}\n";
+    return s;
+}
+
+// A minimal falcon4.ct.json — entries are POSITIONAL (entity_type =
+// 100 + array index): 100 → dummy unit row, 101 → VCD row 1 ("EA-6B",
+// the built-in bit), 102 → VCD row 2 ("F-16P", the pod), 103 → VCD
+// row 3 ("Truck", neither bit).
+std::string ecm_ct_json() {
+    std::string s = "{\n  \"count\": 4,\n  \"entries\": [\n";
+    s += "    {\"entity_type\": 100, \"domain\": 2, \"cls\": 4, \"type\": 0,"
+         " \"stype\": 3, \"vis_type\": [0, 0, 0, 0, 0, 0, 0],"
+         " \"data_type\": 4, \"data_ptr_index\": 0},\n";
+    for (int i = 0; i < 3; ++i) {
+        s += "    {\"entity_type\": " + std::to_string(101 + i) +
+             ", \"domain\": 2, \"cls\": 4, \"type\": 0, \"stype\": 3,"
+             " \"vis_type\": [0, 0, 0, 0, 0, 0, 0],"
+             " \"data_type\": 5, \"data_ptr_index\": " +
+             std::to_string(i + 1) + "}" +
+             (i < 2 ? ",\n" : "\n");
+    }
+    s += "  ]\n}\n";
+    return s;
+}
+
+f4::world_types::ClassTable load_ecm_ct() {
+    const auto path = std::filesystem::temp_directory_path() /
+                      "f4_theater_tables_ct_ecm.json";
+    {
+        std::ofstream f(path);
+        f << ecm_ct_json();
+    }
+    f4::world_types::ClassTable ct;
+    ct.load_json(path);
+    std::filesystem::remove(path);
+    return ct;
+}
+
+} // namespace
+
+TEST(TheaterTables, ResolveEcmBuiltinJammer) {
+    const auto t = TheaterTables::parse(ecm_tables_json());
+    const auto ct = load_ecm_ct();
+    // The built-in leg: VCD Flags & VEH_HAS_JAMMER, no pod, the
+    // documented 1.0-strength / 20-NM reference values.
+    const auto fit = resolve_vehicle_ecm(t, ct, 101);
+    ASSERT_TRUE(fit.has_value());
+    EXPECT_TRUE(fit->builtin);
+    EXPECT_FALSE(fit->pod);
+    EXPECT_TRUE(fit->pod_name.empty());
+    EXPECT_FLOAT_EQ(fit->strength, 1.0f);
+    EXPECT_FLOAT_EQ(fit->burn_through_range_nm, 20.0f);
+    EXPECT_TRUE(fit->carried());
+}
+
+TEST(TheaterTables, ResolveEcmPodFromWcdFlags) {
+    const auto t = TheaterTables::parse(ecm_tables_json());
+    const auto ct = load_ecm_ct();
+    // The pod leg: a hardpoint weapon whose WCD Flags carry WEAP_ECM;
+    // the pod names itself and seeds the burn-through from its own WCD
+    // range_km (30 km × 0.5399568 NM/km ≈ 16.199 NM).
+    const auto fit = resolve_vehicle_ecm(t, ct, 102);
+    ASSERT_TRUE(fit.has_value());
+    EXPECT_FALSE(fit->builtin);
+    EXPECT_TRUE(fit->pod);
+    EXPECT_EQ(fit->pod_name, "ALQ-131");
+    EXPECT_FLOAT_EQ(fit->strength, 1.0f);
+    EXPECT_FLOAT_EQ(fit->burn_through_range_nm, 30.0f * 0.5399568f);
+}
+
+TEST(TheaterTables, ResolveEcmDeclinesWithoutBits) {
+    const auto t = TheaterTables::parse(ecm_tables_json());
+    const auto ct = load_ecm_ct();
+    // Neither bit → no fit (the data said so; the caller stamps
+    // nothing).
+    EXPECT_FALSE(resolve_vehicle_ecm(t, ct, 103).has_value());
+    // Out-of-range entity types decline.
+    EXPECT_FALSE(resolve_vehicle_ecm(t, ct, 9999).has_value());
+    // Empty tables decline (and never throw).
+    const auto empty = TheaterTables::parse(
+        "{ \"format\": \"f4.theater.tables/1\", \"units\": [],"
+        " \"vehicles\": [], \"weapons\": [] }");
+    EXPECT_FALSE(resolve_vehicle_ecm(empty, ct, 101).has_value());
+}

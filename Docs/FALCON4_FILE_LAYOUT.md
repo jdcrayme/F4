@@ -338,6 +338,7 @@ of which is a typed binary record stream:
 | `.unit`    | UnitClass                     | `unit_decoder.cpp`              |
 | `.pilot`   | PilotClass                    | `unit_decoder.cpp` (the squadron's 48-pilot roster — 10-byte PilotClass records; the DOM-3 personnel face consumes it) |
 | `.team`    | (team bits)                   | `team_decoder.cpp`              |
+| `.wth`     | WeatherClass                  | `weather_decoder.cpp` (WTH-CODEC-1 — the three upstream layouts: the original-F4 37-byte header + 128×128 cloud map, the Cobra Tacedit-compat 37-byte form with the COVersion marker, and the v75+ flat 32/36-byte form; the world JSON carries a decoded top-level `"weather"` face and the re-encode is byte-identical; campinit's 0-byte ride reads as absent weather) |
 | `.victory` | VictoryClass                  | (not yet parsed)                |
 | `.oob`     | Order-of-battle               | (not yet parsed)                |
 | `*.key`    | (encryption keys, if present) | skipped                         |

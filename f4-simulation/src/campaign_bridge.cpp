@@ -513,6 +513,19 @@ std::optional<f4::world::CountermeasureCounts> resolve_unit_countermeasures(
     return f4::world::resolve_countermeasures(*tables, ct, vehicle_type);
 }
 
+std::optional<f4::world::EcmFit> resolve_unit_ecm(
+    const f4::world::TheaterTables* tables,
+    const f4::world_types::ClassTable& ct,
+    f4::entities::EntityHandle unit_h) noexcept {
+    if (tables == nullptr) return std::nullopt;
+    const auto* vc = unit_h.get<f4::entities::VehicleCompositionComponent>();
+    if (vc == nullptr || vc->groups.empty()) return std::nullopt;
+    const auto vehicle_type =
+        static_cast<std::uint16_t>(vc->groups.front().vehicle_type);
+    if (vehicle_type == 0) return std::nullopt;
+    return f4::world::resolve_vehicle_ecm(*tables, ct, vehicle_type);
+}
+
 /// Default cruise CAS for derived route legs. The saved plan carries no
 /// per-leg speeds; 400 kts is a representative cruise value for the
 /// fighter-types that dominate a campaign's air tasking. Per-action
@@ -1041,6 +1054,24 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
             auto& cm_supply = h.add<CountermeasureSupplyComponent>();
             cm_supply.chaff_rounds = supply->chaff_rounds;
             cm_supply.flare_rounds = supply->flare_rounds;
+        }
+        // ECM-DATA-1 — the per-vehicle ECM fit rides the same resolution
+        // (flight, fallback the squadron): VCD VEH_HAS_JAMMER / WCD
+        // WEAP_ECM. No fit stamps nothing — the aircraft carries no
+        // jammer and the arm's ecm gate (whatever its position) jams
+        // nobody on this airframe.
+        auto fit = resolve_unit_ecm(theater_tables, ct, flight_h);
+        if (!fit && fp->squadron.value != 0) {
+            fit = resolve_unit_ecm(theater_tables, ct,
+                                   EntityHandle(fp->squadron, &world));
+        }
+        if (fit && fit->carried()) {
+            auto& ecm_fit = h.add<EcmFitComponent>();
+            ecm_fit.builtin = fit->builtin;
+            ecm_fit.pod = fit->pod;
+            ecm_fit.pod_name = fit->pod_name;
+            ecm_fit.strength = fit->strength;
+            ecm_fit.burn_through_range_nm = fit->burn_through_range_nm;
         }
     }
 
@@ -1793,6 +1824,19 @@ spawn_aircraft_for_intent(
             auto& cm_supply = h.add<CountermeasureSupplyComponent>();
             cm_supply.chaff_rounds = supply->chaff_rounds;
             cm_supply.flare_rounds = supply->flare_rounds;
+        }
+        // ECM-DATA-1 — the fit rides the same resolution (the intent
+        // path's squadron fallback): no fit stamps nothing.
+        if (auto fit = resolve_unit_ecm(
+                theater_tables, ct,
+                EntityHandle(squadron_entity, &world));
+            fit && fit->carried()) {
+            auto& ecm_fit = h.add<EcmFitComponent>();
+            ecm_fit.builtin = fit->builtin;
+            ecm_fit.pod = fit->pod;
+            ecm_fit.pod_name = fit->pod_name;
+            ecm_fit.strength = fit->strength;
+            ecm_fit.burn_through_range_nm = fit->burn_through_range_nm;
         }
     }
 

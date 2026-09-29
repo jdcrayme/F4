@@ -32,6 +32,8 @@ add_library(f4-world-convert STATIC
     src/unit_encoder.cpp
     src/team_decoder.cpp
     src/team_encoder.cpp
+    src/weather_decoder.cpp
+    src/weather_encoder.cpp
     src/class_table.cpp
     src/theater_data.cpp
     src/world_json.cpp
