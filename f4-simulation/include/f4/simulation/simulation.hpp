@@ -47,6 +47,7 @@
 #include <f4/world_types/class_table.hpp>  // owned here (see class_table_)
 #include <f4/world/theater_tables.hpp>    // CAMP-SCALE-1: converted tables
 #include <f4/ai/air_picture.hpp>       // PERF-1: the shared snapshot
+#include <f4/ai/datalink_net.hpp>      // Step 13: the per-team GCI net
 #include <f4/ai/modules/strike_module.hpp>   // Tranche D: WP_REFUEL predicate
 
 #include <cstdint>
@@ -867,6 +868,22 @@ private:
     // brain. The members are reused tick over tick so the steady state
     // allocates nothing (contacts/teams clear + repopulate in place).
     f4::ai::AirPicture air_picture_{};
+
+    // Step 13 (AI_IMPLEMENTATION_PLAN §15): the per-tick datalink net —
+    // the picture's own discipline extended one column. Rebuilt inside
+    // push_air_picture_()'s single walk when the combat.gci_datalink
+    // gate is on: the same pass that fills the contacts also collects
+    // the live nodes (AwacsComponent aircraft plus, when
+    // gci_ground_sites is set, RadarComponent objectives) and masks
+    // every contact with which TEAMS' nodes see it. Between walks the
+    // LAST net stays valid — the same bounded-staleness contract as
+    // the picture (the fusions consume them in lockstep). Gate off =
+    // the net is never built and no fusion is ever handed it; every
+    // fusion keeps the legacy omniscient GCI leg byte-for-byte (the
+    // twin-test contract). Gate on with NO live nodes = the host pushes
+    // nullptr (the plan's "gate off OR no live nodes" rule — a war
+    // with no datalink asset keeps omniscience).
+    f4::ai::DatalinkNet datalink_net_{};
 
     // FID-OPT-2: the picture's own refresh cadence. The deep-horizon
     // profile (the FID-OPT-2 measurement: the walk is ~1.4 ms — the

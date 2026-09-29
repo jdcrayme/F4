@@ -1086,6 +1086,16 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
         }
     }
 
+    // Step 13 — the datalink-node stamp (AI_IMPLEMENTATION_PLAN §15):
+    // an AWACS/JSTAR mission carries the pure-state AwacsComponent (the
+    // net's documented 200 NM default radius; the horizon clamp is the
+    // plan's v1 flat-earth 0). Plain DATA — the shared air picture's
+    // walk collects the live nodes; nothing here touches a bus. The
+    // flight's own mission byte decides (no tables involved).
+    if (f4::campaign::mission_is_datalink(fp->mission)) {
+        (void)h.add<AwacsComponent>();
+    }
+
     return h.id();
 }
 
@@ -1857,6 +1867,13 @@ spawn_aircraft_for_intent(
             ecm_fit.strength = fit->strength;
             ecm_fit.burn_through_range_nm = fit->burn_through_range_nm;
         }
+    }
+
+    // Step 13 — the intent path's datalink-node stamp (the flight
+    // path's sibling): the generated war's AWACS/JSTAR filings carry
+    // the node state too, keyed on the intent's mission byte.
+    if (f4::campaign::mission_is_datalink(intent.mission_byte)) {
+        (void)h.add<AwacsComponent>();
     }
 
     return h.id();

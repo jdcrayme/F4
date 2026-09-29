@@ -160,6 +160,28 @@ static_assert(kMissionTypeNames[kMissionTank] == "AMIS_TANK");
     return mission_byte == kMissionTanker || mission_byte == kMissionTank;
 }
 
+// Step 13 — the DATALINK bytes (AI_IMPLEMENTATION_PLAN §15 Step 13).
+// The GCI network's airborne nodes: the AWACS (25, "AMIS_AWACS") and
+// JSTARS (26, "AMIS_JSTAR") support missions — the two datalink-type
+// aircraft the reference's campaign sensor nets feed `detected_by_gci`
+// from (tankbrn.cpp's support station flies the node; radar.cpp's SOJ
+// range-cuts are out of the tranche's scope). A tanker is deliberately
+// NOT a node: mission_is_tanker already covers byte 39, and the
+// datalink arm keys on the net's own vocabulary, not the refuel role.
+inline constexpr std::uint8_t kMissionAwacs = 25;
+inline constexpr std::uint8_t kMissionJstar = 26;
+static_assert(kMissionTypeNames[kMissionAwacs] == "AMIS_AWACS");
+static_assert(kMissionTypeNames[kMissionJstar] == "AMIS_JSTAR");
+
+/// Step 13 — datalink-node mission-hood (both airborne node bytes).
+/// Drives the sim-side AwacsComponent stamp (the spawn paths' pure
+/// state: range + horizon) — the per-team DatalinkNet's node set
+/// builds from exactly these flights plus the radar-flagged ground
+/// objectives when the ground-site arm is on.
+[[nodiscard]] constexpr bool mission_is_datalink(std::uint8_t mission_byte) {
+    return mission_byte == kMissionAwacs || mission_byte == kMissionJstar;
+}
+
 // ============================================================================
 // Mission categories (B.3 tranche)
 // ============================================================================

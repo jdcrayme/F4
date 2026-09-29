@@ -1181,6 +1181,13 @@ public:
     void set_air_picture(const AirPicture* picture) noexcept {
         sensors_.set_air_picture(picture);
     }
+    /// Step 13: the host's per-team datalink net, forwarded to the
+    /// fusion beside the picture (the same push loop, the same
+    /// non-owning lifetime). nullptr = the legacy omniscient GCI leg —
+    /// every pre-Step-13 host, test, and gate-off run is byte-identical.
+    void set_datalink(const DatalinkNet* net) noexcept {
+        sensors_.set_datalink(net);
+    }
     /// PERF-1 demand query (host side): does THIS brain's combat ladder
     /// run a SensorFusion rebuild on THIS update(dt)? Exact mirror of
     /// the update() decision: the ladder runs only while Enroute with

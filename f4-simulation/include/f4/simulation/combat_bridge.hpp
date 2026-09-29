@@ -94,6 +94,21 @@ struct EcmFitComponent : entities::Component<EcmFitComponent> {
     [[nodiscard]] bool carried() const noexcept { return builtin || pod; }
 };
 
+/// Step 13 (AI_IMPLEMENTATION_PLAN §15) — the pure-state datalink-node
+/// stamp: the aircraft is a per-team GCI broadcast node (an AWACS/JSTAR
+/// mission). Stamped at spawn by both campaign spawn paths (the
+/// mission_is_datalink test) and by the scenario's per-aircraft
+/// "awacs" flag; the shared air picture's walk collects the live nodes
+/// into the DatalinkNet. Plain DATA the way EcmFitComponent is: no
+/// behavior, no bus traffic — the host's walk is the only consumer.
+/// v1 geometry is the net's own (node_sees): a horizontal radius plus
+/// the flat-earth horizon clamp; the documented default radius is the
+/// plan's DatalinkNode default (200 NM).
+struct AwacsComponent : entities::Component<AwacsComponent> {
+    double range_nm = 200.0;
+    double min_alt_ft = 0.0;   ///< contacts below this MSL are not seen
+};
+
 class Simulation;  // combat event recording (attach_combat_event_recorder)
 
 /// Add the combat component set to a spawned aircraft entity. Idempotent

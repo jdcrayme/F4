@@ -340,6 +340,21 @@ struct CampaignSessionOptions {
     /// VEH_HAS_JAMMER / WCD WEAP_ECM fit) says the airframe carries
     /// one, with the fit's strength/burn-through values.
     bool ecm = false;
+    /// Step 13 (AI_IMPLEMENTATION_PLAN §15): the datalink tier. Only
+    /// read when aa_combat. Default false — the GCI leg keeps the
+    /// legacy omniscient theater rumor (the golden identity). When
+    /// armed, the sim builds the per-team DatalinkNet on the air
+    /// picture's walk: the live datalink nodes (AWACS/JSTAR missions'
+    /// AwacsComponent stamps plus, with gci_ground_sites, the
+    /// radar-flagged objectives) mask every contact by which TEAMS'
+    /// nodes see it, and the fusions' GCI leg reads the net instead of
+    /// omniscience — a team whose nodes die goes GCI-dark.
+    bool gci_datalink = false;
+    /// Step 13's ground-site arm: radar-flagged objectives (the .obj
+    /// wire's has_radar rows) join the net as ground nodes at their own
+    /// radar ranges. Requires gci_datalink. Default false — airborne
+    /// AWACS/JSTAR nodes only.
+    bool gci_ground_sites = false;
 
     /// FID-1: the fidelity policy (see FidelityPolicy above). Default
     /// FullFidelity — the session is byte-identical to the pre-FID
@@ -1143,6 +1158,24 @@ private:
     double deagg_cooldown_sec_ = 30.0;
 
     std::unordered_map<std::uint32_t, DeaggregatedFlight> deaggregated_;
+    /// FID-P0 (the flight-persistence invariant): the deagged flights
+    /// whose aircraft genuinely died in-sim (the EntityKilled path —
+    /// the session's own booking, which survives the wreck reaper's
+    /// reap: the reap destroys the entity AND the ALIVE tag with it,
+    /// so the tag alone cannot be trusted). The reaggregate fold reads
+    /// this: a hit here is a KILL (mark_destroyed — the flight truly
+    /// died); anything else that cannot produce a live roll-up (the
+    /// reaper's retire racing the fold, a reaped corpse, an FM-less
+    /// materialization) folds the flight at its LAST KNOWN aggregate
+    /// state and the flight STAYS ALIVE as an aggregate — a flight
+    /// never disappears, it only changes fidelity. Consumed at the
+    /// fold; a fresh deagg clears any stale record (a re-deagg is a
+    /// new life).
+    std::unordered_set<std::uint32_t> deagg_killed_flights_;
+    /// FID-P0: the always-on kill subscription id (0 = none). Unlike
+    /// the wreck-hold subscriber above, this one is unconditional —
+    /// the fold's kill verdict must not depend on the wreck option.
+    std::uint64_t deagg_kill_subscription_ = 0;
     int tier_deaggs_ = 0;
     int tier_reaggs_ = 0;
 

@@ -9,6 +9,7 @@ function(f4_ai_add_test name source)
 endfunction()
 
 f4_ai_add_test(test_ai_sensor_fusion test_sensor_fusion.cpp)
+f4_ai_add_test(test_datalink_net   test_datalink_net.cpp)
 f4_ai_add_test(test_ground_steering  test_ground_steering.cpp)
 f4_ai_add_test(test_air_steering     test_air_steering.cpp)
 f4_ai_add_test(test_takeoff_module   test_takeoff_module.cpp)

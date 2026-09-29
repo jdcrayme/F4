@@ -106,6 +106,7 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
         else if (key == "formation")        a.formation = r.read_string();
         else if (key == "tanker")           a.tanker = r.read_bool();
         else if (key == "ecm")              a.ecm = r.read_bool();
+        else if (key == "awacs")            a.awacs = r.read_bool();
         else if (key == "route") {
             // Per-aircraft route (AAR redesign). Empty = use shared waypoints.
             r.expect('[');
@@ -368,6 +369,14 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 // identity).
                 else if (k == "passive_sensors") s.combat.passive_sensors = r.read_bool();
                 else if (k == "ecm")             s.combat.ecm = r.read_bool();
+                // Step 13 (AI_IMPLEMENTATION_PLAN §15): the datalink
+                // tier — the GCI leg reads the host-built per-team
+                // DatalinkNet instead of the omniscient theater rumor.
+                // gci_ground_sites adds the radar-flagged objectives as
+                // ground nodes (requires gci_datalink). Unset keys keep
+                // the defaults (the golden identity).
+                else if (k == "gci_datalink")    s.combat.gci_datalink = r.read_bool();
+                else if (k == "gci_ground_sites") s.combat.gci_ground_sites = r.read_bool();
                 else if (k == "throttle_ir_power") s.combat.throttle_ir_power = r.read_bool();
                 // Real-data tier (Task 64): the wcd2json weapon export
                 // and the sig2json signature library, plus the

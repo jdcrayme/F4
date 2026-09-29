@@ -1629,6 +1629,13 @@ per-team net*).
 
 ### Step 13: DatalinkTier — the AWACS/GCI broadcast (replaces the omniscient leg)
 
+**LANDED (f4 batch 2)** — the f4-ai half matches this design: `datalink_net.hpp`
+(`DatalinkNode` / `DatalinkNet` / `node_sees`, the flat-earth v1 geometry) +
+the fusion's optional net leg (`SensorFusion::set_datalink`, null = the legacy
+omniscient GCI leg, byte-identical) + the twin contract in
+`test_datalink_net.cpp`. The host picture walk and the gate plumbing are the
+f4-simulation tranche.
+
 **FreeFalcon reference**: the GCI rule lives in the campaign's sensor nets
 (radar-bearing objectives + AWACS flights feeding the queries the digi
 brains read as `detected_by_gci`); the specialist node behavior is

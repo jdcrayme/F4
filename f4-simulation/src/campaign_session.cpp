@@ -84,7 +84,9 @@ std::string session_scenario_json(
         const std::filesystem::path& theater_tables,
         bool pilot_skill_flow,
         bool passive_sensors,
-        bool ecm) {
+        bool ecm,
+        bool gci_datalink,
+        bool gci_ground_sites) {
     std::ostringstream out;
     out << "{\n";
     out << "  \"name\": \"f4_viewer_campaign_session\",\n";
@@ -155,6 +157,17 @@ std::string session_scenario_json(
                 // carries one — the data decides who jams.
                 out << ", \"ecm\": true";
             }
+        }
+        // Step 13 (AI_IMPLEMENTATION_PLAN §15): the datalink gates ride
+        // the combat block's top level — the scenario reader's own keys
+        // (scenario.cpp's gci_datalink / gci_ground_sites). Unset keys
+        // keep the defaults: every golden pins exactly the pre-Step-13
+        // bytes (the writer's own identity contract).
+        if (gci_datalink) {
+            out << ", \"gci_datalink\": true";
+        }
+        if (gci_ground_sites) {
+            out << ", \"gci_ground_sites\": true";
         }
         out << "},\n";
         if (!brain_data.empty()) {
@@ -416,7 +429,9 @@ CampaignSession::create(const CampaignSessionOptions& opts,
                                      opts.theater_tables,
                                      opts.pilot_skill_flow,
                                      opts.passive_sensors,
-                                     opts.ecm);
+                                     opts.ecm,
+                                     opts.gci_datalink,
+                                     opts.gci_ground_sites);
         if (!out.good()) {
             return fail("cannot write " + scenario_path.string());
         }
@@ -777,6 +792,30 @@ CampaignSession::create(const CampaignSessionOptions& opts,
                     });
     }
 
+    // FID-P0 (the flight-persistence invariant): the kill ledger's
+    // recorder — ALWAYS on, unlike the wreck-hold subscriber above
+    // (the reaggregate fold's kill verdict must not depend on the
+    // wreck option). When a deagged flight's aircraft dies, the
+    // flight's VU books here; the fold reads it (a hit = a genuine
+    // kill — mark_destroyed is correct: the flight truly died), and
+    // anything else that cannot produce a live roll-up — the reaper's
+    // retire racing the fold, a reaped corpse, an FM-less
+    // materialization — folds the flight at its LAST KNOWN aggregate
+    // state and the flight stays alive as an aggregate. A flight never
+    // disappears; it only changes fidelity.
+    auto* const session_raw = session.get();
+    session->deagg_kill_subscription_ =
+        session->sim_->bus()
+            .subscribe<f4::weapons::EntityKilledMessage>(
+                [session_raw](const f4::weapons::EntityKilledMessage& m) {
+                    for (auto& [vu, rec] : session_raw->deaggregated_) {
+                        if (rec.aircraft.valid() &&
+                            rec.aircraft.value == m.target_id) {
+                            session_raw->deagg_killed_flights_.insert(vu);
+                        }
+                    }
+                });
+
     // 15. The initial tasking cycle (opt-in): the war starts by
     //     planning — a loaded save carries no ATO in this engine, so
     //     without it the air war sits empty for a full
@@ -807,6 +846,10 @@ CampaignSession::~CampaignSession() {
         if (kill_subscription_ != 0) {
             sim_->bus().unsubscribe<f4::weapons::EntityKilledMessage>(
                 kill_subscription_);
+        }
+        if (deagg_kill_subscription_ != 0) {
+            sim_->bus().unsubscribe<f4::weapons::EntityKilledMessage>(
+                deagg_kill_subscription_);
         }
     }
 }
@@ -2696,6 +2739,11 @@ void CampaignSession::deaggregate_flight_(
                       std::max(0, combat_window_sec_))
             : 0;
     deaggregated_.emplace(f.vu, rec);
+    // FID-P0: a fresh deagg is a new life — any stale kill booking
+    // from a previous deagg of this flight is cleared (the fold reads
+    // only THIS life's verdict; a re-deagg could otherwise inherit a
+    // dead flight's verdict and never fold live).
+    deagg_killed_flights_.erase(f.vu);
     ++tier_deaggs_;
     if (trigger == DeaggregatedFlight::Trigger::Combat) {
         ++combat_deaggs_;
@@ -2733,8 +2781,34 @@ bool CampaignSession::reaggregate_flight_(std::uint32_t vu) {
         }
     }
     if (!folded_live) {
-        flights_->mark_destroyed(vu);
+        // FID-P0 — the flight-persistence invariant: a flight NEVER
+        // disappears, it only changes fidelity. A fold that cannot
+        // produce a live roll-up is a KILL only when the death is
+        // genuine: the ALIVE tag false (the EntityKilled path), or the
+        // session's own kill booking (deagg_killed_flights_, which
+        // survives the wreck reaper's reap — the reap destroys the
+        // entity, and the tag with it). Anything else — the reaper's
+        // retire racing the fold, a reaped corpse, an FM-less
+        // materialization — folds the flight at its LAST KNOWN
+        // aggregate state (the suspended row still holds the pre-deagg
+        // values) and the flight stays alive as an aggregate. The old
+        // shape called mark_destroyed here, permanently vanishing a
+        // live flight (and a re-deagg could never bring it back).
+        const bool killed = deagg_killed_flights_.count(vu) > 0;
+        if (killed) {
+            flights_->mark_destroyed(vu);
+        } else {
+            const std::size_t idx = flights_->index_of(vu);
+            if (idx != static_cast<std::size_t>(-1)) {
+                const auto& st = flights_->flights()[idx];
+                flights_->reaggregate(vu, st.fx, st.fy, st.altitude_ft,
+                                      st.fuel_burnt);
+            }
+        }
     }
+    // The kill verdict is consumed: a re-deagg of this flight is a new
+    // life (a fresh deagg clears any stale record too).
+    deagg_killed_flights_.erase(vu);
     // The aircraft leaves the roster + the world (the reaper's own
     // mechanics; idempotent when the reaper already retired it).
     sim_->retire_aircraft(rec->second.aircraft);

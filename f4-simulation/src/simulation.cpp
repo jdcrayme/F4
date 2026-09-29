@@ -1614,6 +1614,12 @@ void Simulation::push_air_picture_(double dt) {
     // this tick get a fresh snapshot; brains that don't get nullptr —
     // inert either way, and no rebuild happens without the demand flag
     // that built the snapshot.
+    // Step 13: the datalink gates, read straight off the combat block
+    // (the ECM gate's own pattern — the scenario is fixed at
+    // construction, so per-tick reads are free and can never go stale).
+    const bool datalink_gate_on = scenario_.combat.gci_datalink;
+    const bool datalink_ground_sites = scenario_.combat.gci_ground_sites;
+
     const f4::ai::AirPicture* push = nullptr;
     bool any_demand = false;
     for (const auto eid : aircraft_entities_) {
@@ -1655,6 +1661,23 @@ void Simulation::push_air_picture_(double dt) {
         air_picture_.contacts.clear();
         air_picture_.teams.clear();
 
+        // Step 13 (AI_IMPLEMENTATION_PLAN §15): the datalink net resets
+        // with the picture — the same walk rebuilds both. Nodes AND the
+        // net's own team table clear unconditionally: a node that died
+        // since the last walk must not linger (a stale node would keep
+        // broadcasting through a dead radar — the exact GCI-ghost the
+        // tier exists to kill), and re-collecting re-interns the table
+        // identically anyway. The team table is the NET'S OWN intern of
+        // the NODE team strings (a ground radar site's team may never
+        // appear as a contact — its entities are clutter to the contact
+        // rule — and the picture's table must stay byte-identical, so
+        // the net interns separately). Gate off = the clears still run
+        // (four vector clears, no observable change — the net stays
+        // empty and the handoff below never fires); every observable
+        // byte is unchanged (the twin-test contract).
+        datalink_net_.nodes.clear();
+        datalink_net_.teams.clear();
+
         for (const auto eid :
              world_.with_component<entities::TransformComponent>()) {
             entities::EntityHandle h(eid, &world_);
@@ -1669,6 +1692,60 @@ void Simulation::push_air_picture_(double dt) {
             if (picture_excluded_ != nullptr &&
                 picture_excluded_->count(eid.value) != 0) {
                 continue;
+            }
+
+            // Step 13: the datalink NODES ride this same walk — the
+            // plan's perf certificate ("one O(contacts × nodes) pass
+            // inside the existing single walk"). Collected BEFORE the
+            // clutter skip: a ground radar site is stationary at ground
+            // level (clutter to the CONTACT rule) yet still a live
+            // NODE; an AWACS/JSTAR is airborne and passes both. Node
+            // team strings intern into the net's own table (above).
+            if (datalink_gate_on) {
+                const auto* awacs = h.get<AwacsComponent>();
+                const auto* radar = datalink_ground_sites
+                                        ? h.get<entities::RadarComponent>()
+                                        : nullptr;
+                if (awacs != nullptr || radar != nullptr) {
+                    f4::ai::DatalinkNode node;
+                    node.entity_id = eid.value;
+                    node.position = tf->position;
+                    if (awacs != nullptr) {
+                        node.range_nm = awacs->range_nm;
+                        node.min_alt_ft = awacs->min_alt_ft;
+                    } else {
+                        // The objective radar's own range: the wire's
+                        // km -> runtime feet (1 km = 1000/0.3048 ft
+                        // exactly) then feet -> nm through the net's
+                        // own constant. Ground sites see UP from the
+                        // deck — no horizon clamp in v1 (min_alt 0).
+                        node.range_nm =
+                            (static_cast<double>(radar->range_km) *
+                             3280.8398950131231) /
+                            f4::ai::kDatalinkFeetPerNm;
+                        node.min_alt_ft = 0.0;
+                        node.is_ground_site = true;
+                    }
+                    if (auto team_tag = h.get_tag(entities::tags::TEAM)) {
+                        if (const auto* s = team_tag->as_string()) {
+                            std::int16_t idx = -1;
+                            for (std::size_t i = 0;
+                                 i < datalink_net_.teams.size(); ++i) {
+                                if (datalink_net_.teams[i] == *s) {
+                                    idx = static_cast<std::int16_t>(i);
+                                    break;
+                                }
+                            }
+                            if (idx < 0) {
+                                datalink_net_.teams.push_back(*s);
+                                idx = static_cast<std::int16_t>(
+                                    datalink_net_.teams.size() - 1);
+                            }
+                            node.team = idx;
+                        }
+                    }
+                    datalink_net_.nodes.push_back(node);
+                }
             }
 
             // The same C6 rule the fusion's world walk applies (and the
@@ -1741,6 +1818,33 @@ void Simulation::push_air_picture_(double dt) {
             }
         }
 
+        // Step 13: the per-contact team bitmask — the mask computation
+        // rides the END of the walk (after the aggregate feed above so
+        // aggregate flights mask exactly like materialized aircraft:
+        // a node of team t sees the flight iff node_sees() says so).
+        // node_sees() is the plan's shared v1 geometry — the same body
+        // the f4-ai tests pin; the contact's entity id keys the
+        // fusion's consumption seam (emplace_target knows ids, not
+        // picture indexes, and both rebuild paths share the call).
+        if (datalink_gate_on) {
+            datalink_net_.contact_seen_teams.clear();
+            datalink_net_.contact_index_by_entity.clear();
+            datalink_net_.contact_seen_teams.reserve(
+                air_picture_.contacts.size());
+            for (std::size_t i = 0; i < air_picture_.contacts.size(); ++i) {
+                const auto& c = air_picture_.contacts[i];
+                std::uint32_t mask = 0;
+                for (const auto& n : datalink_net_.nodes) {
+                    if (n.team < 0) continue;
+                    if (f4::ai::node_sees(n, c.position)) {
+                        mask |= (1u << static_cast<unsigned>(n.team));
+                    }
+                }
+                datalink_net_.contact_seen_teams.push_back(mask);
+                datalink_net_.contact_index_by_entity.emplace(c.entity_id, i);
+            }
+        }
+
         // The walk resets the cadence window (the increment at the top
         // of the gate already aged it for this tick).
         ticks_since_picture_walk_ = 0;
@@ -1755,6 +1859,21 @@ void Simulation::push_air_picture_(double dt) {
     // own world-query path, output-identical.
     push = any_demand ? &air_picture_ : nullptr;
 
+    // Step 13: the datalink handoff rides the picture's own gating —
+    // the net is handed ONLY when the gate is on AND at least one live
+    // node exists (the plan's "gate on with NO live nodes = the legacy
+    // leg" rule: a scenario that arms the datalink without any
+    // datalink asset keeps omniscience; the operator-lag decay window
+    // is the named v2 tranche). Between walks the LAST net stays
+    // valid — the same bounded-staleness contract as the picture it
+    // was built beside. Gate off (or no nodes) hands nullptr and every
+    // fusion keeps the legacy omniscient leg byte-for-byte (the
+    // twin-test contract).
+    const f4::ai::DatalinkNet* net_push = nullptr;
+    if (datalink_gate_on && !datalink_net_.nodes.empty()) {
+        net_push = &datalink_net_;
+    }
+
     // Push (or clear) on every roster brain in one pass. A brain that
     // initializes its fusion AFTER a push (the first combat tick) clears
     // the pointer in initialize() and rebuilds via the world path that
@@ -1766,6 +1885,11 @@ void Simulation::push_air_picture_(double dt) {
         auto* brain = h.get<f4::ai::BrainComponent>();
         if (brain == nullptr) continue;
         brain->set_air_picture(push);
+        // Step 13: the datalink beside the picture — the same push
+        // loop, the same non-owning lifetime discipline. Null = the
+        // legacy omniscient GCI leg (every pre-Step-13 run, and every
+        // gate-off tick, is byte-identical).
+        brain->set_datalink(net_push);
     }
 }
 

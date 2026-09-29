@@ -118,6 +118,12 @@ void SensorFusion::initialize(std::uint64_t ownship_id,
     prev_targets_.clear();
     picture_ = nullptr;  // the host re-pushes per tick; a stale pointer
                          // from a previous life would read freed memory
+    datalink_ = nullptr;  // Step 13: the same hygiene as the picture —
+                          // the host re-pushes per tick; a stale net
+                          // pointer from a previous life would read
+                          // freed memory. Identity for every pre-Step-13
+                          // run (the field was never set before).
+    datalink_own_team_ = -1;
 }
 
 void SensorFusion::update(double dt) {
@@ -287,6 +293,14 @@ void SensorFusion::rebuild_target_list() {
         return;  // ownship not in world (shouldn't happen)
     }
 
+    // Step 13: resolve the ownship's seat on the datalink once per
+    // rebuild (the net's team table is a handful of entries; the string
+    // the resolve just read is the seat's key). A team the net does not
+    // know seats at -1 — the GCI leg reads dark for that brain until a
+    // node of its team appears.
+    datalink_own_team_ =
+        (datalink_ != nullptr) ? datalink_->team_index(own_team_) : -1;
+
     // --- Path A (PERF-1): the host's shared air picture -----------------
     // Contacts arrive in entity-index order — the exact order the world
     // walk below yields (the host builds the picture from the same
@@ -395,6 +409,23 @@ void SensorFusion::emplace_target(
         t.detected_by_rwr    = (t.range_nm <= cfg_.max_rwr_range_nm)    && t.is_hostile;
         t.detected_by_visual =
             (t.range_nm <= cfg_.max_visual_range_nm * visual_range_scale_);
+    }
+
+    // Step 13: the datalink leg. When the host wired a net, the GCI
+    // source is the net's per-contact team bitmask — a node of the
+    // ownship's team must geometrically see the contact — instead of
+    // the omniscient rule (or the policy's gci=false flip). The policy
+    // keeps radar/RWR/visual; the net owns GCI. With no net wired this
+    // block is a no-op: every pre-Step-13 path (world query, picture,
+    // policy, legacy) is byte-identical (the twin-test contract).
+    //
+    // A contact the host's last walk never masked (it joined between
+    // walks, or the ownship's team seats at -1) reads NOT seen — the
+    // next picture walk picks it up; the fusion never invents GCI
+    // knowledge the net does not carry.
+    if (datalink_ != nullptr) {
+        t.detected_by_gci = (datalink_own_team_ >= 0) &&
+            datalink_->seen_by_entity(t.entity_id, datalink_own_team_);
     }
 
     // EWMA smoothing — find the previous snapshot for this entity.

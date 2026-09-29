@@ -47,6 +47,7 @@
 #include <vector>
 
 #include <f4/ai/air_picture.hpp>
+#include <f4/ai/datalink_net.hpp>
 #include <f4/ai/skill_level.hpp>
 #include <f4/ai/target_info.hpp>
 #include <f4/entities/entity.hpp>
@@ -303,6 +304,34 @@ public:
     }
     [[nodiscard]] DetectionPolicy* detection_policy() noexcept { return policy_; }
 
+    // --- Datalink (AI_IMPLEMENTATION_PLAN §15 Step 13) -----------------------
+    // The GCI leg's replacement data: the host-built per-team broadcast
+    // net (DatalinkNet — see datalink_net.hpp). When set, the GCI
+    // detection source is the net's per-contact team bitmask (a node of
+    // the ownship's team must geometrically see the contact) instead of
+    // the omniscient rule; when null, the legacy leg stands byte-for-
+    // byte (the twin-test contract). Non-owning — the same lifetime
+    // discipline as the picture: the host owns it and re-fills it on
+    // its picture walks.
+    //
+    // Composition with a DetectionPolicy: the policy owns radar/RWR/
+    // visual; the net owns GCI. A policy that answers gci=false (the
+    // radar-backed adapter's "the flip is the point" rule) composes —
+    // the net re-arms the broadcast leg behind real nodes, so campaign
+    // brains hold radar truth AND the datalink picture.
+    //
+    // Own-team resolution: the fusion's own_team_ tag string is mapped
+    // through DatalinkNet::team_index once per rebuild (a linear scan
+    // over a handful of entries). A team the net does not know (an
+    // untagged ownship, a team with no nodes) reads as GCI-dark — the
+    // net only broadcasts to teams it serves.
+    void set_datalink(const DatalinkNet* net) noexcept {
+        datalink_ = net;
+    }
+    [[nodiscard]] const DatalinkNet* datalink() const noexcept {
+        return datalink_;
+    }
+
     // --- Skill parameters (per AI_IMPLEMENTATION_PLAN §9) ---
 
     [[nodiscard]] static double update_interval_sec(SkillLevel s) noexcept;
@@ -347,6 +376,13 @@ private:
     SkillLevel skill_{SkillLevel::Rookie};
     Config cfg_{};
     DetectionPolicy* policy_{nullptr};
+    /// The host's per-tick datalink net (Step 13). Non-owning; null =
+    /// the legacy omniscient GCI leg.
+    const DatalinkNet* datalink_{nullptr};
+    /// The ownship's team index in the current net (resolved per
+    /// rebuild, right after resolve_ownship reads own_team_). -1 = the
+    /// net does not serve the ownship's team.
+    std::int16_t datalink_own_team_{-1};
     double visual_range_scale_{1.0};
 
     /// Ownship's TEAM tag, resolved at each rebuild. Own-relative

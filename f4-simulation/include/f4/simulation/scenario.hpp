@@ -122,6 +122,15 @@ struct ScenarioAircraft {
     /// must agree — the gate is the fidelity switch, this field is the
     /// per-aircraft fit). Default false — the pre-ECM shape.
     bool ecm{false};
+    /// DATALINK NODE (AI_IMPLEMENTATION_PLAN §15 Step 13): this aircraft
+    /// is a per-team GCI broadcast node (an AWACS/JSTAR stand-in for
+    /// scenario-mode tests and demos). Only takes effect when the
+    /// combat block's "gci_datalink" gate is also on — the gate is the
+    /// fidelity switch, this field is the per-aircraft node. The node's
+    /// geometry is the net's documented v1 default (200 NM radius, the
+    /// flat-earth horizon clamp at 0). Default false — the pre-Step-13
+    /// shape.
+    bool awacs{false};
     /// Per-aircraft route (AAR redesign). Empty = use the shared
     /// scenario_.waypoints (the legacy behavior — one route for all
     /// aircraft). When non-empty, this aircraft flies its own route.
@@ -286,6 +295,23 @@ struct CombatConfig {
     /// carries no per-unit ECM data — nobody jams there until a data
     /// source lands.)
     bool ecm{false};
+    /// Step 13 (AI_IMPLEMENTATION_PLAN §15) — the datalink tier: the
+    /// GCI leg reads the host-built per-team DatalinkNet (the shared
+    /// air picture's walk collects the live nodes — AwacsComponent
+    /// aircraft plus, when gci_ground_sites is set, radar-bearing
+    /// objectives) instead of the omniscient theater rumor. Default
+    /// FALSE — no net is built or pushed, every fusion keeps the legacy
+    /// `detected_by_gci = true` byte-identically (the twin-test
+    /// contract). The plan's own arming rule rides with it: gate on
+    /// with NO live nodes = the legacy leg (a scenario that arms the
+    /// datalink without any datalink asset keeps omniscience; the
+    /// operator-lag decay is a named v2 tranche).
+    bool gci_datalink{false};
+    /// Step 13's ground-site arm: radar-flagged objectives (the
+    /// .obj wire's has_radar rows, f4-world's RadarComponent) join the
+    /// net as is_ground_site nodes at their own radar ranges. Default
+    /// FALSE — airborne AWACS/JSTAR nodes only. Requires gci_datalink.
+    bool gci_ground_sites{false};
     /// Throttle-driven IR band: the FM's last-flown throttle selects the
     /// target signature's IR band each tick (AB detent = ir2, mil/high
     /// dry = ir1, cruise/idle = ir0) instead of the Afterburner default.
