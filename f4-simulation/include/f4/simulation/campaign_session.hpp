@@ -30,13 +30,21 @@
 // physics loop that flies the save's own flights. Generation → spawn
 // → FLIGHT, in one world.
 //
-// Clock model: ONE clock. The sim ticks at the fixed sim_dt (the FM's
+// Clock model: two clocks, one timeline (AGG-1, the
+// AGGREGATE_CLOCK_PLAN.md doc). The sim ticks at the fixed sim_dt (the FM's
 // tuned discretization — the "Fix Your Timestep" contract from the
-// scenario player); the campaign ladder advances in whole campaign
-// seconds accumulated from the same ticks, so tasking cycles, the
-// reinforcement cadence, and the aircraft physics share one timeline.
-// The host scales WALL-CLOCK time before calling advance() (a speed
-// preset multiplies the frame dt; the tick dt never changes).
+// scenario player); the campaign layer advances by CATCH-UP: every
+// advance() call drains the sim accumulator first, then fires ONE
+// campaign pass carrying the whole campaign seconds that drain
+// produced — one big ladder tick when the debt was big (one big tick
+// == N small ones, the C2 pin), nothing when the drain did not
+// complete a second. Tasking cycles, the reinforcement cadence, and
+// the aircraft physics share one timeline (the campaign delta is BOOKED
+// from the same ticks the sim drained — the clocks cannot diverge);
+// only the PASS SHAPE moved: per advance() call, not per campaign
+// second sliced off the tick stream. The host scales WALL-CLOCK time
+// before calling advance() (a speed preset multiplies the frame dt;
+// the tick dt never changes).
 //
 // Determinism: same as every other harness — no RNG, no clocks of
 // their own, bus ordering. Two sessions over the same world advanced
@@ -514,10 +522,14 @@ public:
     CampaignSession& operator=(const CampaignSession&) = delete;
 
     /// Advance by (speed-scaled) wall-clock seconds: drains the
-    /// fixed-timestep accumulator in whole sim_dt ticks, advancing the
-    /// campaign ladder and the damage sync in whole campaign seconds.
-    /// Returns true when the tick cap hit (the caller may surface
-    /// "time dilated" — the debt is dropped, not queued).
+    /// fixed-timestep accumulator in whole sim_dt ticks, then advances
+    /// the campaign layer in ONE catch-up pass with the whole campaign
+    /// seconds that drain produced (AGG-1 — one big ladder tick == N
+    /// small ones, the C2 pin; the emit_* walks ride the same firing
+    /// and batch their events per pass). A drain that completes no
+    /// campaign second runs no campaign pass. Returns true when the
+    /// tick cap hit (the caller may surface "time dilated" — the debt
+    /// is dropped, not queued).
     ///
     /// V-THREAD: max_steps_override caps the ticks THIS call may run
     /// (0 = the session's max_steps_per_advance option — the QC and
@@ -1026,37 +1038,37 @@ private:
     /// armed when wreck_hold_sec > 0 — a no-op otherwise).
     void retire_due_wrecks_();
 
-    /// G1: fire the ground war's update ticks for every whole
-    /// ground-second owed by the campaign clock (the ladder's own
-    /// per-second cadence, on the ground engine's coarser update
-    /// granularity), then mirror moved battalions into the sim's
-    /// entities (transforms + tactical state + roster decay + the
+    /// G1: fire the ground war's update ticks for the campaign pass's
+    /// whole-second delta (AGG-1: the pass's big delta, on the ground
+    /// engine's own coarser update granularity — one big tick == N
+    /// small ones, the C2 pin), then mirror moved battalions into the
+    /// sim's entities (transforms + tactical state + roster decay + the
     /// ALIVE tag on destruction).
-    void advance_ground_();
+    void advance_ground_(f4::campaign::CampaignTime delta_sec);
 
     /// G1: the entity-side mirror — one pass over the engine's dirty
     /// battalions (the write-back's own activity rule).
     void sync_ground_entities_();
 
-    /// CAMP-DOM-6: fire the naval engine's update ticks for every
-    /// whole naval-second owed by the campaign clock (the ground
-    /// cadence's twin), then sync the moved task-force rows into the
-    /// session's WorldState (the `taskforces` query's serving face —
-    /// the wire-state rule) and mirror the 3D task-force entities.
-    void advance_naval_();
+    /// CAMP-DOM-6: fire the naval engine's update ticks for the
+    /// campaign pass's whole-second delta (the ground cadence's twin),
+    /// then sync the moved task-force rows into the session's
+    /// WorldState (the `taskforces` query's serving face — the
+    /// wire-state rule) and mirror the 3D task-force entities.
+    void advance_naval_(f4::campaign::CampaignTime delta_sec);
 
     /// CAMP-DOM-6: the entity-side mirror — one pass over the
     /// engine's task forces (transform only; read-first-write, the
     /// ground mirror's own rule).
     void sync_naval_entities_();
 
-    /// FID-2: fire the aggregate engine's update ticks for every whole
-    /// air-aggregate second owed by the campaign clock (the ground
-    /// cadence's twin), then mirror moved flights into the sim's
-    /// flight entities (transforms + FlightPlanComponent fields) and
-    /// run one tier evaluation (bubble / ops-window / force triggers,
-    /// the reagg hysteresis + cooldown).
-    void advance_flights_();
+    /// FID-2: fire the aggregate engine's update ticks for the
+    /// campaign pass's whole-second delta (the ground cadence's twin),
+    /// then mirror moved flights into the sim's flight entities
+    /// (transforms + FlightPlanComponent fields) and run one tier
+    /// evaluation (bubble / ops-window / force triggers, the reagg
+    /// hysteresis + cooldown).
+    void advance_flights_(f4::campaign::CampaignTime delta_sec);
 
     /// FID-2: the entity-side mirror — engine positions/altitudes/fuel
     /// into the flight entities' TransformComponent +
@@ -1172,7 +1184,10 @@ private:
     // Clock + pacing state.
     std::int64_t epoch_ = 0;        ///< the save's campaign.current_time
     double accumulator_ = 0.0;      ///< owed sim seconds (speed-scaled)
-    double campaign_sec_accum_ = 0.0;  ///< fractional campaign seconds
+    /// AGG-1: whole campaign seconds drained but not yet passed (the
+    /// catch-up carry — the pass fires when this crosses 1.0, one big
+    /// delta per advance() call, sub-second residue rides forward).
+    double campaign_sec_accum_ = 0.0;
     bool paused_ = false;
     std::size_t registered_spawns_ = 0;  ///< spawner().spawned() index
 
@@ -1189,14 +1204,11 @@ private:
     };
     std::vector<PendingWreck> pending_wrecks_;
 
-    // G1: the ground war's own cadence accumulator (campaign seconds
-    // owed to the engine) + the last-synced engine update count (so
-    // the entity mirror only walks when the engine actually advanced).
-    double ground_sec_accum_ = 0.0;
+    // G1: the last-synced ground-engine update count (so the entity
+    // mirror only walks when the engine actually advanced — the pass
+    // delta itself rides advance()'s campaign clock, AGG-1).
     int ground_synced_updates_ = 0;
-    /// CAMP-DOM-6: the naval cadence's accumulators (the ground
-    /// pair's twins).
-    double naval_sec_accum_ = 0.0;
+    /// CAMP-DOM-6: the naval mirror's twin of the ground update cursor.
     int naval_synced_updates_ = 0;
 
     // FID: the fidelity-tier machinery. flights_ is null unless the
@@ -1270,7 +1282,8 @@ private:
     int combat_deaggs_ = 0;                ///< combat-trigger deaggs so far
     int synthetic_registered_ = 0;         ///< generated aggregates so far
 
-    double flight_sec_accum_ = 0.0;
+    // FID: the mirror's update cursor (the pass delta rides advance()'s
+    // campaign clock, AGG-1).
     int flight_synced_updates_ = 0;
     double default_air_radius_ft_ = 2560.0;  ///< the AII SIM_BUBBLE floor
     bool air_bubble_active_ = false;         ///< the camera-driven air bubble

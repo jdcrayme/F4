@@ -170,8 +170,12 @@ void CampaignWarHarness::run_pass_(int run, const ProgressFn& on_sample) {
     pass_sample_wall_ = std::chrono::steady_clock::now();
 
     // The loop: 4-sim-second advance batches (the session's 240-tick
-    // per-advance cap at 60 Hz, fully drained — byte-equivalent to any
-    // other split of the same ticks, pinned by the C2 tests). The
+    // per-advance cap at 60 Hz, fully drained — one campaign pass per
+    // batch, its big delta engine-equivalent to N one-second passes,
+    // pinned by the C2 tests; AGG-1 moved the pass out of the tick
+    // stream, so the BATCH SHAPE is part of the driver contract —
+    // same-shape runs stay byte-identical, cross-shape emission
+    // timing re-pins deliberately, AGGREGATE_CLOCK_PLAN.md §5). The
     // loop keys on the SIM CLOCK, not the debt, so it self-corrects.
     const double target =
         pass_t0_ + static_cast<double>(opts_.horizon_sec);

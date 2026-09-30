@@ -291,6 +291,80 @@ TEST(CampaignSession, IdenticalRunsAreByteIdentical) {
     EXPECT_EQ(a->ledger_json(), b->ledger_json());
 }
 
+// ── 3b. AGG-1: the catch-up pass — one big batch == aligned small ones ─────
+//
+// The campaign pass leaves the tick stream (one pass per advance()
+// call, the drained whole seconds as ONE engine delta). When the big
+// deltas land ON the tasking boundaries, the whole war — books
+// included — is byte-identical to the one-second-passes shape (the
+// C2 pin, session edition). A big delta that STRADDLES a boundary
+// fires the cycle at the pass's post-tick clock (the books' t_s
+// shifts to the batch edge — the deliberate re-pin,
+// AGGREGATE_CLOCK_PLAN.md §5); the books' TOTALS do not move. Both
+// shapes are pinned here.
+TEST(CampaignSession, BigCatchUpBatchesMatchAlignedSmallOnesByteForByte) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    // Cycle 4 s, a 12-second war: boundaries at 4/8/12 — the 4-second
+    // batches (the drain cap: 240 ticks) land exactly on them. The
+    // raw fixture: no routes → no generation-to-spawn divergence
+    // between the shapes.
+    auto opts = make_opts(kunsan_world());
+    opts.tasking_cycle_sec = 4;
+    std::string ea, eb;
+    auto a = CampaignSession::create(opts, &ea);
+    auto b = CampaignSession::create(opts, &eb);
+    ASSERT_NE(a, nullptr) << ea;
+    ASSERT_NE(b, nullptr) << eb;
+
+    for (int sec = 0; sec < 12; ++sec) a->advance(1.0);   // 12 × δ1
+    for (int batch = 0; batch < 3; ++batch) b->advance(4.0);  // 3 × δ4
+
+    // Same war, same clock, same books — byte for byte.
+    EXPECT_EQ(a->stats().sim_time_s, b->stats().sim_time_s);
+    EXPECT_EQ(a->campaign_time(), b->campaign_time());
+    EXPECT_EQ(a->campaign().cycles_fired(), b->campaign().cycles_fired());
+    EXPECT_EQ(a->ledger_json(), b->ledger_json());
+    EXPECT_EQ(a->campaign().to_summary_json(),
+              b->campaign().to_summary_json());
+}
+
+TEST(CampaignSession, StraddledBigTickKeepsTheBooksTotals) {
+    if (!std::filesystem::exists(f16_config())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    // Cycle 5 s, a 12-second war: the δ2 batches cross 5 and 10
+    // mid-tick — the cycles fire at the batch's post-tick clock (6
+    // and 12) instead of 5 and 10. The books' totals (the one-pool
+    // C2 counters) are the shape-independent contract.
+    auto opts = make_opts(kunsan_world());
+    opts.tasking_cycle_sec = 5;
+    std::string ea, eb;
+    auto a = CampaignSession::create(opts, &ea);
+    auto b = CampaignSession::create(opts, &eb);
+    ASSERT_NE(a, nullptr) << ea;
+    ASSERT_NE(b, nullptr) << eb;
+
+    for (int sec = 0; sec < 12; ++sec) a->advance(1.0);
+    for (int batch = 0; batch < 6; ++batch) b->advance(2.0);
+
+    EXPECT_EQ(a->campaign_time(), b->campaign_time());
+    ASSERT_EQ(a->campaign().cycles_fired(),
+              b->campaign().cycles_fired());
+    ASSERT_EQ(a->campaign().cycles_fired(), 2);
+    // The one-pool totals: every squadron drew the same aircraft in
+    // both shapes (the t_s moved, the books did not).
+    const auto& sa = a->ledger().squadrons();
+    const auto& sb = b->ledger().squadrons();
+    ASSERT_EQ(sa.size(), sb.size());
+    for (std::size_t i = 0; i < sa.size(); ++i) {
+        EXPECT_EQ(sa[i].run_draws, sb[i].run_draws) << "squadron " << i;
+        EXPECT_EQ(sa[i].availability, sb[i].availability)
+            << "squadron " << i;
+    }
+}
+
 // ── 4. Pause + the fresh-session identity ──────────────────────────────────
 TEST(CampaignSession, PauseStopsTheDrainAndFreshChangesNothing) {
     if (!std::filesystem::exists(f16_config())) {

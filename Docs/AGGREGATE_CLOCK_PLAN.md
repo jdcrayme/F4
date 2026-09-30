@@ -2,7 +2,10 @@
 
 > **Status**: Active plan. **AGG-0 LANDED** (the FID-DEF-GOV patch: Tiered is
 > the session default fidelity policy; the viewer runner's dilation is an
-> AIMD delivery governor). AGG-1..5 are the open roadmap. This document is
+> AIMD delivery governor). **AGG-1 LANDED** (the catch-up clock: the
+> campaign pass left the tick stream — one pass per advance() call
+> carrying the drained whole seconds as ONE engine delta). AGG-2..5 are
+> the open roadmap. This document is
 > the canonical record of the 2026-10 time-compression investigation: why
 > campaigns were CPU-limited below ~20× while the FreeFalcon reference has
 > no problem at 64×, and the migration path from the fixed-dt whole-war
@@ -135,7 +138,9 @@ Patch: `0001-FID-DEF-GOV-tiered-default-and-delivery-governor.patch`.
   losing seconds; `time_dilated()` reports only the residual case; the
   new `delivery_scale()` readout gives the UI the governor's answer.
 
-### AGG-1 — decouple the campaign clock from the tick stream
+### AGG-1 — decouple the campaign clock from the tick stream — **LANDED**
+
+Patch: `0003-AGG-1-campaign-pass-leaves-the-tick-stream.patch`.
 
 **The structural change.** Replace the per-campaign-second slicing in
 `CampaignSession::advance()` (campaign_session.cpp:861-967) with the
@@ -155,14 +160,61 @@ reference's two-clock split:
   campaign-second boundaries INSIDE the big tick, so `step(ticks)`
   semantics and the replay axis hold.
 
-**Proof obligations.** Byte-equivalence via the existing C2 pins and the
-war harness's drained-batch certificate; the C5 24-hour acceptance run
-re-certified at high preset with the campaign layer's wall share measured
-before/after (expect ∝ frames, not ∝ campaign seconds).
+**As built** (the honest-clock shape — see §5 for what re-pinned):
 
-**Effort**: ~a focused week. **Risk**: event-stream consumers see events
-in per-big-tick batches (order preserved — the stream's "order is the
-engine's order" contract is per-batch); deliberate re-pin (§5).
+- The pass LEFT the drain loop: `advance()` drains the sim accumulator
+  (unchanged shape — fixed dt, step-capped, honest drop), then fires ONE
+  campaign pass with the whole seconds that drain produced, delta ≥ 1;
+  a drain that completed no second runs no pass (the sub-second residue
+  rides in `campaign_sec_accum_`).
+- The delta is BOOKED as the product `steps × sim_dt`, not a per-tick
+  sum: N × (1/60) rounds bit-exact (240 × 1/60 == 4.0) where N
+  sequential additions drift ~1e-14 SHORT and would quantize the pass
+  boundaries a whole second off (the summed 240-tick book is
+  3.9999999999999907 — floor 3, not 4). The clocks cannot diverge:
+  the campaign delta IS the drained sim time.
+- The per-second accumulators (`ground_sec_accum_`, `naval_sec_accum_`,
+  `flight_sec_accum_`) are GONE — the helpers take the pass's delta and
+  feed each engine ONE `tick(delta)` (the C2 pins hold per engine).
+- The catch-up is the DRAIN's whole seconds (the honest-clock rule),
+  not an unbounded `campaign_target`: the AGG-0 delivery governor owns
+  de-rating (the reference's `SetTemporaryCompression` shape) and the
+  drain cap owns the residual drop. The reference's 1-minute cap is
+  moot here — the drain caps at 240 ticks = 4 sim-seconds, so the big
+  delta is ≤ 4 campaign-seconds by construction.
+- The CAMP-HOST journal axis holds: `step(ticks)` segments around the
+  pending `apply_tick` boundaries in the HOST (campaign_session_host.cpp)
+  — the session's pass shape is invisible to it; replay commands still
+  apply at exact engine-tick boundaries.
+
+**Proof obligations, met:**
+
+- The engine-level big-tick equivalences were already pinned (the C2
+  `CampaignTick` pins, `OneBigTickEqualsNSmallOnes` for the war
+  engines); a runtime probe re-executed the ladder pin for real
+  (tick(1800) == 30×tick(60) == 1799+1+0, byte-identical summaries; a
+  big delta STRADDLING the due boundary fires the cycle at the
+  post-tick clock).
+- Two new session pins (test_campaign_session.cpp):
+  `BigCatchUpBatchesMatchAlignedSmallOnesByteForByte` (3 × advance(4.0)
+  == 12 × advance(1.0), ledger JSON byte-identical when the big deltas
+  land ON the tasking boundaries) and `StraddledBigTickKeepsTheBooksTotals`
+  (a straddling big tick shifts the books' t_s to the batch edge; the
+  one-pool totals do not move).
+- The C5 24-hour acceptance re-certifies on the next harness run (the
+  harness's 4-second batches now run ONE pass each — the campaign
+  layer's wall share drops ∝ the batch length).
+
+**The pass-count arithmetic (what this buys, honestly):** the pass-set
+now fires `min(advance calls with δ≥1, campaign seconds consumed)` times
+per wall second. Batch drivers (the war harness's 4-second batches, the
+scenario player's drains, the replay's runs) cut the campaign-layer pass
+count by the batch length (∝ frames, not ∝ campaign seconds). A frame
+driver at presets below the frame rate (60 fps × 16×) still consumes
+each campaign second in its own δ1 pass — the count there is the
+clock's, not the driver's; deferring those passes until the debt
+ crosses a threshold is AGG-2's scheduler's job (the reference's
+ walk-everything-gate-the-work shape needs the due queue first).
 
 ### AGG-2 — the deterministic due-queue
 

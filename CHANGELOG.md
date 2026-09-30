@@ -5,6 +5,55 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## AGG-1 — the campaign pass leaves the tick stream (the catch-up clock)
+
+The time-compression ceiling's structural remainder
+(Docs/AGGREGATE_CLOCK_PLAN.md §1, cost multiplier 3): the campaign
+ladder, the ground/naval/flight engines, the damage sync, and the eight
+`emit_*` event walks all rode the 60 Hz accumulator, sliced into whole
+campaign seconds — the campaign layer paid O(theater) once per campaign
+second, so its cost scaled with compression even in Tiered mode.
+
+- **One pass per advance() call** — `advance()` drains the sim
+  accumulator first (unchanged: fixed dt, step-capped, honest drop),
+  then fires ONE campaign pass carrying the drained whole seconds as
+  ONE engine delta (`ladder_->tick(delta)` big tick == N small ones,
+  the C2 pin; each engine's due gates fire every update at its own
+  boundary inside the big delta). A drain that completed no campaign
+  second runs no pass. The per-second accumulators
+  (`ground_sec_accum_`/`naval_sec_accum_`/`flight_sec_accum_`) are
+  gone — `advance_ground_/naval_/flights_` take the pass's delta.
+- **The booking is the product, not a sum** — the campaign delta is
+  `steps × sim_dt` (240 × 1/60 == 4.0, bit-exact), not 240 additions
+  of sim_dt (3.9999999999999907 — the ~1e-14 drift would quantize the
+  pass boundaries a whole second off). The campaign clock cannot
+  diverge from the sim clock: the delta IS the drained sim time.
+- **Batch drivers win ∝ batch length** — the war harness's 4-second
+  batches, the scenario player's drains, and the replay's runs now
+  run ONE pass-set per batch instead of one per campaign second; the
+  campaign layer's wall share tracks advance() calls (∝ frames), not
+  campaign seconds consumed. Frame drivers at presets below the frame
+  rate keep δ1 passes (the count there is the clock's; deferring
+  passes past a threshold is AGG-2's due-queue's job).
+- **The deterministic re-pin, deliberate** (AGGREGATE_CLOCK_PLAN.md
+  §5): events batch per pass — emission TIMING moves, content and
+  order do not (every walk is a cursor/log-tail diff; the tasking-cycle
+  event already reported how many cycles rode together). A big delta
+  straddling a tasking boundary fires the cycle at the pass's
+  post-tick clock (the books' t_s moves to the batch edge; the one-pool
+  totals do not). Pinned both ways:
+  `BigCatchUpBatchesMatchAlignedSmallOnesByteForByte` (3 × advance(4.0)
+  == 12 × advance(1.0), ledger JSON byte-identical when the big deltas
+  land ON the boundaries) and `StraddledBigTickKeepsTheBooksTotals`.
+- **The CAMP-HOST replay axis holds** — `step(ticks)` segments around
+  the pending `apply_tick` boundaries in the host, untouched; commands
+  still apply at exact engine-tick boundaries no matter how the
+  session batches its passes.
+- The war harness's drained-batch certificate comment now states the
+  batch-shape contract (same-shape runs byte-identical; cross-shape
+  emission timing re-pins deliberately); the C5 24-hour acceptance
+  re-certifies on the next run.
+
 ## FID-P1B — the aggregate row follows a live flight; the fold re-anchors the wire; a dead lead folds on the pass
 
 The viewer's campaign-map triad — flights pausing, teleporting, and

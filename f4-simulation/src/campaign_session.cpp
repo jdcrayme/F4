@@ -885,84 +885,100 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             break;
         }
         sim_->tick(sim_dt_);
-
-        // The campaign clock advances in whole seconds accumulated from
-        // the same ticks (CampaignTime is integral). One big tick ==
-        // N small ones (pinned by the C2 tests), so per-second ladder
-        // ticks are exactly the QC's single advance, split.
-        campaign_sec_accum_ += sim_dt_;
-        if (campaign_sec_accum_ >= 1.0) {
-            const auto whole = static_cast<int>(campaign_sec_accum_);
-            campaign_sec_accum_ -= static_cast<double>(whole);
-            ladder_->tick(whole);
-            // CAMP-HOST-2: the cadence events — the cycle fires and the
-            // reinforcement deliveries the tick just booked, published
-            // immediately so the stream's order is the engine's order.
-            emit_cadence_events_();
-            // CAMP-ATM-1: the ACTION tables' filings the tick just
-            // booked (the war's reactions, right after the cycle that
-            // generated them).
-            emit_action_filed_events_();
-            // G1: the ground war rides the same whole-second cadence
-            // (its own accumulator gates on the update granularity).
-            if (ground_ != nullptr) {
-                ground_sec_accum_ += static_cast<double>(whole);
-                advance_ground_();
-                // CAMP-HOST-2: the flips the ground pass just booked.
-                emit_capture_events_();
-            }
-            // CAMP-DOM-6: the naval movement rides the same cadence
-            // (its own accumulator; the moved rows sync inside —
-            // the query face reads the WorldState, not the engine).
-            if (naval_ != nullptr) {
-                naval_sec_accum_ += static_cast<double>(whole);
-                advance_naval_();
-            }
-            // FID: the aggregate flights ride the same whole-second
-            // cadence (the engine accumulates to its own update gate;
-            // the tier pass runs per second — O(flights)).
-            if (flights_ != nullptr) {
-                flight_sec_accum_ += static_cast<double>(whole);
-                advance_flights_();
-                // FID-5: the combat pass — the aggregate feed + the
-                // commit/convergence triggers (§4.5), after the tier
-                // pass so the feed reflects the final tier state.
-                evaluate_combat_();
-            }
-            // The damage sync rides the same cadence: final-state diff
-            // of every damaged objective (cheap — the diff walks only
-            // objectives with damage components).
-            sink_->sync_objective_damage();
-            // CAMP-HOST-2: the changed objectives publish here (the
-            // sink collects; the session fills owner + time).
-            emit_damage_events_();
-            // CAMP-DOM-2: the repair cadence's books (the ledger log's
-            // tail) + the sim-side bitmap mirror (a repaired feature's
-            // entity face joins the engine's truth so the NEXT damage
-            // sync diff sees the repair, not the stale rubble).
-            emit_repair_events_();
-            // CAMP-DOM-3: the personnel logs' tails — the crews the
-            // cycle's filings just drew (assigned), the slots the sink's
-            // losses consumed (lost), and the sorties the recoveries
-            // credited (recovered). Three independent cursors: the logs
-            // append from three different engines (the tasking cadence,
-            // the result sink, the recovery pass).
-            emit_pilot_events_();
-            // CAMP-DOM-4: the scheduling books' denials — the refusals
-            // the cycle's tasking walk just produced (the gate's skips
-            // and the horizon's refusals the ledger logged).
-            emit_slot_denied_events_();
-            // CAMP-DOM-1: the verdict's coarse state — the event fires
-            // only when the band or the leader changed (a capture is
-            // the only mover today; the diff keeps the stream sparse).
-            emit_verdict_events_();
-            adopt_new_spawns_();
-            retire_due_wrecks_();
-        }
-
         accumulator_ -= sim_dt_;
         ++steps;
     }
+
+    // The campaign clock books the same ticks the sim drained (the
+    // campaign delta is derived from the DRAIN, so the two clocks
+    // cannot diverge — the honest-clock rule; the AGG-0 governor
+    // de-rates the feed upstream, the drain drops only the residual).
+    // The booking is the PRODUCT, not a per-tick sum: N × sim_dt
+    // rounds to the exact whole seconds (240 × 1/60 == 4.0, bit-exact)
+    // where N sequential additions of sim_dt drift ~1e-14 and would
+    // quantize the pass boundaries a whole second off. The pass itself
+    // fires ONCE, below.
+    campaign_sec_accum_ += static_cast<double>(steps) * sim_dt_;
+
+    // AGG-1 — the two-clock split (Docs/AGGREGATE_CLOCK_PLAN.md §4):
+    // the campaign layer advances by CATCH-UP, one big pass per
+    // advance() call, not one pass-set per campaign second sliced off
+    // the tick stream. The drained whole seconds go to the engines as
+    // ONE delta — one big ladder tick == N small ones (the C2 pin;
+    // every engine's due gates fire each update at its own boundary
+    // inside the big delta) — and the emit_* walks ride the same
+    // single firing (they are cursor/log-tail diffs: batching moves
+    // the events' timestamps, never their content or order; the
+    // tasking-cycle event already reports how many cycles rode
+    // together). A drain that completed no campaign second runs no
+    // campaign pass (the sub-second residue rides forward).
+    if (campaign_sec_accum_ >= 1.0) {
+        const auto delta = static_cast<f4::campaign::CampaignTime>(
+            campaign_sec_accum_);
+        campaign_sec_accum_ -= static_cast<double>(delta);
+        ladder_->tick(delta);
+        // CAMP-HOST-2: the cadence events — the cycle fires and the
+        // reinforcement deliveries the tick just booked, published
+        // immediately so the stream's order is the engine's order.
+        emit_cadence_events_();
+        // CAMP-ATM-1: the ACTION tables' filings the tick just
+        // booked (the war's reactions, right after the cycle that
+        // generated them).
+        emit_action_filed_events_();
+        // G1: the ground war rides the same pass delta (its own
+        // update granularity gates inside).
+        if (ground_ != nullptr) {
+            advance_ground_(delta);
+            // CAMP-HOST-2: the flips the ground pass just booked.
+            emit_capture_events_();
+        }
+        // CAMP-DOM-6: the naval movement rides the same pass delta
+        // (the moved rows sync inside — the query face reads the
+        // WorldState, not the engine).
+        if (naval_ != nullptr) {
+            advance_naval_(delta);
+        }
+        // FID: the aggregate flights ride the same pass delta (the
+        // engine accumulates to its own update gate; the tier pass
+        // runs once per campaign pass — O(flights)).
+        if (flights_ != nullptr) {
+            advance_flights_(delta);
+            // FID-5: the combat pass — the aggregate feed + the
+            // commit/convergence triggers (§4.5), after the tier
+            // pass so the feed reflects the final tier state.
+            evaluate_combat_();
+        }
+        // The damage sync rides the same pass: final-state diff of
+        // every damaged objective (cheap — the diff walks only
+        // objectives with damage components).
+        sink_->sync_objective_damage();
+        // CAMP-HOST-2: the changed objectives publish here (the
+        // sink collects; the session fills owner + time).
+        emit_damage_events_();
+        // CAMP-DOM-2: the repair cadence's books (the ledger log's
+        // tail) + the sim-side bitmap mirror (a repaired feature's
+        // entity face joins the engine's truth so the NEXT damage
+        // sync diff sees the repair, not the stale rubble).
+        emit_repair_events_();
+        // CAMP-DOM-3: the personnel logs' tails — the crews the
+        // cycle's filings just drew (assigned), the slots the sink's
+        // losses consumed (lost), and the sorties the recoveries
+        // credited (recovered). Three independent cursors: the logs
+        // append from three different engines (the tasking cadence,
+        // the result sink, the recovery pass).
+        emit_pilot_events_();
+        // CAMP-DOM-4: the scheduling books' denials — the refusals
+        // the cycle's tasking walk just produced (the gate's skips
+        // and the horizon's refusals the ledger logged).
+        emit_slot_denied_events_();
+        // CAMP-DOM-1: the verdict's coarse state — the event fires
+        // only when the band or the leader changed (a capture is
+        // the only mover today; the diff keeps the stream sparse).
+        emit_verdict_events_();
+        adopt_new_spawns_();
+        retire_due_wrecks_();
+    }
+
     if (capped) {
         // Drop the debt, stay live (the scenario player's rule — never
         // queue unbounded catch-up behind a stall).
@@ -1042,19 +1058,16 @@ constexpr std::uint32_t kSyntheticVuBase = 0x53590000u;
 
 } // namespace
 
-void CampaignSession::advance_ground_() {
-    if (ground_ == nullptr) return;
+void CampaignSession::advance_ground_(
+    f4::campaign::CampaignTime delta_sec) {
+    if (ground_ == nullptr || delta_sec <= 0) return;
 
     // The engine's tick() accumulates on its own clock; feed it the
-    // whole campaign seconds owed. One big tick == N small ones (the
-    // C2 pin — the engine fires updates at fixed update_sec
-    // boundaries).
-    if (ground_sec_accum_ >= 1.0) {
-        const auto whole = static_cast<f4::campaign::CampaignTime>(
-            ground_sec_accum_);
-        ground_sec_accum_ -= static_cast<double>(whole);
-        ground_->tick(whole);
-    }
+    // campaign pass's whole-second delta in ONE call. One big tick ==
+    // N small ones (the C2 pin — the engine fires updates at fixed
+    // update_sec boundaries, each at its own due time inside the big
+    // delta).
+    ground_->tick(delta_sec);
 
     // Mirror whenever the engine actually advanced.
     if (ground_->stats().updates != ground_synced_updates_) {
@@ -1122,18 +1135,14 @@ void CampaignSession::sync_ground_entities_() {
 // CAMP-DOM-6 — the task-force movement (the naval GroundWar sibling)
 // ---------------------------------------------------------------------------
 
-void CampaignSession::advance_naval_() {
-    if (naval_ == nullptr) return;
+void CampaignSession::advance_naval_(
+    f4::campaign::CampaignTime delta_sec) {
+    if (naval_ == nullptr || delta_sec <= 0) return;
 
     // The engine's tick() accumulates on its own clock; feed it the
-    // whole campaign seconds owed (the ground cadence's twin — one
-    // big tick == N small ones, the C2 pin).
-    if (naval_sec_accum_ >= 1.0) {
-        const auto whole = static_cast<f4::campaign::CampaignTime>(
-            naval_sec_accum_);
-        naval_sec_accum_ -= static_cast<double>(whole);
-        naval_->tick(whole);
-    }
+    // campaign pass's whole-second delta in ONE call (the ground
+    // cadence's twin — one big tick == N small ones, the C2 pin).
+    naval_->tick(delta_sec);
 
     // Sync whenever the engine actually advanced: the moved rows land
     // in the session's WorldState (the `taskforces` query reads the
@@ -1177,20 +1186,17 @@ void CampaignSession::sync_naval_entities_() {
 // FID — the fidelity-tier machinery (Docs/FIDELITY_TIERS_PLAN.md)
 // ---------------------------------------------------------------------------
 
-void CampaignSession::advance_flights_() {
-    if (flights_ == nullptr) return;
+void CampaignSession::advance_flights_(
+    f4::campaign::CampaignTime delta_sec) {
+    if (flights_ == nullptr || delta_sec <= 0) return;
 
     // The engine's tick() accumulates on its own clock (the ground
-    // war's shape): feed it the whole campaign seconds owed.
-    if (flight_sec_accum_ >= 1.0) {
-        const auto whole = static_cast<f4::campaign::CampaignTime>(
-            flight_sec_accum_);
-        flight_sec_accum_ -= static_cast<double>(whole);
-        flights_->tick(whole);
-    }
+    // war's shape): feed it the campaign pass's whole-second delta in
+    // ONE call.
+    flights_->tick(delta_sec);
 
     // Mirror whenever the engine actually advanced, then one tier pass
-    // (per campaign second — O(flights), all distance tests).
+    // (per campaign pass — O(flights), all distance tests).
     if (flights_->stats().updates != flight_synced_updates_) {
         flight_synced_updates_ = flights_->stats().updates;
         sync_flight_entities_();
