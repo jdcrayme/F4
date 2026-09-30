@@ -2046,6 +2046,14 @@ void Simulation::derive_campaign_airfield() {
     // with the specific "no airbase objective" message.
 }
 
+void Simulation::register_airbase_airfields(
+    const AirbaseAirfieldMap& map) {
+    if (!atc_) return;
+    for (const auto& [vu, af] : map) {
+        atc_->set_airbase_airfield(vu, to_atc_airfield(af));
+    }
+}
+
 void Simulation::register_campaign_airbase_airfields(
     const f4::world::WorldState* preloaded_world) {
     if (!atc_ || scenario_.world_json_path.empty()) return;

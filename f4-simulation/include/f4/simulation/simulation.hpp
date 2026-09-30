@@ -196,6 +196,15 @@ public:
     /// slice and never join the flying roster).
     bool retire_aircraft(entities::EntityId id);
 
+    /// CAMP-LAND: register the CAMPAIGN session's per-airbase airfield
+    /// map with the ATC (the campaign path builds the map for the
+    /// spawner but, unlike the scenario path's
+    /// register_campaign_airbase_airfields(), never taught the ATC —
+    /// every LandingRequest then fell back to the stub's empty default
+    /// field (threshold at the theater origin) and the recovering
+    /// aircraft chased approach data off the map).
+    void register_airbase_airfields(const AirbaseAirfieldMap& map);
+
     /// Aircraft retired via retire_aircraft() so far — the churn
     /// counter long-horizon hosts read (roster == initial + spawned −
     /// retired, the identity the C5 harness pins).

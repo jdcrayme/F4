@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <unordered_set>
 #include <map>
 #include <string>
 #include <vector>
@@ -525,6 +526,21 @@ void ViewerApp::draw_canvas() {
         const float sy_min = -cull_margin;
         const float sy_max = static_cast<float>(impl_->window_h) + cull_margin;
 
+        // CAMP-ATO-MARKS: the objectives the CURRENT ATO actually
+        // targets (the filed intents' target ids). The old always-on
+        // priority ring (every objective with priority >= 40 — most of
+        // the map on a stock save) read as unexplained static clutter;
+        // a ring now MEANS something: this objective is a target of a
+        // filed mission this cycle.
+        std::unordered_set<std::uint32_t> ato_targets;
+        if (impl_->session) {
+            for (const auto& t : impl_->session_snap.tasking) {
+                if (t.target_objective_id != 0) {
+                    ato_targets.insert(t.target_objective_id);
+                }
+            }
+        }
+
         for (const auto& eid : impl_->objectives()) {
             auto h = impl_->handle(eid);
             auto* tr = h.get<f4::entities::TransformComponent>();
@@ -627,13 +643,16 @@ void ViewerApp::draw_canvas() {
                                                outline, /*filled=*/false,
                                                &impl_->symbol_library);
             }
-            if (pri && pri->priority >= 40) {
-                const float ring_r = base_size * 0.5f + 3.0f;
-                const Color ring = (pri->priority >= 70)
-                    ? Color{255, 215, 0,   255}
-                    : Color{255, 215, 0,   150};
-                DrawCircleLines(static_cast<int>(p.x), static_cast<int>(p.y),
-                                ring_r, ring);
+            {
+                const std::uint32_t vu =
+                    static_cast<std::uint32_t>(
+                        impl_->pb_int(pb, "vu_id_num", 0));
+                if (vu != 0 && ato_targets.count(vu) != 0) {
+                    const float ring_r = base_size * 0.5f + 3.0f;
+                    DrawCircleLines(static_cast<int>(p.x),
+                                    static_cast<int>(p.y), ring_r,
+                                    Color{255, 215, 0, 200});
+                }
             }
             if (draw_labels) {
                 std::string label;
@@ -1085,27 +1104,109 @@ void ViewerApp::draw_canvas() {
                 (route_selected || impl_->show_all_routes)) {
                 auto* brain = h.get<f4::ai::BrainComponent>();
                 if (brain && !brain->mission_plan().route.empty()) {
-                    Vector2 prev = p;
-                    int idx = 0;
-                    for (const auto& w : brain->mission_plan().route) {
-                        const Vector2 q = impl_->world_to_screen(
+                    // FF-MAP — the FreeFalcon flight-plan conventions:
+                    // a FAINT plan polyline (the plan is context, not
+                    // the star of the map), a faded gray leg from the
+                    // aircraft to the waypoint it is FLYING, circles on
+                    // the airfields (filled = primary, hollow =
+                    // alternate), a triangle on each strike target, a
+                    // box on AR anchors, and NO path line into the
+                    // landing waypoint (the approach is not a plan leg).
+                    const auto& route = brain->mission_plan().route;
+                    const std::size_t pursuing =
+                        brain->navigation().current_waypoint_index();
+                    const auto w2s = [&impl_ = impl_](const auto& w) {
+                        return impl_->world_to_screen(
                             static_cast<float>(w.position.x / 1024.0),
                             static_cast<float>(w.position.y / 1024.0));
-                        DrawLineEx(prev, q, route_selected ? 2.5f : 1.5f,
-                                   Color{c.r, c.g, c.b,
-                                         static_cast<unsigned char>(
-                                             route_selected ? 235 : 150)});
-                        DrawCircleV(q, 2.5f, Color{c.r, c.g, c.b, 200});
-                        if (draw_wp_labels) {
-                            char lbl[8];
-                            std::snprintf(lbl, sizeof(lbl), "%d", idx);
-                            DrawText(lbl,
-                                     static_cast<int>(q.x + 4),
-                                     static_cast<int>(q.y - 6), 9,
-                                     Color{c.r, c.g, c.b, 220});
+                    };
+                    const Color plan_c{c.r, c.g, c.b,
+                                       route_selected ? 170 : 90};
+                    const Color gray{160, 160, 160,
+                                     route_selected ? 200 : 130};
+
+                    // The plan polyline. The leg INTO the last landing
+                    // waypoint is not drawn (the approach is not a plan
+                    // line), and the first leg is not drawn from the
+                    // aircraft (the pursue leg draws as the gray line).
+                    Vector2 prev = p;
+                    int idx = 0;
+                    for (const auto& w : route) {
+                        const Vector2 q = w2s(w);
+                        const bool is_land = w.action == 7;   // kWpLand
+                        const bool from_aircraft = idx == 0;
+                        if (!(is_land &&
+                              idx + 1 == static_cast<int>(route.size())) &&
+                            !from_aircraft) {
+                            DrawLineEx(prev, q, 1.0f, plan_c);
                         }
                         prev = q;
                         ++idx;
+                    }
+
+                    // The pursue leg: aircraft -> the waypoint being
+                    // flown, faded gray (distinct from the plan color).
+                    if (!route.empty()) {
+                        const std::size_t target =
+                            pursuing < route.size() ? pursuing : 0;
+                        DrawLineEx(p, w2s(route[target]),
+                                   route_selected ? 2.0f : 1.5f, gray);
+                    }
+
+                    // The waypoint marks: airfield circles (the last
+                    // landing waypoint filled = primary; an earlier one
+                    // hollow = the alternate), strike triangles, AR
+                    // anchor boxes, plain dots for turnpoints.
+                    for (int i = 0; i < static_cast<int>(route.size()); ++i) {
+                        const auto& w = route[i];
+                        const Vector2 q = w2s(w);
+                        switch (w.action) {
+                            case 7: {   // kWpLand: the airfield circle
+                                if (i + 1 ==
+                                    static_cast<int>(route.size())) {
+                                    DrawCircleV(q, 4.0f,
+                                                Color{c.r, c.g, c.b, 210});
+                                    DrawCircleLines(
+                                        static_cast<int>(q.x),
+                                        static_cast<int>(q.y), 6.0f,
+                                        Color{c.r, c.g, c.b, 230});
+                                } else {
+                                    DrawCircleLines(
+                                        static_cast<int>(q.x),
+                                        static_cast<int>(q.y), 5.0f,
+                                        Color{c.r, c.g, c.b, 190});
+                                }
+                                break;
+                            }
+                            case 17: case 18: case 14: case 15: case 19: {
+                                // A-G delivery: the strike triangle.
+                                DrawTriangle(
+                                    Vector2{q.x, q.y - 5.5f},
+                                    Vector2{q.x - 5.0f, q.y + 3.5f},
+                                    Vector2{q.x + 5.0f, q.y + 3.5f},
+                                    Color{c.r, c.g, c.b, 220});
+                                break;
+                            }
+                            case 4: {   // kWpRefuel: the AR anchor box.
+                                DrawRectangleLinesEx(
+                                    Rectangle{q.x - 4.5f, q.y - 4.5f,
+                                              9.0f, 9.0f}, 1.4f,
+                                    Color{c.r, c.g, c.b, 210});
+                                break;
+                            }
+                            default:
+                                DrawCircleV(q, 2.2f,
+                                            Color{c.r, c.g, c.b, 180});
+                                break;
+                        }
+                        if (draw_wp_labels) {
+                            char lbl[8];
+                            std::snprintf(lbl, sizeof(lbl), "%d", i);
+                            DrawText(lbl,
+                                     static_cast<int>(q.x + 4),
+                                     static_cast<int>(q.y - 6), 9,
+                                     Color{c.r, c.g, c.b, 200});
+                        }
                     }
                 }
             }

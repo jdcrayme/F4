@@ -108,6 +108,47 @@ read that frozen position.
   tracking contract. FullFidelitySpawnsAndHasNoEngine now requests the
   policy explicitly (the FID-DEF-GOV sweep missed it).
 
+## VIEWER-QC-2 — the stock-save session's four: damage-event dupes, mystery rings, plan spaghetti, the landing flyaway
+
+The save1 play-through QC's catch, four for four:
+
+- **Duplicate "objective damaged:" events** — the result sink's damage
+  diff ran against a snapshot that NEVER advanced: the first delta
+  re-reported every pass, and the session re-published the event each
+  second per damaged objective. The snapshot now advances to what was
+  just reported (the diff is against the last SYNC), the event face
+  pins empty on the second pass, and the ledger stops growing one
+  damage record per objective per second.
+- **The static yellow circles** — the objective pass drew a gold ring
+  on every objective with priority >= 40 (most of the map on a stock
+  save) — unexplained clutter. A ring now MEANS "a filed ATO mission
+  targets this objective": the pass builds the target set from the
+  snapshot's tasking rows each frame.
+- **Flight-plan graphics (FF-MAP)** — the live plan drew one strong
+  owner-color polyline with numbered dots, the approach included: the
+  plan line TO the landing field read as a leg the flight will fly.
+  FreeFalcon conventions now: a faint plan polyline, a faded gray leg
+  from the aircraft to the waypoint it is FLYING (the pursue leg,
+  `navigation().current_waypoint_index()`), NO plan line into the last
+  landing waypoint, circles on airfields (filled = primary, hollow =
+  an earlier/alternate), triangles on A-G delivery waypoints, boxes on
+  AR (refuel) anchors, numbers only zoomed in.
+- **The landing flyaway (CAMP-LAND)** — "aircraft come back, switch
+  into approach and then just fly off into infinity": the campaign
+  session built its per-airbase airfield map for the SPAWNER but never
+  registered it with the ATC (the scenario path's
+  register_campaign_airbase_airfields did; the campaign path had no
+  counterpart). Every LandingRequest fell back to the stub's empty
+  default field — threshold at the theater origin — and the recovering
+  aircraft chased approach data off the map. `Simulation::
+  register_airbase_airfields(map)` registers the campaign's map; the
+  session calls it at create. Reproduced end to end over the canonical
+  save1 export in test_campaign_stock_landing (F4_STOCK_WORLD-gated):
+  the RTB'd flight's OWN clearance now names its own base's field
+  (< 25 grid from the landing waypoint), the approach engages
+  (RequestApproach -> ProceedToFix), and the flight never diverges
+  from the field.
+
 ## FID-DEF-GOV — Tiered is the default fidelity policy; the runner's dilation becomes an AIMD delivery governor
 
 - **The acceleration verdict becomes the default** — `CampaignSessionOptions::fidelity_policy`

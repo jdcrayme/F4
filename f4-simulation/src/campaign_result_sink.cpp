@@ -286,7 +286,7 @@ void CampaignResultSink::handle_unit_loss(
 void CampaignResultSink::sync_objective_damage() {
     auto& mut_world = const_cast<f4::entities::EntityWorld&>(world_);
     damage_synced_.clear();
-    for (const auto& snap : objective_snapshots_) {
+    for (auto& snap : objective_snapshots_) {
         EntityHandle h(EntityId{snap.entity}, &mut_world);
 
         // Current state — the same read the snapshot took.
@@ -335,6 +335,14 @@ void CampaignResultSink::sync_objective_damage() {
         ledger_.apply_objective_damage(rec);
         damage_synced_.push_back(
             DamageSync{snap.vu, damaged});   // the session publishes it
+        // The snapshot ADVANCES to what was just reported: the diff is
+        // against the last SYNC, not the pristine state. Without this
+        // the same delta re-reported every pass — the viewer's event
+        // log filled with duplicate "objective damaged:" rows and the
+        // ledger's damage log grew one record per objective per second.
+        snap.features_destroyed = destroyed;
+        snap.destroyed_pct_x100 = pct_x100;
+        snap.fstatus = current_fstatus;
         ++stats_.objectives_synced;
     }
 }

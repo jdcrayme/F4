@@ -467,11 +467,17 @@ TEST(ResultSink, BombImpactAndObjectiveDamageSync) {
     EXPECT_EQ(rec.fstatus, kDamagedFstatus);
     EXPECT_EQ(sink.stats().objectives_synced, 1);
 
-    // Repeated sync is a no-op (the snapshot never moves; the ledger
-    // is last-write-wins).
+    // Repeated sync is a no-op (the snapshot ADVANCES to what was
+    // reported; the ledger is last-write-wins).
     sink.sync_objective_damage();
     EXPECT_EQ(ledger.objective_damage().size(), 1u);
     EXPECT_EQ(ledger.features_destroyed(), 1);
+    // CAMP-DOM-6b: the EVENT face too — the sync's delta buffer is
+    // EMPTY on the second pass. The session publishes one "objective
+    // damaged:" event per delta row; the old shape (the snapshot
+    // frozen at the pristine state) re-pushed the same objective every
+    // pass and the viewer's log filled with duplicates.
+    EXPECT_TRUE(sink.damage_synced().empty());
 
     // The write-back + repopulate round-trip: apply_to the WorldState,
     // populate a FRESH EntityWorld, and the damage is there — the

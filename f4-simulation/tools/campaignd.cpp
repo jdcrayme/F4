@@ -107,6 +107,7 @@ struct Args {
     int tasking_cycle_sec = 1800;
     int reinforce_period_sec = 43200;
     bool atm_pipeline = true;
+    bool near_initial_wave = false;
     bool aa_combat = false;
     bool ground_war = false;
     bool strategy_layer = false;
@@ -188,6 +189,8 @@ void usage(std::ostream& os) {
             a.tasking_cycle_sec = std::atoi(next().c_str());
         } else if (k == "--reinforce-period-sec") {
             a.reinforce_period_sec = std::atoi(next().c_str());
+        } else if (k == "--near-initial-wave") {
+            a.near_initial_wave = true;
         } else if (k == "--no-atm") {
             a.atm_pipeline = false;
         } else if (k == "--aa-combat") {
@@ -255,6 +258,8 @@ int main(int argc, char** argv) {
     opts.strategy_layer = args.strategy_layer;
     opts.synthesize_airbases = args.synthesize_airbases;
     opts.max_steps_per_advance = args.max_steps;
+    opts.near_initial_wave = args.near_initial_wave;
+    opts.initial_tasking_cycle = true;
 
     std::string err;
     auto host = f4::simulation::EngineSessionHost::create(opts, &err);

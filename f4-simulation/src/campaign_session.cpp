@@ -525,6 +525,12 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         session->airbase_airfields_.empty()
             ? nullptr
             : &session->airbase_airfields_);
+    // CAMP-LAND: teach the ATC the same per-base fields the spawner
+    // got — the LANDING side consumes ATC clearances, and without this
+    // registration every approach answered with the stub's empty
+    // default field (threshold at the theater origin): the recovering
+    // aircraft chased it "off into infinity".
+    session->sim_->register_airbase_airfields(session->airbase_airfields_);
     // FID-5 pacing + arms (copied from Options — they outlive the
     // options object, the sim_dt_ pattern). The spawner's deferral flag
     // is read at handle() time; inert unless the Tiered policy armed
