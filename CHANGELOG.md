@@ -5,6 +5,41 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## AVIONICS-2 — the FCR page: the radar page as an SM + the lock hand-off
+
+The avionics plan's second tranche (Docs/AVIONICS_PLAN.md §4) — the
+fire-control radar page exists as avionics logic:
+
+- **`fcr_page.hpp`** — the `RWS/TWS/VS` mode machine as a pure
+  transition table on f4-state-machine (every transition AND refusal
+  pinned); the lock state with the reference's rules (refused with the
+  page Off, refused for untracked/Dropped targets, page lock ==
+  radar lock by construction, mode switches keep the lock, PowerOff
+  clears it, track death drops it) and the renderer-facing
+  `FcrPageSnapshot` (page-relative azimuth wrap, slant range, signed
+  closure, IFF, the Established-or-Coasting flag, the designated flag,
+  the live scan frame; VS = velocity-only display semantics, no new
+  radar physics).
+- **The lock hand-off is the radar's own primitives** — the tranche's
+  enabling discovery: `RadarSimComponent::command_track/command_search`
+  already implement the reference's lock behavior and the AI's
+  fire-control gate (`MissileModule::should_fire` via the policy's
+  radar leg) already honors a live track. The page DRIVES those
+  primitives and writes nothing else: zero sim-loop bytes changed,
+  AI-only runs byte-identical by construction, and the AI still never
+  consumes f4-avionics (the charter's parallel rule).
+- **The done-when, proven in a scenario** — `test_fcr_page_flight`:
+  the bandit starts inside the player's ±60° bar at 12 NM and files
+  east out of it. Search alone: the track decays and drops, the radar
+  leg dies, the gate closes. The page's designate parks the radar in
+  Track mode (which scans the locked target regardless of the search
+  volume): the leg stays lit the whole flight. break_lock closes it
+  again. Page inputs → the AI's own can_fire path.
+- **Wiring** — f4-avionics links f4-sensors (beside f4-flight-api/
+  f4-geo/f4-state-machine; still never f4-ai). 18 unit tests
+  (`test_avionics_fcr`, label `f4-avionics`) + the scenario test
+  (`test_fcr_page_flight`, label `f4-simulation`).
+
 ## DATALINK-1 — Step 13 closed out: the sim-side datalink tiers
 
 The AI Implementation Plan's DatalinkTier (§15 Step 13) is complete —

@@ -497,3 +497,74 @@ Stage Summary:
   change lives behind datalink_gate_on); the plan's v2 notes (operator
   lag decay window, beam-physics node geometry) stay named-not-built.
 
+---
+
+Task ID: AVIONICS-2
+Agent: main
+Task: "Land the avionics plan's AVIONICS-2 tranche — the FCR page model
+(the radar page as an SM): the RWS/TWS/VS mode machine, the lock state
+with the reference's lock rules, the renderer-facing RadarPageModel,
+and the f4-sensors lock hand-off the fire-control gate already honors —
+done when the page's lock drives the AI's MissileModule can_fire path
+from page inputs in a scenario test."
+
+Work Log:
+- Mapped the sensors/AI surfaces first (the Explore pass): RadarSimComponent
+  already owns RadarMode{Search,Track} + command_track/command_search with
+  the reference's refusal rule and the auto-drop; the fire-control chain
+  (live track -> RadarBackedDetectionPolicy radar leg -> MissileModule::
+  should_fire) was already end-to-end. Design consequence, written into
+  the plan's as-built note: AVIONICS-2 is a PAGE over those primitives —
+  f4-sensors gained nothing, f4-ai gained nothing, the whole tranche is
+  additive (zero sim-loop bytes; AI-only runs byte-identical by
+  construction).
+- fcr_page.hpp (header-only, namespace f4::avionics): FcrState/FcrEvent +
+  make_fcr_machine() (pure table, the make_ins_machine discipline);
+  FcrPageModel (InsUnit pattern) with power_on/off, select_rws/tws/vs,
+  designate (refused page-Off; takes the radar's command_track answer —
+  page lock == radar lock, no divergence), break_lock, and update()
+  (pure snapshot recompute + exactly ONE write: the track-death mirror).
+  FcrPageSnapshot/FcrSymbol: page-relative azimuth wrap [-pi,pi],
+  elevation, slant range, signed closure (positive = closing), IFF,
+  Established-or-Coasting flag, designated flag, the live scan frame;
+  VS = velocity-only display semantics (closing-only symbols +
+  velocity_only flag) — no new sensor physics. Symbols ascending
+  entity_id; snapshot comparable (operator<=>) for the two-renderers
+  golden rule.
+- Wiring: f4-avionics links f4-sensors (beside f4-flight-api/f4-geo/
+  f4-state-machine; still never f4-ai); umbrella updated; root boundary
+  verifier re-run (PASS at configure).
+- test_avionics_fcr.cpp (18 cases, label f4-avionics): the full mode
+  table incl. refusals (double power-on, self-select no-ops,
+  everything-from-Off), power-off clearing the lock from every live
+  state, mode switches keeping the lock, the designate refusal set
+  (Off / untracked / Dropped), the no-divergence lock landing, break
+  lock parking the radar, the track-death mirror, symbol geometry pins
+  (az wrap both directions, closure signs, IFF, the quality ladder,
+  designated), the VS filter, snapshot determinism, and the scan-frame
+  pass-through.
+- test_fcr_page_flight.cpp (label f4-simulation, links f4-avionics):
+  the done-when E2E. Two-ship scenario; player brain combat-disabled
+  (the radar belongs to the page); the AI gate wired standalone (radar
+  track store -> RadarBackedDetectionPolicy -> MissileModule::
+  should_fire). Bandit starts inside the +-60 deg bar at 12 NM, files
+  east out of it: search alone -> track decays -> radar leg dies ->
+  gate closes; designate before the exit -> Track mode scans the locked
+  target regardless of volume -> the leg stays lit 100 s of flight;
+  break_lock -> the leg decays again. Page inputs driving the AI's own
+  can_fire path.
+- Docs: AVIONICS_PLAN.md status banner (AVIONICS-2 LANDED) + the §4
+  as-built note; CHANGELOG entry; this worklog entry.
+
+Tests: test_avionics_fcr 18/18; test_fcr_page_flight green (first
+run); test_avionics_ins + test_avionics_steer re-run green; boundary
+verifier PASS. f4-simulation/f4-ai/f4-sensors sources untouched by this
+tranche — the fast sim tier's green set is expected to be unchanged.
+
+Stage Summary:
+- The FCR page exists as engine-agnostic avionics logic: mode SM + lock
+  rules + renderer-facing snapshot, deterministic, render-ready.
+- The player-in-the-loop path is now OPEN end to end in library form:
+  page inputs (designate/break_lock) drive the same fire-control gate
+  the digi brains use. AVIONICS-3 (the HUD view model) is the next
+  rung; its first consumer is named (the world viewer's sp_draw_hud).

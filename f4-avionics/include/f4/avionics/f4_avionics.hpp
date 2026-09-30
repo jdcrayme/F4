@@ -15,13 +15,24 @@
 //   f4::avionics::to_steer / current_steer  — BRA solutions to a steerpoint
 //   f4::avionics::steer_cue / current_steer_cue — the HSI steering cue
 //
+// Contents (AVIONICS-2):
+//   f4::avionics::FcrPageModel              — the FCR page: the
+//                                             RWS/TWS/VS mode SM, the lock
+//                                             state (designate/break_lock
+//                                             driving f4-sensors'
+//                                             command_track/command_search),
+//                                             and the renderer-facing
+//                                             FcrPageSnapshot
+//
 // The AI does NOT consume this library (the digi brains keep their
 // SensorFusion pipeline — parallel, not shared, same as the reference).
-// The PilotInput seam is read-side for now: the unit consumes
-// IAircraftState; PilotInput emission arrives with the page models
-// (AVIONICS-2+).
+// The page models write only through the radar's own primitives
+// (command_track/command_search) when a host drives them — the same
+// PilotInput-shaped seam: host input in, avionics state out, no
+// sim-loop feedback without a host.
 
 #pragma once
 
 #include "f4/avionics/ins.hpp"
 #include "f4/avionics/steerpoint.hpp"
+#include "f4/avionics/fcr_page.hpp"

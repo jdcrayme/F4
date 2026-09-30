@@ -1,6 +1,6 @@
 # Avionics Plan — the engine-agnostic avionics logic layer
 
-> **Status**: Active — **AVIONICS-1 LANDED** (the `f4-avionics` scaffold: the IAircraftState seam, the INS alignment SM, the stored heading/altitude/position chain, the seeded deterministic drift walk keyed on the airframe's nav data, and steerpoint navigation with the HSI steering cue — 24 tests, label `f4-avionics`; see §4's as-built note). AVIONICS-2–4 open.
+> **Status**: Active — **AVIONICS-2 LANDED** (the `f4-avionics` FCR page: the RWS/TWS/VS mode SM as a pure transition table, the lock state with the reference's lock rules driving `f4-sensors`' own `command_track`/`command_search`, and the renderer-facing `FcrPageSnapshot` — 18 unit tests + the done-when scenario test; see §4's as-built notes. AVIONICS-1 landed the scaffold: the IAircraftState seam, the INS alignment SM, the seeded deterministic drift walk, steerpoint navigation — 24 tests, label `f4-avionics`). AVIONICS-3–4 open.
 > **Source of Truth**: [FreeFalcon/freefalcon-central](https://github.com/FreeFalcon/freefalcon-central) (develop branch), `sim/avio*`, HUD/MFD source under `sim/`
 > **Companions**: [Architecture Proposal](ARCHITECTURE%20PROPOSAL.md) §1 (scope), [Falcon4 File Layout](FALCON4_FILE_LAYOUT.md), [AI Implementation Plan](AI_IMPLEMENTATION_PLAN.md)
 
@@ -141,7 +141,7 @@ positions.
   from raw under drift and equal it with drift off; the cue pins (shortest
   way, the dead-astern pin).
 
-### AVIONICS-2 — the FCR page model (the radar page as an SM)
+### AVIONICS-2 — the FCR page model (the radar page as an SM) — **LANDED**
 RWS → TWS/VS mode SM over `f4-sensors`' radar component (the AI's
 `RadarBackedDetectionPolicy` geometry, presented as page semantics:
 azimuth/elevation bars, ranges, a lock state with the reference's lock
@@ -149,6 +149,60 @@ rules). Output: `RadarPageModel` + a `f4-sensors` lock hand-off the
 fire-control gate already honors. **Done when**: the page model's lock
 state drives the same `can_fire` path the AI's MissileModule uses, from
 page inputs, in a scenario test.
+
+**LANDED (AVIONICS-2)** — as-built, against this done-when:
+
+- **The discovery that shrank the tranche**: `RadarSimComponent` ALREADY
+  owns the lock primitives — `RadarMode{Search, Track}` +
+  `command_track()`/`command_search()` with the reference's refusal rule
+  ("cannot lock what the radar is not tracking") and the auto-drop ("the
+  lock cannot outlive its track"). The fire-control chain was already
+  end-to-end: live track → `RadarBackedDetectionPolicy`'s radar leg
+  (`detected_by_radar`) → `MissileModule::should_fire`. So AVIONICS-2 is
+  a PAGE over those primitives, not a new sensor concept: `f4-sensors`
+  gained nothing, `f4-ai` gained nothing, and the whole tranche is
+  additive to f4-avionics (zero bytes of sim-loop change — AI-only runs
+  stay byte-identical by construction; the page writes only when a host
+  drives it, the PilotInput-shaped seam).
+- **`fcr_page.hpp`** — `FcrState{Off, Rws, Tws, Vs}` +
+  `FcrEvent{PowerOn, PowerOff, Select*}` as a PURE transition table
+  (`make_fcr_machine()`, the `make_ins_machine()` discipline: no
+  captures; every transition AND every refusal pinned). `FcrPageModel`
+  (the InsUnit pattern) owns the side effects: power_off clears the
+  lock; mode switches KEEP it (the lock is orthogonal to the search
+  display); `designate(id, radar)` refuses with the page Off and takes
+  the radar's own `command_track` answer (page lock == radar lock, the
+  no-divergence rule); `break_lock(radar)` parks the radar into Search;
+  `update()` is a pure snapshot recompute with exactly ONE write — the
+  track-death mirror (the locked track observed Dropped drops the page
+  lock and defensively parks the radar, idempotent against the radar's
+  own decay rule).
+- **The snapshot** — `FcrPageSnapshot` + `FcrSymbol`: page-relative
+  azimuth (bearing minus the live antenna center, wrapped [-π, π]),
+  elevation, slant range, SIGNED closure (positive = closing, the
+  radar-page convention), IFF hostile, the track-store's
+  Established-or-Coasting "good track" flag, the designated flag, and
+  the live scan frame (az half-width, el band, range scale). VS is
+  velocity-only DISPLAY semantics (closing contacts only + a
+  `velocity_only` flag) — no new radar physics (the plan's non-goal).
+  Symbols in ascending entity_id; two renderers consuming one snapshot
+  must agree frame for frame (pinned by an operator<=> determinism
+  test).
+- **The lock hand-off, honored** — the done-when, in
+  `f4-simulation/tests/test_fcr_page_flight.cpp`: a two-ship scenario,
+  the "player" brain combat-disabled (the radar belongs to the page),
+  the AI's exact gate wired standalone (the radar's track store → the
+  policy's radar leg → `MissileModule::should_fire`). The bandit starts
+  INSIDE the player's ±60° bar at 12 NM and files east out of it:
+  search alone lets the track decay and DROP — the radar leg dies and
+  the gate closes; the page's designate (before the exit) parks the
+  radar in Track mode, which scans the locked target regardless of the
+  search volume — the leg stays lit the whole flight; break_lock kills
+  it again. Page inputs driving the AI's own fire-control path.
+- **Wiring** — `f4-avionics` now links `f4-sensors` (the radar
+  component beside f4-flight-api/f4-geo/f4-state-machine; still never
+  f4-ai). 18 unit tests (`test_avionics_fcr.cpp`, label `f4-avionics`)
+  + the scenario test (label `f4-simulation`).
 
 ### AVIONICS-3 — the HUD view model
 Symbology elements (airspeed/altitude boxes, heading tape, pitch ladder,

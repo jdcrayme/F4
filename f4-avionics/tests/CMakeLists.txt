@@ -10,3 +10,4 @@ endfunction()
 
 f4_avionics_add_test(test_avionics_ins test_ins.cpp)
 f4_avionics_add_test(test_avionics_steer test_steerpoint.cpp)
+f4_avionics_add_test(test_avionics_fcr test_fcr_page.cpp)

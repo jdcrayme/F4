@@ -129,6 +129,14 @@ f4_simulation_add_test(test_datalink_tiers         test_datalink_tiers.cpp)
 target_compile_definitions(test_datalink_tiers PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
 )
+# The AVIONICS-2 done-when: the FCR page's lock state (f4-avionics)
+# driving the same fire-control path the AI's MissileModule gates —
+# from page inputs, in a running two-ship scenario.
+f4_simulation_add_test(test_fcr_page_flight        test_fcr_page_flight.cpp)
+target_compile_definitions(test_fcr_page_flight PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
+target_link_libraries(test_fcr_page_flight PRIVATE f4-avionics)
 f4_simulation_add_test(test_countermeasure_e2e     test_countermeasure_e2e.cpp)
 target_compile_definitions(test_countermeasure_e2e PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
