@@ -739,6 +739,30 @@ follow-up refinement, documented here.
   viewer arms it) launches the initial cycle's wave inside the first
   ops window — `live 49 (48 airborne)` at +2 min after — while the
   deliveries keep the planner's schedule.
+- **AIRWAR-QC — TOT adherence (QC 2026-09-30, open)** — the
+  F4_STOCK_WORLD-gated harness (test_campaign_airwar_qc) ran a
+  524-flight, 6-h measured war over the canonical save1 export with
+  the viewer's own options. Verdict: launches and recoveries WORK
+  (353-358 launched, 265-307 recovered home, zero losses); **TOT
+  adherence does not** — across every pacing configuration the
+  matured deliveries sat at ±20-30 min from their TOTs (0% within
+  ±5 min; at best 23% within ±15). Landed so far: distance-paced
+  gates (TOT − ingress/cruise — the flat TOT−1200 gate ignored
+  geometry), `Trigger::OpsTakeoff` + `takeoff_pin_sec` (the 20-min
+  live pin flew the whole ingress at real speed), TOT appointment
+  holds (the seed stamps the delivery waypoint's arrive = TOT; the
+  SPEED/TIME walks hold short of an appointed waypoint — and the
+  appointment converts wave routes to TIME mode, whose snap-to-TOT
+  semantics are exactly right), and a feasibility floor (a delivery
+  cannot precede its own ingress). What REMAINS is a coherent
+  TOT-pacing design pass: the live windows, the folds, and the mode
+  classification each shift individual flights ±10-30 min, and the
+  appointment/mode/detector interactions (TIME-mode snaps vs
+  SPEED-mode cursor passes) are subtle enough that the remaining
+  scatter needs its own tranche, not another constant. The harness's
+  median-±10-min assertion is the open bar (the test is env-gated;
+  CI is unaffected).
+
 - **Per-action altitude shaping** (C3): lands with its consumer (the
   fuel tranche) — documented in route_builder.hpp. (Package-shared
   ingress and TOT slotting landed with C4's package composition —

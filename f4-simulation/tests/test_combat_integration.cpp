@@ -419,6 +419,117 @@ TEST(CombatIntegration, AirPictureWalksAtTheCadenceUnderContinuousDemand) {
 }
 
 // ============================================================================
+// 2b. AGG-2b: the picture walk rides the world's air-picture roster (the
+// wired SpatialIndex term). The sim-level pins: the roster holds exactly
+// the non-clutter population (the parked ramp bird never joins; the
+// launched missile does — a structural flip), and the stagger key primes
+// per-unit radar sweep phases (default off = all zero, the golden
+// identity).
+// ============================================================================
+TEST(CombatIntegration, AirPictureRosterHoldsTheNonClutterPopulation) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    auto scenario =
+        load_scenario_from_string(combat_scenario_json(f16, true));
+    Simulation sim(std::move(scenario), std::filesystem::path("."));
+    sim.initialize();
+
+    entities::EntityHandle shooter(sim.aircraft_entities()[0], &sim.world());
+    entities::EntityHandle bandit(sim.aircraft_entities()[1], &sim.world());
+
+    // A parked ramp bird: stationary, below the clutter floor — air
+    // picture noise by the C6 rule, never a roster member.
+    auto parked = sim.world().create();
+    parked.add<entities::TransformComponent>().position =
+        f4::geo::WorldPosition{500.0, -2000.0, 0.0};
+
+    for (int i = 0; i < 80; ++i) sim.tick(kDt);  // past the radars' first
+        // sweep (1 s) — the scan refreshes (primes) the shared roster
+
+    {
+        const auto& roster = sim.world().air_roster();
+        std::vector<std::uint64_t> ids;
+        for (const auto id : roster) ids.push_back(id.value);
+        EXPECT_NE(std::find(ids.begin(), ids.end(),
+                            shooter.id().value),
+                  ids.end())
+            << "the airborne shooter must be an air-picture member";
+        EXPECT_NE(std::find(ids.begin(), ids.end(),
+                            bandit.id().value),
+                  ids.end());
+        EXPECT_EQ(std::find(ids.begin(), ids.end(), parked.id().value),
+                  ids.end())
+            << "a parked entity must never join the air-picture roster";
+    }
+
+    // The launch: a new airborne entity (a structural flip) joins at the
+    // next walk's refresh — the epoch compare forces the rebuild, no
+    // cadence wait.
+    const auto amraam = sim.weapon_table().find_by_name("AIM-120C");
+    ASSERT_NE(amraam, weapons::kInvalidWeapon);
+    const auto missile = weapons::launch_missile(
+        sim.world(), sim.bus(), shooter, bandit.id(),
+        sim.weapon_table(), amraam, sim.sim_time_s());
+    ASSERT_TRUE(missile.valid());
+    for (int i = 0; i < 80; ++i) sim.tick(kDt);  // past the next sweep —
+        // the epoch rebuild catches the launch, no cadence wait
+
+    const auto& roster = sim.world().air_roster();
+    std::vector<std::uint64_t> ids;
+    for (const auto id : roster) ids.push_back(id.value);
+    EXPECT_NE(std::find(ids.begin(), ids.end(), missile.value), ids.end())
+        << "the flying missile is air picture — it must join through "
+           "the epoch rebuild";
+}
+
+TEST(CombatIntegration, StaggerSensorPhasesKeyPrimesTheRadarPhases) {
+    const auto f16 = f16_config_path();
+    if (f16.empty()) GTEST_SKIP() << "f16.json fixture not generated";
+
+    // WITHOUT the key (the golden identity): every radar primes at
+    // phase 0 — the pre-AGG-2b schedule exactly.
+    {
+        auto scenario = load_scenario_from_string(
+            combat_scenario_json(f16, true));
+        Simulation sim(std::move(scenario), std::filesystem::path("."));
+        sim.initialize();
+        for (const auto eid : sim.aircraft_entities()) {
+            auto* radar =
+                entities::EntityHandle(eid, &sim.world())
+                    .get<sensors::RadarSimComponent>();
+            ASSERT_NE(radar, nullptr);
+            EXPECT_EQ(radar->scan_phase_s, 0.0);
+        }
+    }
+
+    // WITH the key: every armed aircraft's radar carries a deterministic
+    // hash phase inside its interval (the reference's HOTSPOT_FIX jitter,
+    // spread across the 1,000 phase slots).
+    {
+        auto scenario = load_scenario_from_string(combat_scenario_json(
+            f16, true, {}, {},
+            R"(, "stagger_sensor_phases": true)"));
+        Simulation sim(std::move(scenario), std::filesystem::path("."));
+        sim.initialize();
+        int phased = 0;
+        for (const auto eid : sim.aircraft_entities()) {
+            auto* radar =
+                entities::EntityHandle(eid, &sim.world())
+                    .get<sensors::RadarSimComponent>();
+            ASSERT_NE(radar, nullptr);
+            EXPECT_GE(radar->scan_phase_s, 0.0);
+            EXPECT_LT(radar->scan_phase_s, 1.0)
+                << "the phase lives inside the default 1 s interval";
+            if (radar->scan_phase_s != 0.0) ++phased;
+        }
+        EXPECT_GT(phased, 0)
+            << "two aircraft hashing the same phase slot is possible but "
+               "the pair must not both land on zero";
+    }
+}
+
+// ============================================================================
 // 3. The policy adapter: SensorFusion sees radar truth, not GCI truth.
 // ============================================================================
 TEST(CombatIntegration, RadarBackedPolicyFlipsSensorFusionOffGci) {

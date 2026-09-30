@@ -568,3 +568,106 @@ Stage Summary:
   page inputs (designate/break_lock) drive the same fire-control gate
   the digi brains use. AVIONICS-3 (the HUD view model) is the next
   rung; its first consumer is named (the world viewer's sp_draw_hud).
+
+---
+
+Task ID: AGG-2b
+Agent: main
+Task: "Land AGGREGATE_CLOCK_PLAN §4's AGG-2b — wire f4-entities'
+SpatialIndex as the radar/detection membership term (FID_OPT §5's
+20.8 s residual) and give the air picture per-unit detection cadences
+with the AGG-2a stagger primitive — with the walks' byte contracts
+held."
+
+Work Log:
+- Synced to origin/main first: the user had applied the previous
+  session's DATALINK-1 + AVIONICS-2 patches AND folded a CAMP-TOT-PACE
+  improvement into the DATALINK-1 commit (c540866); the local
+  redundant commits were dropped via reset to origin (the trees were
+  verified: origin superset).
+- Studied the two hot walks' full shape: the radar scan's Search
+  branch (with_component_ref bucket copy + inline clutter/range
+  pre-gates, ~7,400 candidates/scan/radar, 99.8% rejected by
+  is_ground_clutter) and push_air_picture_ (with_component id copy +
+  per-entity handle resolution, ~4,400/walk at 10 Hz under demand).
+  Key design finding: the dominant rejector is the CLUTTER predicate
+  (stationary AND below 8,000 ft), not range — the 8x cutoff ball
+  covers the theater at fighter radar ranges, so the win is a
+  membership cache, not a positional ball prune.
+- Landed AirPictureRoster (f4-entities/air_roster.hpp/.cpp): the
+  non-clutter membership in entity-index order (the transform ref
+  bucket's order — the uncached walks' candidate/contact order) +
+  a SpatialIndex over member positions captured at rebuild (the
+  within_radius convenience surface). Maintenance rule: rebuild on
+  structural-epoch movement, revalidate on the caller-driven cadence
+  (host-stamped sim time, never wall time; interval <= 0 = every
+  call). EntityWorld owns one lazily through a unique_ptr (the
+  forward declaration + out-of-line dtor/move-ops dance — the
+  incomplete-type constraint shaped the API); the move ops leave the
+  destination's instance empty, the moved-from world's stale roster
+  self-heals through the epoch compare.
+- The radar scan's Search branch now refreshes the roster (sim_time +
+  roster_revalidate_s, default 1.0 s, data) and walks members with
+  FRESH transform reads, re-applying clutter + cutoff idempotently.
+  Track mode untouched. The scan_phase_s field (default 0.0) primes
+  the sweep timer once on the first update (the first-tick bake
+  shape); the fmod carry keeps the cadence exact for any phase.
+- push_air_picture_ now walks the roster for contacts (same values,
+  same order, fresh clutter gate per member) and collects the
+  Step-13 datalink nodes from their own populations: the
+  AwacsComponent + entities::RadarComponent ref buckets merged by
+  slot index and deduped (dual-carriers), reproducing the interleaved
+  walk's node order and team-intern order byte-for-byte; node
+  liveness stays a fresh per-walk read (the GCI-ghost kill keeps its
+  <= 100 ms bound). The walk's signature gained the stamped now_s.
+- The per-unit detection cadences (the AGG-2a primitive's named
+  consumer): scenario combat key "stagger_sensor_phases" (scenario.cpp
+  reader + the session JSON writer + CampaignSessionOptions, default
+  off) gates the armed spawn paths filling radar.scan_phase_s from
+  f4-campaign's vu_hash — the campaign path keys the flight VU per
+  arm index, the scenario path the radar seed + index, both folding
+  into 1,000 phase slots (the reference's HOTSPOT_FIX jitter, made
+  replay-stable; default off = byte-identical, the golden-identity
+  rule).
+- Tests: test_entities_air_roster (11 cases: priming, the epoch's
+  instant rebuilds, the cadence's behavioral flips both directions,
+  entity-index order, the radius surface, move-op self-healing, the
+  interval knobs); 4 radar pins (BehavioralFlipJoinsAtTheRosterCadence,
+  LandedMemberLeavesTheCandidatePoolImmediately,
+  ScanPhaseShiftsTheSweepScheduleExactly,
+  PhaseShiftMovesTimingNotOutcomes — plus the pre-existing
+  DetectionTimelineInvariantToClutterPopulation pin now running
+  through the roster path byte-for-byte); 2 sim pins
+  (AirPictureRosterHoldsTheNonClutterPopulation,
+  StaggerSensorPhasesKeyPrimesTheRadarPhases).
+- Full suite audited clean-tree vs work-tree (the stash-and-rebuild
+  comparison): 13 failures are PRE-EXISTING from the CAMP-TOT-PACE
+  commit (DtoGoldens.IntentView's mission_over golden; the
+  ResultSink.DirtySync bomb-impact log row; the EventStream,
+  ArmedWar, CombatDeagg, CmdRetask/Abort/Journal, CampaignSession
+  BigCatchUp/Straddled, CampaignWarHarness.RunsCertifies, and
+  CampaignSchedulingSession.ArmOff ledger/timeline re-pins — the same
+  set on both trees). The 5 ctest Timeout/Failed stragglers
+  (CampaignInitWarsFast x4, WvrMergeHarness) run green solo on BOTH
+  trees with identical timings (30.3 s vs 30.5 s, 16.0 s vs 16.0 s) —
+  the 60 s ctest caps are load artifacts of this container, not
+  regressions. The slow-labeled 24 h harnesses exceed the session
+  budget (CampaignVerdict.TheFrontMoving + CampaignInitWars.SmallWar
+  run green on the work tree; the rest re-certify on the next
+  certificate run, the AGG-1 precedent).
+
+Stage Summary:
+- The radar/detection term is wired: one shared membership index
+  serves every radar scan and the picture walk; the per-pass cost of
+  both is O(air picture) (~100-200 members) instead of O(theater)
+  (~7,400 transforms), and the per-scan ref-bucket copy is gone with
+  it. The per-unit sweep phases (opt-in) kill the once-per-interval
+  co-mounted radar spike.
+- The byte contracts held: candidate sets, order, RNG streams,
+  contacts, node order, and node liveness are the uncached walks';
+  the only delta is the documented <= 1 s behavioral-flip latency
+  (the AGG plan §5 re-pin doctrine), pinned in both directions.
+- AGG-2b is the last named blocker before AGG-3 (aggregate-first
+  spawn policy) — the FID_OPT §5 residual list now holds only the FM
+  floor (physics) and the brain's diffuse glue.
+- Produced 0003-AGG-2b-*.patch for the user's commit-and-push flow.

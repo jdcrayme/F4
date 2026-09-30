@@ -14,6 +14,7 @@
 #include <cmath>
 
 #include <f4/ai/brain_component.hpp>
+#include <f4/campaign/due_queue.hpp>  // AGG-2b: vu_hash — the deterministic stagger
 #include <f4/campaign/mission_type.hpp>
 #include <f4/entities/types.hpp>
 #include <f4/recorder/flight_recorder.hpp>
@@ -38,6 +39,20 @@ namespace f4::simulation {
 namespace {
 
 constexpr double FEET_PER_NM = 6076.11548;
+
+// AGG-2b: the per-unit radar sweep phase — the reference's HOTSPOT_FIX
+// jitter (unit.cpp's rand() % interval "spread the herd"), made
+// deterministic through the due-queue primitive's FNV-1a vu_hash (the
+// same value pinned across builds and replays). The hash folds into
+// 1,000 phase slots inside the radar's scan interval; the component's
+// own fmod carry normalizes against whatever interval the card sets.
+// key = the unit's identity (the scenario seed+index, the campaign
+// flight VU+arm index, the entity id as the fallback).
+inline double radar_scan_phase_s(std::uint64_t key) noexcept {
+    return static_cast<double>(f4::campaign::vu_hash(
+               static_cast<std::uint32_t>(key ^ (key >> 32))) %
+           1000ull) * 0.001;
+}
 
 // The real-data signature resolution (Task 64): exact name match first,
 // then case-insensitive; the stem lookup is the library's own
@@ -261,7 +276,8 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
                            bool passive_sensors,
                            bool ecm,
                            const f4::data::IrstSensorData*
-                               ir_airframe_cards) {
+                               ir_airframe_cards,
+                           bool stagger_phases) {
     // Identity first: the TEAM tag drives IFF (TrackStore), RWR emitter
     // role checks, and launch_missile's team copy. CampaignIdentity
     // carries the callsign the radar's NCTR resolves after a few scans.
@@ -327,6 +343,15 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
     auto& radar = aircraft.add<sensors::RadarSimComponent>();
     radar.rng_seed = seed_base + static_cast<std::uint32_t>(aircraft_index);
     radar.own_team = ac.team;
+    if (stagger_phases) {
+        // AGG-2b: the per-unit sweep phase (the deterministic HOTSPOT_FIX
+        // stagger) — a hash of this aircraft's radar identity folds into
+        // the interval's 1,000 phase slots. Off (the default) keeps
+        // phase 0 — every pre-AGG-2b spawn schedule byte-identical.
+        radar.scan_phase_s = radar_scan_phase_s(
+            (static_cast<std::uint64_t>(radar.rng_seed) << 16) ^
+            static_cast<std::uint64_t>(aircraft_index));
+    }
 
     // The RWR (passive — Simulation::tick's update_rwr sweep fills it).
     aircraft.add<sensors::RwrComponent>();
@@ -1045,7 +1070,8 @@ CampaignCombatArmament arm_campaign_combat(
     bool countermeasures,
     bool passive_sensors,
     bool ecm,
-    const f4::data::IrstSensorData* ir_airframe_cards) {
+    const f4::data::IrstSensorData* ir_airframe_cards,
+    bool stagger_phases) {
     CampaignCombatArmament out;
 
     // 0. The candidate contract: a campaign aircraft (origin stamped) with
@@ -1136,6 +1162,18 @@ CampaignCombatArmament arm_campaign_combat(
         const auto team = aircraft.get_tag(entities::tags::TEAM);
         radar.own_team = (team && team->as_string())
             ? *team->as_string() : "blue";
+        if (stagger_phases) {
+            // AGG-2b: the per-unit sweep phase, keyed off the flight's
+            // own VU (wingmen share the flight's schedule coherently,
+            // offset per arm index; a VU-less arm falls back to the
+            // entity id). Deterministic per flight — the replay axis
+            // holds.
+            const std::uint64_t vu = origin->flight_vu != 0
+                ? origin->flight_vu
+                : aircraft.id().value;
+            radar.scan_phase_s = radar_scan_phase_s(
+                (vu << 16) ^ static_cast<std::uint64_t>(arm_index));
+        }
         out.components_attached = true;
     }
     if (aircraft.get<sensors::RwrComponent>() == nullptr) {

@@ -18,4 +18,5 @@ endfunction()
 
 f4_add_test(test_entities_entity              test_entity.cpp)
 f4_add_test(test_entities_spatial             test_spatial_index.cpp)
+f4_add_test(test_entities_air_roster          test_air_roster.cpp)
 f4_add_test(test_entities_behavioral          test_behavioral_component.cpp)

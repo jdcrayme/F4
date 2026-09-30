@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # remain in the header for inlining.
 add_library(f4-entities STATIC
     src/entity.cpp
+    src/air_roster.cpp
 )
 target_link_libraries(f4-entities PUBLIC f4_warnings)
 

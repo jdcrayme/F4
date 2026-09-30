@@ -600,7 +600,10 @@ bool Simulation::arm_campaign_aircraft(entities::EntityId id) {
         // tables' per-vehicle fit) says the airframe carries one.
         // Default false = the golden identity (nobody jams).
         scenario_.combat.ecm,
-        &ir_seeker_data_);
+        &ir_seeker_data_,
+        // AGG-2b: the per-unit sweep-phase stagger (the session's
+        // scenario key; default off = phase 0 everywhere).
+        scenario_.combat.stagger_sensor_phases);
     if (!result.armed) {
         // Not a candidate (no origin/brain/store) or already armed —
         // EXCEPT the doctrine-failure shapes, which are misconfigurations
@@ -932,7 +935,8 @@ void Simulation::spawn_from_scenario_list() {
                                   scenario_.combat.countermeasures,
                                   scenario_.combat.passive_sensors,
                                   scenario_.combat.ecm && sc.ecm,
-                                  &ir_seeker_data_);
+                                  &ir_seeker_data_,
+                                  scenario_.combat.stagger_sensor_phases);
 
             // The gun's ammo ledger: the store's gun station (attached
             // just above; 511 for a standard M61A1 load). The brain's
@@ -1592,9 +1596,9 @@ std::vector<entities::EntityId> Simulation::find_tanker_entities_() {
     return out;
 }
 
-void Simulation::push_air_picture_(double dt) {
-    // PERF-1 (PERFORMANCE_PLAN.md §3): ONE walk over the transform
-    // bucket — but only on ticks where at least one brain's fusion will
+void Simulation::push_air_picture_(double dt, double now_s) {
+    // PERF-1 (PERFORMANCE_PLAN.md §3): ONE air-picture build per walk —
+    // but only on ticks where at least one brain's fusion will
     // actually REBUILD (the demand query mirrors the fusion's own
     // update() decision exactly; see BrainComponent::wants_air_picture).
     // Cruise ticks with no expiring skill timer and no visible hostile
@@ -1602,6 +1606,11 @@ void Simulation::push_air_picture_(double dt) {
     // cruise phases keep their baseline cost, and the merge phase (every
     // brain under a missile threat refreshes every tick) pays the walk
     // ONCE instead of once per brain.
+    //
+    // AGG-2b: the build's O(theater) transform-bucket sweep became O(air
+    // picture) — the contacts walk the world's air-picture roster (the
+    // wired SpatialIndex term) and the datalink nodes walk their own two
+    // component buckets. See the AGG-2b note inside the walked block.
     //
     // The snapshot must reproduce the fusion's own world query EXACTLY —
     // same entities, same entity-index order, same values, same clutter
@@ -1678,30 +1687,71 @@ void Simulation::push_air_picture_(double dt) {
         datalink_net_.nodes.clear();
         datalink_net_.teams.clear();
 
-        for (const auto eid :
-             world_.with_component<entities::TransformComponent>()) {
-            entities::EntityHandle h(eid, &world_);
-            const auto* tf = h.get<entities::TransformComponent>();
-            if (tf == nullptr) continue;
+        // AGG-2b: the walk's O(theater) bucket sweep is gone. The
+        // contacts now ride the world's air-picture roster (the wired
+        // SpatialIndex term — f4-entities' AirPictureRoster): the
+        // non-clutter membership refreshed against the structural epoch
+        // plus kRosterRevalidateS, SHARED with the radar scans, walked
+        // here in the roster's entity-index order (the bucket order the
+        // old walk produced — contact order and the values the fusions
+        // read are the same, positions/velocities are fresh transform
+        // reads, and the clutter gate re-runs idempotently per member).
+        // The Step-13 datalink NODES leave the contact walk: ground
+        // radar sites are clutter to the contact rule, so the node
+        // collection keeps its own population — the AwacsComponent and
+        // RadarComponent carriers, merged from their ref buckets and
+        // ordered by entity index (the same node order and team-intern
+        // order the interleaved walk produced). Liveness (the corpse
+        // rule) stays a FRESH per-walk read — the GCI-ghost kill keeps
+        // its <= 100 ms bound.
+        world_.refresh_air_roster(now_s, kRosterRevalidateS);
 
-            // FID-5 (§4.6): the tiered session's campaign-flight entities
-            // are excluded — their truth lives in the aggregate engine and
-            // flows through the aggregate-contact feed below (a suspended
-            // flight's frozen transform would otherwise linger as a stale
-            // phantom).
-            if (picture_excluded_ != nullptr &&
-                picture_excluded_->count(eid.value) != 0) {
-                continue;
+        // --- Step 13: the datalink NODES (their own small walk) ---------
+        if (datalink_gate_on) {
+            // The node population: every AwacsComponent and every
+            // objective RadarComponent carrier. Both ref buckets are
+            // entity-index ordered by invariant; merging them by slot
+            // index (EntityId's low word — the entity-index order the
+            // interleaved walk produced) and deduping dual-carriers
+            // reproduces the old node order exactly. An objective
+            // radar's bucket is a few hundred entries at theater scale —
+            // the merge is O(nodes log nodes) once per walk.
+            std::vector<entities::EntityId> node_ids;
+            for (const auto& [aid, awacs] :
+                 world_.with_component_ref<AwacsComponent>()) {
+                (void)awacs;
+                node_ids.push_back(aid);
             }
+            for (const auto& [rid, radar] :
+                 world_.with_component_ref<entities::RadarComponent>()) {
+                (void)radar;
+                node_ids.push_back(rid);
+            }
+            std::sort(node_ids.begin(), node_ids.end(),
+                      [](const entities::EntityId& a,
+                         const entities::EntityId& b) {
+                          return a.index() < b.index();
+                      });
+            node_ids.erase(
+                std::unique(node_ids.begin(), node_ids.end(),
+                            [](const entities::EntityId& a,
+                               const entities::EntityId& b) {
+                                return a.index() == b.index();
+                            }),
+                node_ids.end());
 
-            // Step 13: the datalink NODES ride this same walk — the
-            // plan's perf certificate ("one O(contacts × nodes) pass
-            // inside the existing single walk"). Collected BEFORE the
-            // clutter skip: a ground radar site is stationary at ground
-            // level (clutter to the CONTACT rule) yet still a live
-            // NODE; an AWACS/JSTAR is airborne and passes both. Node
-            // team strings intern into the net's own table (above).
-            if (datalink_gate_on) {
+            for (const auto eid : node_ids) {
+                entities::EntityHandle h(eid, &world_);
+                const auto* tf = h.get<entities::TransformComponent>();
+                if (tf == nullptr) continue;
+
+                // FID-5: an excluded flight is no node either — the old
+                // walk's excluded check ran before the node collection.
+                if (picture_excluded_ != nullptr &&
+                    picture_excluded_->count(eid.value) != 0) {
+                    continue;
+                }
+
                 // The NODE's own liveness first (the corpse rule for the
                 // node side): a killed datalink asset — the shot-down
                 // AWACS, the destroyed objective radar — stops
@@ -1765,10 +1815,30 @@ void Simulation::push_air_picture_(double dt) {
                     datalink_net_.nodes.push_back(node);
                 }
             }
+        }
+
+        // --- The contacts (the roster walk) ------------------------------
+        for (const auto eid : world_.air_roster()) {
+            entities::EntityHandle h(eid, &world_);
+            const auto* tf = h.get<entities::TransformComponent>();
+            if (tf == nullptr) continue;
+
+            // FID-5 (§4.6): the tiered session's campaign-flight entities
+            // are excluded — their truth lives in the aggregate engine and
+            // flows through the aggregate-contact feed below (a suspended
+            // flight's frozen transform would otherwise linger as a stale
+            // phantom).
+            if (picture_excluded_ != nullptr &&
+                picture_excluded_->count(eid.value) != 0) {
+                continue;
+            }
 
             // The same C6 rule the fusion's world walk applies (and the
             // radar's candidate walk): stationary low-altitude entities
-            // are ground clutter, not air picture.
+            // are ground clutter, not air picture. Fresh per member —
+            // the roster's membership is as-of-rebuild, and a member
+            // that landed since it is dropped HERE, exactly when the
+            // old full walk would have dropped it.
             if (tf->is_ground_clutter()) continue;
 
             f4::ai::AirPictureContact c;
@@ -2751,7 +2821,7 @@ void Simulation::tick(double dt) {
         push_environment_scale_();
     }
     if (combat_on) {
-        push_air_picture_(dt);
+        push_air_picture_(dt, t_now);
     }
 
 

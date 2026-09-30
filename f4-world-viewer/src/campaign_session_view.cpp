@@ -855,7 +855,7 @@ void ViewerApp::draw_campaign_session_view() {
 
         ImGui::TextUnformatted(
             "Flights (click to select; D deaggregates, R folds):");
-        if (ImGui::BeginTable("session_flights", 10, table_flags,
+        if (ImGui::BeginTable("session_flights", 11, table_flags,
                               ImVec2(0.0f, 0.0f))) {
             ImGui::TableSetupScrollFreeze(0, 1);
             ImGui::TableSetupColumn("VU", ImGuiTableColumnFlags_WidthFixed,
@@ -877,7 +877,10 @@ void ViewerApp::draw_campaign_session_view() {
                                     64.0f, 5);
             ImGui::TableSetupColumn("tier", ImGuiTableColumnFlags_WidthFixed,
                                     52.0f, 6);
-            ImGui::TableSetupColumn("window",
+            ImGui::TableSetupColumn("takeoff",
+                                    ImGuiTableColumnFlags_WidthFixed,
+                                    78.0f, 7);
+            ImGui::TableSetupColumn("count",
                                     ImGuiTableColumnFlags_WidthFixed,
                                     60.0f, 7);
             ImGui::TableSetupColumn("ops", ImGuiTableColumnFlags_WidthFixed,
@@ -953,9 +956,36 @@ void ViewerApp::draw_campaign_session_view() {
                     }
                     ImGui::TableNextColumn();
                     {
-                        // The next ops window: takeoff countdown when the
-                        // flight still holds at its base, else the
-                        // recovery countdown. "-" = no schedule.
+                        // The takeoff TIME — the gate on the campaign
+                        // clock (day + hh:mm). The countdown lives in
+                        // its own column; a schedule-less or terminal
+                        // flight shows "-".
+                        char wbuf[20];
+                        if (t.destroyed || t.to_depart < -1) {
+                            std::snprintf(wbuf, sizeof(wbuf), "-");
+                        } else {
+                            const std::int64_t gate_abs =
+                                static_cast<std::int64_t>(
+                                    impl_->session_epoch_s) +
+                                static_cast<std::int64_t>(t.to_depart);
+                            const std::int64_t day = gate_abs / 86400;
+                            const std::int64_t hh =
+                                (gate_abs % 86400) / 3600;
+                            const std::int64_t mm =
+                                (gate_abs % 3600) / 60;
+                            std::snprintf(wbuf, sizeof(wbuf),
+                                          "D%d %02d:%02d",
+                                          static_cast<int>(day + 1),
+                                          static_cast<int>(hh),
+                                          static_cast<int>(mm));
+                        }
+                        ImGui::TextUnformatted(wbuf);
+                    }
+                    ImGui::TableNextColumn();
+                    {
+                        // The countdown: to the takeoff while the flight
+                        // still holds, else to the recovery deadline.
+                        // "-" = no schedule.
                         char wbuf[16];
                         const std::int32_t w =
                             t.to_depart >= 0

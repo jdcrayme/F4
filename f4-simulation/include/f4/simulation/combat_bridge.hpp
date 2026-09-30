@@ -169,7 +169,16 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
                            /// shipped generic card). Non-owning; the
                            /// host owns the parse.
                            const f4::data::IrstSensorData*
-                               ir_airframe_cards = nullptr);
+                               ir_airframe_cards = nullptr,
+                           /// AGG-2b: the per-unit sweep-phase stagger
+                           /// (the reference's HOTSPOT_FIX jitter). When
+                           /// set, the freshly attached radar primes its
+                           /// scan_timer_ at a deterministic hash phase
+                           /// inside its interval instead of 0 — co-
+                           /// mounted radars stop sweeping on the same
+                           /// tick. Default false: phase 0, byte-identical
+                           /// to every pre-AGG-2b spawn.
+                           bool stagger_phases = false);
 
 /// SensorFusion::DetectionPolicy backed by the ownship's radar tracks and
 /// RWR picture. This is the M2 integration point (SensorFusion::
@@ -567,6 +576,11 @@ struct CampaignCombatArmament {
     /// The passive-fusion data hook (see attach_combat_loadout):
     /// the airframe IRST card resolves from the library's "generic"
     /// row when the passive legs attach here.
-    const f4::data::IrstSensorData* ir_airframe_cards = nullptr);
+    const f4::data::IrstSensorData* ir_airframe_cards = nullptr,
+    /// AGG-2b: the per-unit sweep-phase stagger (see
+    /// attach_combat_loadout). The phase keys off the flight's own VU
+    /// (wingmen of a flight share the flight's coherent sweep schedule
+    /// offset per arm index — deterministic per VU, spread per aircraft).
+    bool stagger_phases = false);
 
 } // namespace f4::simulation

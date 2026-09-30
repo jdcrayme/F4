@@ -14,11 +14,25 @@
 //                 tick's aircraft positions, BEFORE missile sims (40) so
 //                 guidance and the scan read the same picture.
 //
-// What it scans: every OTHER entity with a TransformComponent, friendly or
-// hostile (matching SensorFusion's Phase D note — radar detects ALL
-// contacts; hostility is IFF classification afterwards). Dead entities are
-// not filtered yet (SensorFusion doesn't filter them either); the M3 host
+// What it scans: every OTHER non-clutter entity with a TransformComponent,
+// friendly or hostile (matching SensorFusion's Phase D note — radar detects
+// ALL contacts; hostility is IFF classification afterwards). Dead entities
+// are not filtered yet (SensorFusion doesn't filter them either); the M3 host
 // decides whether corpses still paint.
+//
+// AGG-2b — the candidate walk rides the world's air-picture roster
+// (f4-entities' AirPictureRoster — the wired SpatialIndex term): the
+// non-clutter membership is refreshed against the structural epoch + a
+// 1 s behavioral-flip cadence and SHARED across every radar and the
+// picture walk, so the per-scan cost is O(air picture) instead of
+// O(theater) (FID_OPT_PLAN §5's 20.8 s residual). The scan re-applies
+// the clutter and range gates FRESH per member (idempotent predicates
+// over fresh transforms), the candidate order stays the bucket's
+// entity-index order, and the RNG stream the rolls consume is
+// unchanged for the shared population — the only observable delta is
+// the roster's bounded behavioral-flip latency (a parked aircraft that
+// starts moving is a candidate within one revalidation window instead
+// of instantly; the plan's §5 re-pinning covers it).
 //
 // Detection sampling: a seeded std::mt19937 per component. Same seed + same
 // scenario => same detection sequence (the reproducibility discipline that
@@ -66,6 +80,20 @@ public:
     RadarParameters params{};
     ScanVolume scan{};                 // Search-mode volume
     double scan_interval_s = 1.0;      // one sweep per second
+    // AGG-2b: the sweep's PHASE inside its interval (seconds). 0.0 — the
+    // default — keeps the pre-AGG-2b behavior byte-identical: every radar
+    // primes scan_timer_ at zero and all sweeps land on the interval's
+    // edges. A host (the campaign spawn path, AGG-2b's per-unit detection
+    // cadences) sets a deterministic per-unit phase — stagger_phase-
+    // shaped — so co-mounted radars don't all sweep on the same tick (the
+    // reference's HOTSPOT_FIX jitter: "spread the herd"). The fmod carry
+    // below keeps the cadence exact for any phase.
+    double scan_phase_s = 0.0;
+    // AGG-2b: the air-picture roster's behavioral-flip revalidation
+    // cadence this radar drives the shared roster with (seconds; the
+    // picture walk drives the same world roster with its own default).
+    // Data, not a constant — the same rule every engine cadence keeps.
+    double roster_revalidate_s = 1.0;
     std::uint32_t rng_seed = 0x46344ull;
     std::string own_team = "blue";     // IFF reference
     std::uint32_t nctr_after_scans = 2;
@@ -100,6 +128,7 @@ private:
     std::mt19937 rng_{};
     bool initialized_ = false;
     double scan_timer_ = 0.0;
+    bool phase_primed_ = false;        // AGG-2b: scan_phase_s applied once
     std::uint64_t scans_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> detection_counts_;
 };

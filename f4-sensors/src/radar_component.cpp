@@ -58,6 +58,20 @@ void RadarSimComponent::update(double dt, messaging::MessageBus& bus) {
         rng_.seed(rng_seed);
         initialized_ = true;
     }
+    if (!phase_primed_) {
+        // AGG-2b: the per-unit sweep phase (scan_phase_s), applied once on
+        // the first update — the same first-tick bake the track store
+        // rides, so spawn code that sets the phase after add<>() is
+        // honored. 0.0 (the default) primes the timer at exactly the
+        // pre-AGG-2b starting value: every pre-existing scan schedule is
+        // byte-identical. A positive phase shifts THIS radar's sweeps
+        // inside its interval (the reference's per-unit jitter — "spread
+        // the herd"); the fmod carry below keeps the cadence exact.
+        phase_primed_ = true;
+        if (scan_interval_s > 0.0) {
+            scan_timer_ = std::fmod(scan_phase_s, scan_interval_s);
+        }
+    }
     scan_timer_ += dt;
     if (scan_timer_ < scan_interval_s) return;
     // Carry the remainder so the scan rate stays exact regardless of tick
@@ -93,21 +107,34 @@ void RadarSimComponent::perform_scan(messaging::MessageBus& bus) {
         }
     }
     if (mode_ == RadarMode::Search) {
-        // FID-OPT-3: the candidate walk reads each transform through the
-        // component-type index's ref bucket (with_component_ref — same
-        // live set, same entity-index order, pointer attached) and
-        // applies the two cheap pre-gates INLINE, so the per-candidate
-        // EntityHandle + component-map lookup (the scan's measured
-        // dominant cost at campaign scale: ~7,400 candidates/scan, 99.8%
-        // rejected by these two arithmetic checks, ~1.26 ms/scan) is paid
-        // only by the handful of candidates that survive both. The
-        // survivors still meet the SAME gates in the detection loop below
-        // — idempotent pure predicates over the same component values —
-        // so the candidate set, its order, and the RNG stream the
-        // detection rolls consume are exactly the pre-OPT-3 scan's.
-        for (const auto& [eid, tf] :
-             world->with_component_ref<entities::TransformComponent>()) {
+        // AGG-2b: the candidate walk rides the world's air-picture roster
+        // (f4-entities' AirPictureRoster — the wired SpatialIndex term).
+        // The roster holds the NON-CLUTTER membership, refreshed against
+        // the structural epoch plus a behavioral-flip cadence, and shared
+        // across every radar and the picture walk — the pre-AGG-2b walk
+        // resolved the full transform bucket PER RADAR PER SCAN only to
+        // reject 99.8% of it with the clutter gate (FID_OPT_PLAN §5's
+        // 20.8 s residual). The per-member work below is the pre-OPT-3
+        // scan's own loop, re-applied FRESH: the handle resolution the
+        // FID-OPT-3 ref-walk avoided is now paid on the small member set
+        // (~100-200 of ~7,400), and the clutter + range gates re-run
+        // idempotently over fresh transforms — a member that landed since
+        // the roster's rebuild is skipped exactly as the uncached walk
+        // would skip it. The roster's members() is entity-index order (the
+        // bucket order), so the candidate SET, its ORDER, and the RNG
+        // stream the detection rolls consume are the pre-AGG-2b scan's for
+        // the shared population; the only observable delta is the roster's
+        // bounded flip latency (a parked aircraft that starts moving
+        // becomes a candidate within one revalidation window instead of
+        // instantly — AGGREGATE_CLOCK_PLAN §5's re-pinning covers it).
+        const_cast<entities::EntityWorld*>(world)->refresh_air_roster(
+            now, roster_revalidate_s);
+        for (const auto eid : world->air_roster()) {
             if (eid.value == owner_.id().value) continue;
+            entities::EntityHandle h(eid,
+                                     const_cast<entities::EntityWorld*>(world));
+            const auto* tf = h.get<entities::TransformComponent>();
+            if (tf == nullptr) continue;  // died since the rebuild
             if (tf->is_ground_clutter()) continue;
             const double dxr = tf->position.x - own_pos.x;
             const double dyr = tf->position.y - own_pos.y;

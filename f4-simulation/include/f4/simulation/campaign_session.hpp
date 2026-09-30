@@ -369,6 +369,16 @@ struct CampaignSessionOptions {
     /// radar ranges. Requires gci_datalink. Default false — airborne
     /// AWACS/JSTAR nodes only.
     bool gci_ground_sites = false;
+    /// AGG-2b (AGGREGATE_CLOCK_PLAN §4): the per-unit radar sweep-phase
+    /// stagger — every armed aircraft's radar primes its sweep INSIDE
+    /// its scan interval from a deterministic hash of its identity (the
+    /// reference's HOTSPOT_FIX jitter, "spread the herd", made
+    /// replay-stable through the due-queue's FNV-1a vu_hash). Only read
+    /// when aa_combat. Default false — every radar sweeps at phase 0
+    /// exactly as before (the golden identity); the stagger removes the
+    /// once-per-interval co-mounted radar spike and spreads the
+    /// detection load across the interval.
+    bool stagger_sensor_phases = false;
 
     /// FID-1: the fidelity policy (see FidelityPolicy above). Default
     /// Tiered — the acceleration verdict (FID-6: 25.3x full-fidelity
@@ -1279,6 +1289,11 @@ private:
     /// CAMP-TOT-PACE: the pure takeoff-window deagg's live hold (the
     /// options' takeoff_pin_sec doc).
     int takeoff_pin_sec_ = 300;
+    /// CAMP-SAVE-WAVE (rev 2): the initial wave's per-base launch
+    /// queue — base VU -> flights gated so far. One runway per base:
+    /// each flight's gate slides kWaveDepartureSpacingSec past the
+    /// previous one's, bases concurrent.
+    std::unordered_map<std::uint32_t, int> initial_wave_base_seq_;
     bool combat_deagg_ = true;
     double combat_envelope_ft_ = 30000.0;
     /// CAMP-SCALE-1: the pilot-skill flow gate (the tables ride

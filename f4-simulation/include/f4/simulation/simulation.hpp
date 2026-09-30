@@ -570,7 +570,7 @@ private:
     /// kPictureCadenceTicks ticks; between walks a demanding tick hands
     /// out the LAST snapshot (bounded <= 100 ms staleness). See the
     /// kPictureCadenceTicks note for the measured rationale.
-    void push_air_picture_(double dt);
+    void push_air_picture_(double dt, double now_s);
     /// Task 73: push the weather/day-night visual scale to every roster
     /// brain's SensorFusion (unconditional, O(roster) double writes).
     /// Never called when no environment is configured — the scale stays
@@ -747,6 +747,21 @@ public:
     /// <= 100 ms of sim, the licensed bound. Deterministic: an integer
     /// tick counter.
     static constexpr int kRwrCadenceTicks = 6;
+
+    /// AGG-2b: the air-picture roster's behavioral-flip revalidation
+    /// cadence the picture walk drives the shared world roster with
+    /// (seconds of sim — the radar scans drive the SAME roster with
+    /// their own stamped clock and default; the first refresh inside a
+    /// cadence window rebuilds for everyone). Structural flips (spawn,
+    /// destroy, component add/replace) rebuild immediately through the
+    /// epoch compare; this interval bounds only the behavioral ones
+    /// (the taxi launch, the landing stop — flips no structural event
+    /// marks). 1 s: the same order as the radar's own scan interval
+    /// and the picture's 100 ms staleness bound stays intact for every
+    /// ALREADY-airborne contact (positions are fresh transform reads;
+    /// only the membership rides the cadence). Public: hosts and the
+    /// QC surface reason about the flip-latency bound.
+    static constexpr double kRosterRevalidateS = 1.0;
 
 private:
 

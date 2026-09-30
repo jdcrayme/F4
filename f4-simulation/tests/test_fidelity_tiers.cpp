@@ -553,28 +553,18 @@ TEST(FidelityTiers, InitialWaveLaunchesNear) {
     const auto& rows = rig.session->flight_engine()->flights();
     ASSERT_EQ(rows.size(), 3u);   // the world flight + the two intents
 
-    // CAMP-TOT-PACE: the initial wave's TOT clamps to
-    // now + ingress + 2×ops_window and the gate rides TOT − ingress —
-    // launch ≈ now + 2×ops_window, deliver ≈ now + 2×ops_window +
-    // ingress: launch and delivery stay CONSISTENT (the old shape
-    // clamped the gate under the planner's TOT and the wave transited
-    // its targets ~90 min early). Route (390,455)→(420,460) ≈ 30.4
-    // grid = 152 s at the 12-grid cruise.
-    const auto& a_row = rows[1];
-    const std::int64_t a_tot =
-        rig.session->flight_engine()->now() +
-        (a_row.time_on_target -
-         static_cast<std::int32_t>(
-             rig.session->flight_engine()->now()));
-    (void)a_tot;
+    // CAMP-SAVE-WAVE rev 2 — the stagger: the initial wave queues PER
+    // BASE (one runway, 150 s between departures, bases concurrent),
+    // and each flight's TOT derives from its OWN gate: gate + ingress
+    // + one ops window. The first flight at a base gates at
+    // now + ops_window (600).
     const std::int32_t a_depart =
         rig.session->flight_engine()->seconds_to_depart(1);
     ASSERT_GT(a_depart, 0);
-    EXPECT_LE(a_depart, 2 * 600 + 10);   // ≈ 2×ops_window (± the sample)
-    EXPECT_GE(a_depart, 2 * 600 - 10);
+    EXPECT_NEAR(a_depart, 600, 10);
 
     // The later cycle keeps the planner's schedule, distance-paced:
-    // TOT 7200 − 152 s of ingress ≈ 7048.
+    // TOT 7200 − 152 s of ingress ≈ 7048 (unaffected by the stagger).
     const std::int32_t b_depart =
         rig.session->flight_engine()->seconds_to_depart(2);
     EXPECT_NEAR(b_depart, 7200 - 152, 2);

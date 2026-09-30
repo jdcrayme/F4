@@ -377,6 +377,10 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 // the defaults (the golden identity).
                 else if (k == "gci_datalink")    s.combat.gci_datalink = r.read_bool();
                 else if (k == "gci_ground_sites") s.combat.gci_ground_sites = r.read_bool();
+                // AGG-2b: the per-unit radar sweep phases (the
+                // deterministic HOTSPOT_FIX stagger). Unset keys keep
+                // the default (phase 0 everywhere — the golden identity).
+                else if (k == "stagger_sensor_phases") s.combat.stagger_sensor_phases = r.read_bool();
                 else if (k == "throttle_ir_power") s.combat.throttle_ir_power = r.read_bool();
                 // Real-data tier (Task 64): the wcd2json weapon export
                 // and the sig2json signature library, plus the

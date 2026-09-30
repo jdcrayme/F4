@@ -86,7 +86,8 @@ std::string session_scenario_json(
         bool passive_sensors,
         bool ecm,
         bool gci_datalink,
-        bool gci_ground_sites) {
+        bool gci_ground_sites,
+        bool stagger_sensor_phases) {
     std::ostringstream out;
     out << "{\n";
     out << "  \"name\": \"f4_viewer_campaign_session\",\n";
@@ -168,6 +169,12 @@ std::string session_scenario_json(
         }
         if (gci_ground_sites) {
             out << ", \"gci_ground_sites\": true";
+        }
+        if (stagger_sensor_phases) {
+            // AGG-2b: the per-unit radar sweep-phase stagger. Unset key
+            // keeps the default (phase 0 everywhere — the golden identity,
+            // the writer's own identity contract).
+            out << ", \"stagger_sensor_phases\": true";
         }
         out << "},\n";
         if (!brain_data.empty()) {
@@ -431,7 +438,8 @@ CampaignSession::create(const CampaignSessionOptions& opts,
                                      opts.passive_sensors,
                                      opts.ecm,
                                      opts.gci_datalink,
-                                     opts.gci_ground_sites);
+                                     opts.gci_ground_sites,
+                                     opts.stagger_sensor_phases);
         if (!out.good()) {
             return fail("cannot write " + scenario_path.string());
         }
@@ -2596,38 +2604,60 @@ void CampaignSession::handle_mission_intent_(
                        60.0;
         }
 
-        // CAMP-SAVE-WAVE: the INITIAL cycle's wave (intents filed at
-        // ladder time 0) files NEAR strikes — the TOT clamps to
-        // now + ingress + two ops windows (launch in ~one window,
-        // deliver ~20 min later) instead of the ATM's 2-h midpoints:
-        // a freshly loaded stock save1 sat dead, ~100 filed missions
-        // and not one launching, for that first hour and a half. The
-        // recovery deadline shifts by the same clamp so the books
-        // follow the delivery. (The old shape clamped the GATE under
-        // the planner's TOT — the wave then transited its targets
-        // ~90 min early; clamping the TOT keeps launch and delivery
-        // consistent.)
+        // CAMP-SAVE-WAVE (rev 2 — the stagger): the INITIAL cycle's
+        // wave files NEAR strikes, but a wave is not a mob — every
+        // flight gating at the same second launched a 49-aircraft
+        // simultaneous surge (the user's "all the aircraft launch at
+        // the same time"), and every row's window countdown read the
+        // same number. The wave now queues PER BASE: one runway, one
+        // departure per kWaveDepartureSpacingSec, bases concurrent
+        // (wire-order deterministic), capped so the spread stays
+        // inside ~two ops windows. Each flight's TOT then derives from
+        // ITS OWN gate: launch + ingress + one ops window (the
+        // delivery holds an appointment one window past the ingress).
+        // The recovery deadline keeps the plan's span over the new
+        // TOT.
         std::int64_t tot = tot_abs;
+        bool wave_staggered = false;
         if (near_initial_wave_ && intent.issued_time == 0 &&
             delivery_index > 0) {
-            const std::int64_t clamped =
-                std::min(tot_abs,
-                         campaign_time() +
-                             static_cast<std::int64_t>(travel_s) +
-                             2 * static_cast<std::int64_t>(
-                                     std::max(0, ops_window_sec_)));
-            if (clamped < tot) {
-                const std::int64_t shift = tot - clamped;
-                if (seed.mission_over_time > 0) {
-                    seed.mission_over_time = static_cast<std::int32_t>(
-                        std::clamp<std::int64_t>(
-                            static_cast<std::int64_t>(
-                                seed.mission_over_time) -
-                                shift,
-                            1, 2147483647));
+            std::uint32_t base_key = intent.squadron_id;
+            const auto sq_it = unit_id_map_.find(intent.squadron_id);
+            if (sq_it != unit_id_map_.end() && sq_it->second.valid()) {
+                const auto* sq =
+                    f4::entities::EntityHandle(sq_it->second,
+                                               &sim_->world())
+                        .get<f4::entities::SquadronComponent>();
+                if (sq != nullptr && sq->airbase.value != 0) {
+                    base_key = sq->airbase.value;
                 }
-                tot = clamped;
             }
+            const int seq = initial_wave_base_seq_[base_key]++;
+            // One runway, one departure per 15 minutes (the reference's
+            // own ATC spacing); a busy base queues for hours.
+            constexpr std::int64_t kWaveDepartureSpacingSec = 900;
+            constexpr std::int64_t kWaveSpreadCapSec = 14400;
+            std::int64_t gate =
+                campaign_time() +
+                static_cast<std::int64_t>(
+                    std::max(0, ops_window_sec_)) +
+                static_cast<std::int64_t>(seq) * kWaveDepartureSpacingSec;
+            gate = std::min(gate, campaign_time() + kWaveSpreadCapSec);
+            depart = std::max(gate, earliest);
+            tot = gate + static_cast<std::int64_t>(travel_s) +
+                  static_cast<std::int64_t>(
+                      std::max(0, ops_window_sec_));
+            if (seed.mission_over_time > 0 && intent.time_on_target > 0) {
+                const std::int64_t span =
+                    static_cast<std::int64_t>(intent.mission_over) -
+                    static_cast<std::int64_t>(intent.time_on_target);
+                if (span > 0) {
+                    seed.mission_over_time = static_cast<std::int32_t>(
+                        std::clamp<std::int64_t>(tot + span, 1,
+                                                 2147483647));
+                }
+            }
+            wave_staggered = true;
         }
 
         // CAMP-TOT-PACE: a delivery cannot precede its own ingress.
@@ -2657,7 +2687,9 @@ void CampaignSession::handle_mission_intent_(
             }
         }
 
-        if (airbase_scheduling_ && intent.takeoff > 0) {
+        if (wave_staggered) {
+            // The stagger already owns this flight's gate.
+        } else if (airbase_scheduling_ && intent.takeoff > 0) {
             const std::int64_t takeoff_abs =
                 epoch_ + static_cast<std::int64_t>(intent.takeoff);
             depart = std::max(takeoff_abs, earliest);
@@ -3002,6 +3034,25 @@ void CampaignSession::deaggregate_flight_(
     // it at the next whole-second boundary.
     apply_effective_roe_(*spawned);
 
+    // CAMP-GATE-ROLL: the takeoff lands ON the gate. The flight
+    // materializes one ops window early (the ramp beat); the parking
+    // hold stretches to consume the rest, so the roll starts AT the
+    // gate instead of ~10 minutes before it (the 45 s budget covers
+    // the teleport + roll to liftoff).
+    {
+        const std::int32_t to_gate = flights_->seconds_to_depart(index);
+        if (to_gate > 0) {
+            auto* spawn_brain =
+                f4::entities::EntityHandle(*spawned, &sim_->world())
+                    .get<f4::ai::BrainComponent>();
+            if (spawn_brain != nullptr) {
+                spawn_brain->module().runway_wait_s =
+                    std::clamp(static_cast<double>(to_gate) - 45.0, 45.0,
+                               7200.0);
+            }
+        }
+    }
+
     flights_->set_suspended(f.vu, true);
     DeaggregatedFlight rec;
     rec.aircraft = *spawned;
@@ -3014,7 +3065,12 @@ void CampaignSession::deaggregate_flight_(
     rec.pinned_until =
         trigger == DeaggregatedFlight::Trigger::OpsTakeoff
             ? rec.deagg_time +
-                  static_cast<std::int64_t>(std::max(0, takeoff_pin_sec_))
+                  std::max(static_cast<std::int64_t>(
+                               std::max(0, takeoff_pin_sec_)),
+                           static_cast<std::int64_t>(
+                               std::max(0, flights_->seconds_to_depart(
+                                                index))) +
+                               120)
         : trigger == DeaggregatedFlight::Trigger::Ops
             ? rec.deagg_time +
                   2 * static_cast<std::int64_t>(std::max(0, ops_window_sec_))

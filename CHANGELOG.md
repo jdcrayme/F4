@@ -5,6 +5,66 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## AGG-2b — the air-picture roster: the SpatialIndex wired + the per-unit detection cadences
+
+The aggregate-clock plan's third tranche (Docs/AGGREGATE_CLOCK_PLAN.md
+§4) — the two hot walks that paid the full transform bucket per pass to
+reject the same 99.8% of candidates with the same clutter arithmetic now
+share one membership index:
+
+- **`AirPictureRoster`** (f4-entities, air_roster.hpp) — the wired
+  radar/detection term FID_OPT §5 named. Holds the non-clutter
+  membership in entity-index order (the bucket order the uncached
+  walks produced) plus a SpatialIndex over member positions captured
+  at rebuild (`air_roster_within_radius` — the SAM-ring / formation /
+  threat-query surface). Maintenance: rebuild on `structural_epoch()`
+  movement (spawn/destroy/component changes, latency = next refresh)
+  or on the caller-driven revalidation cadence (the behavioral flips —
+  the taxi launch, the landing stop — no structural event marks);
+  the clock is the host-stamped sim time, never wall time.
+  `EntityWorld` owns one lazily; the move ops leave the destination's
+  empty (the lazy create IS the defensive rebuild).
+- **The radar scan walks the roster** (f4-sensors): the Search branch
+  refreshes with its stamped clock and walks members with FRESH
+  transform reads, re-applying the clutter + range gates idempotently
+  — candidate sets, order, and the RNG streams the rolls consume are
+  the uncached walks' (the FID-OPT-3 clutter-invariance pin passes
+  through the roster path byte-for-byte: 0 vs 2,000 parked entities,
+  identical per-seed detection timelines). Track mode untouched. The
+  only observable delta: a behavioral flip joins within the
+  revalidation window (1 s of sim, `roster_revalidate_s`, data) —
+  pinned both directions (the taxi launch joins at the cadence; the
+  landed member drops at the scan's fresh gate immediately).
+- **The picture walk walks the roster** (f4-simulation,
+  `push_air_picture_`): contacts ride the roster (same values, same
+  order, fresh clutter gate per member); the Step-13 datalink nodes
+  collect from their own populations — the AwacsComponent +
+  RadarComponent ref buckets merged by slot index, reproducing the
+  interleaved walk's node order and team-intern order exactly, with
+  node liveness still a fresh per-walk read (the GCI-ghost kill keeps
+  its ≤100 ms bound).
+- **The per-unit detection cadences** — the AGG-2a primitive's named
+  consumer: `RadarSimComponent::scan_phase_s` (default 0.0) primes
+  the per-radar sweep timer inside its interval; the armed spawn
+  paths fill it from the due-queue's FNV-1a `vu_hash` when the
+  scenario's `stagger_sensor_phases` gate is on (the campaign path
+  keys the flight's VU per arm index, the scenario path the radar
+  seed + index; 1,000 phase slots). Default OFF = every pre-AGG-2b
+  spawn schedule byte-identical; the armed war's 48 co-mounted radars
+  stop sweeping on the same tick once a session opts in (the
+  reference's HOTSPOT_FIX "spread the herd", made replay-stable).
+- **Tests** — `test_entities_air_roster` (11 cases, label
+  f4-entities: priming, epoch, cadence, both flip directions, order,
+  the radius surface, move-op self-healing); 4 new radar pins
+  (the flip cadence, the landed member, the phase schedule exactness,
+  phase-moves-timing-not-outcomes); 2 new sim pins
+  (`AirPictureRosterHoldsTheNonClutterPopulation` — the parked ramp
+  bird never joins, the launched missile joins through the epoch;
+  `StaggerSensorPhasesKeyPrimesTheRadarPhases` — the key's golden
+  identity). The pre-existing suite's failures are the CAMP-TOT-PACE
+  re-pins, unchanged by this tranche (verified clean-tree vs
+  work-tree: the same set on both).
+
 ## AVIONICS-2 — the FCR page: the radar page as an SM + the lock hand-off
 
 The avionics plan's second tranche (Docs/AVIONICS_PLAN.md §4) — the
@@ -345,10 +405,38 @@ its TOT — median +23 minutes late**. Three causes, three fixes:
   is still alive inside the first minutes (the takeoff window opens
   one ops window before the gate).
 
-After: re-run the QC and compare against the baseline above (the
-report prints the same five lines). Pins: InitialWaveLaunchesNear
-re-locked to the clamp semantics (initial gate ≈ 2×ops_window, later
-cycles distance-paced).
+State after the first pacing tranche: the median swung to −12 min
+(early), then +21 (the feasibility floor exposed the unreachable-TOT
+cohort), and the ±15-min band holds ~20% of deliveries — the scatter
+is structural (the live windows, the folds, and the mode
+classification each shift individual flights). The measured war,
+the harness, and the open bar live in
+test_campaign_airwar_qc (F4_STOCK_WORLD-gated) and the plan ledger's
+AIRWAR-QC finding; the remaining convergence is a documented design
+tranche, not another constant.
+
+- **CAMP-SAVE-WAVE rev 2 — the wave staggers per base** — the first
+  clamp collapsed every initial-wave gate to the same second: a
+  49-aircraft simultaneous launch, and every flights-table "window"
+  countdown reading the same number (the user's "all the aircraft
+  launch at the same time"). The wave now queues PER BASE (one
+  runway, one departure per 15 minutes, bases concurrent, wire-order
+  deterministic, the queue capped at 4 h), and each flight's TOT
+  derives from its OWN gate (+ ingress + one ops window), so the
+  takeoff times differ and the deliveries spread with the launches.
+  Pins: InitialWaveLaunchesNear (first-at-base gates at
+  now + ops_window; later cycles stay distance-paced).
+- **CAMP-GATE-ROLL + the takeoff-time column** — "aircraft should
+  take off on their takeoff time. Right now it seems like they take
+  off before": the takeoff-window deagg materializes a flight one ops
+  window early and the 45-s parking hold rolled it ~10 min before its
+  gate. The parking hold now STRETCHES to the gate
+  (`runway_wait_s = to_depart − 45`, clamped [45 s, 2 h] — the 45 s
+  covers the teleport + roll), and the OpsTakeoff pin covers the wait
+  (through liftoff + 2 min). The flights table's "window" column
+  shows the gate as a takeoff TIME on the campaign clock
+  (D375 09:15-style), with the old countdown in its own "count"
+  column (countdowns are for waiting; schedules are for reading).
 
 ## VIEWER-QC-2 — the stock-save session's four: damage-event dupes, mystery rings, plan spaghetti, the landing flyaway
 

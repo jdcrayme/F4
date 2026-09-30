@@ -393,9 +393,17 @@ CAMP-OPT-1 restores it and the pins now guard the walk's shape.
   resolution, fuel state, threat queries, intent bookkeeping) at
   ~2.9 µs per brain-tick. No single lever named yet.
 - **The post-OPT-3 radar term** — 20.8 s: the ref-bucket copy + the
-  pre-gate walk. A 3D spatial hash (`SpatialIndex`) exists in
+  pre-gate walk. ~~A 3D spatial hash (`SpatialIndex`) exists in
   f4-entities but is unwired (nothing maintains it against moving
-  aircraft); wiring it would prune the walk to the cutoff ball.
+  aircraft); wiring it would prune the walk to the cutoff ball.~~
+  **WIRED — AGG-2b** (Docs/AGGREGATE_CLOCK_PLAN.md §4): the
+  AirPictureRoster caches the non-clutter MEMBERSHIP (the dominant
+  rejector, not the range ball — the 8× cutoff covers the theater at
+  fighter radar ranges) shared across every radar scan and the picture
+  walk; the scans re-apply both gates fresh per member, so the
+  candidate sets, order, and RNG streams are the pre-AGG-2b walks'
+  (the clutter-invariance pin passes through the roster path), the
+  only delta is the documented ≤1 s behavioral-flip latency.
 - **The picture walk** — 36.2 s / 6 sim-hours (§3): could adopt the
   same ref primitive (`with_component_ref`) for its transform reads;
   named, not landed (2% of the tick, and the path is byte-pinned by

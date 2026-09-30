@@ -312,6 +312,17 @@ struct CombatConfig {
     /// net as is_ground_site nodes at their own radar ranges. Default
     /// FALSE — airborne AWACS/JSTAR nodes only. Requires gci_datalink.
     bool gci_ground_sites{false};
+    /// AGG-2b — the per-unit detection cadences: every armed aircraft's
+    /// radar primes its sweep phase INSIDE its scan interval from a
+    /// deterministic hash of its identity (the reference's HOTSPOT_FIX
+    /// jitter — rand() % interval "spread the herd", made deterministic
+    /// through f4-campaign's FNV-1a vu_hash). Default FALSE — every
+    /// radar primes at phase 0 exactly as before (all sweeps land on
+    /// the interval edges, the golden identity); the stagger removes
+    /// the once-per-interval radar spike of a co-mounted 48-radar war
+    /// and spreads the detection load across the interval. Scenario
+    /// key: combat block's "stagger_sensor_phases".
+    bool stagger_sensor_phases{false};
     /// Throttle-driven IR band: the FM's last-flown throttle selects the
     /// target signature's IR band each tick (AB detent = ir2, mil/high
     /// dry = ir1, cruise/idle = ir0) instead of the Afterburner default.

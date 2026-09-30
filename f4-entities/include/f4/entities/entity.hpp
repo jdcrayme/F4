@@ -61,6 +61,16 @@
 // include the full header.
 namespace f4::messaging { class MessageBus; }
 
+// AGG-2b (air_roster.hpp): the air-picture roster — the wired
+// radar/detection membership index. Forward-declared here (a by-value
+// member would drag its include chain ahead of EntityId's definition);
+// the world owns one through a unique_ptr created lazily on the first
+// refresh — and deliberately NOT transferred by the move ops: the
+// destination's instance starts empty (the next refresh builds it) and
+// the moved-from world's stale roster self-heals through the epoch
+// compare, the same defensive shape the ref buckets use.
+namespace f4::entities { class AirPictureRoster; }
+
 namespace f4::entities {
 
     // ============================================================================
@@ -796,6 +806,10 @@ namespace f4::entities {
     class EntityWorld {
     public:
         EntityWorld();
+        // Out-of-line: the AGG-2b roster member is forward-declared, and
+        // the implicit destructor would instantiate unique_ptr's deleter
+        // in every TU that destroys a world (incomplete-type error).
+        ~EntityWorld();
 
         // Non-copyable (holds unique_ptrs); movable.
         EntityWorld(const EntityWorld&) = delete;
@@ -814,65 +828,20 @@ namespace f4::entities {
         // against the destination. The new cookie simply ensures handles
         // captured against the destination are bound to ITS cookie, not
         // the source's.
-        EntityWorld(EntityWorld&& other) noexcept
-            : entities_(std::move(other.entities_))
-            , free_list_(std::move(other.free_list_))
-            , tag_index_(std::move(other.tag_index_))
-            , component_index_(std::move(other.component_index_))
-            , cookie_(detail::next_world_cookie())
-        {
-            // The moved-from world no longer owns the component objects its
-            // cache points at — clear it so a stray update_all() on the
-            // source rebuilds (into an empty world) instead of walking
-            // dangling pointers. The destination rebuilds lazily.
-            other.behavioral_cache_.clear();
-            other.active_behavioral_cache_.clear();
-            other.behavioral_cache_dirty_ = true;
-            behavioral_cache_dirty_ = true;
-            // FID-OPT-3: the ref buckets hold component pointers — dropped
-            // on both sides (the destination rebuilds lazily, one walk),
-            // the same defensive move the behavioral cache makes.
-            component_ref_index_.clear();
-            // CAMP-OPT-1: a move IS a structural change for both worlds —
-            // the destination's contents arrived from the source and the
-            // source's components were transferred away. Both epochs must
-            // land strictly ABOVE every value either world ever exposed
-            // (a destination that starts at its =1 default and merely bumps
-            // could collide with a stale capture and read moved components;
-            // max+1 makes the new epoch unique against both histories).
-            structural_epoch_ =
-                std::max(structural_epoch_, other.structural_epoch_) + 1;
-            other.structural_epoch_ = structural_epoch_ + 1;
-        }
+        //
+        // AGG-2b: defined out-of-line (entity.cpp) beside the destructor —
+        // the roster member is forward-declared, and an inline move op
+        // would instantiate the unique_ptr member's cleanup path in every
+        // including TU (incomplete-type error). The roster is NOT
+        // transferred: the destination's instance starts empty (the next
+        // refresh builds it) and the moved-from world's stale roster
+        // self-heals through the epoch compare.
+        EntityWorld(EntityWorld&& other) noexcept;
 
         // Move assignment: same reasoning — regenerate the cookie so old
         // handles against `*this` (before the assignment) don't accidentally
-        // validate against the new contents.
-        EntityWorld& operator=(EntityWorld&& other) noexcept {
-            if (this != &other) {
-                entities_   = std::move(other.entities_);
-                free_list_  = std::move(other.free_list_);
-                tag_index_  = std::move(other.tag_index_);
-                component_index_ = std::move(other.component_index_);
-                cookie_     = detail::next_world_cookie();
-                // Both sides' caches are now stale (this: old components
-                // destroyed; other: nodes transferred here). See move ctor.
-                behavioral_cache_.clear();
-                active_behavioral_cache_.clear();
-                behavioral_cache_dirty_ = true;
-                other.behavioral_cache_.clear();
-                other.active_behavioral_cache_.clear();
-                other.behavioral_cache_dirty_ = true;
-                component_ref_index_.clear();  // FID-OPT-3: see move ctor
-                // CAMP-OPT-1: both sides changed — same max+1 discipline
-                // as the move ctor (a plain bump could collide with the
-                // destination's own pre-assignment captures).
-                structural_epoch_ =
-                    std::max(structural_epoch_, other.structural_epoch_) + 1;
-                other.structural_epoch_ = structural_epoch_ + 1;
-            }
-            return *this;
-        }
+        // validate against the new contents. Out-of-line, same reason.
+        EntityWorld& operator=(EntityWorld&& other) noexcept;
 
         [[nodiscard]] EntityHandle create();
         void destroy(EntityId id);
@@ -928,6 +897,25 @@ namespace f4::entities {
         // --- Spatial queries (forwarded to SpatialIndex when present) ---
         [[nodiscard]] std::vector<EntityId> within_radius(double cx, double cy, double cz,
             double radius) const;
+
+        // --- AGG-2b: the air-picture roster (the wired radar/detection
+        // --- membership index) ------------------------------------------
+        // The non-clutter air-picture population, maintained by the world
+        // (a derived acceleration structure — the same doctrine the ref
+        // buckets and the behavioral cache follow) and shared by every
+        // consumer: the radar scans refresh it with their stamped sim
+        // clock, the picture walk refreshes it beside its own cadence, and
+        // both walk the SAME membership instead of two private O(theater)
+        // walks. See air_roster.hpp for the maintenance rule (structural
+        // flips via the epoch, behavioral flips via the caller-driven
+        // cadence) and the consumption contract (entity-index order, fresh
+        // value reads, the bounded flip latency). Out-of-line in
+        // entity.cpp — the roster type is forward-declared above.
+        void refresh_air_roster(double now_s, double revalidate_interval_s);
+        [[nodiscard]] const std::vector<EntityId>& air_roster() const noexcept;
+        [[nodiscard]] std::vector<EntityId> air_roster_within_radius(
+            double cx, double cy, double cz, double radius) const;
+        [[nodiscard]] const AirPictureRoster* air_roster_state() const noexcept;
 
         // --- Sim tick primitive ---
         // Calls update(dt, bus) on every behavioral component of every live
@@ -1151,6 +1139,12 @@ namespace f4::entities {
         // first add of an unqueried type still invalidates. Copy/move ops
         // start the new world at its own epoch (never copied).
         std::uint64_t structural_epoch_ = 1;
+
+        // AGG-2b: the air-picture roster (see refresh_air_roster above).
+        // Lazily created on the first refresh; never copied or moved (the
+        // move ops construct the destination without one — the lazy create
+        // IS the defensive rebuild).
+        std::unique_ptr<AirPictureRoster> air_roster_;
 
         // Index maintenance (called from EntityHandle::add/remove — the
         // friend declaration covers them — and from destroy()).

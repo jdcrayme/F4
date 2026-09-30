@@ -9,8 +9,12 @@
 > sync diffs only the objectives a transition marked — O(changes) — and
 > the verdict emit computes only after the capture tail moved; the
 > deterministic due-queue + stagger primitive is in
-> `f4-campaign/due_queue.hpp`). AGG-2b (the SpatialIndex radar term +
-> per-unit detection cadences), AGG-3..5 are the open roadmap. This
+> `f4-campaign/due_queue.hpp`). **AGG-2b LANDED** (the air-picture
+> roster: f4-entities' `SpatialIndex` wired as the radar/detection
+> membership term — the FID_OPT §5 20.8 s residual — plus the per-unit
+> detection cadences: the radar scans and the picture walk share one
+> roster, and the armed war's radars stagger their sweep phases behind
+> the `stagger_sensor_phases` gate). AGG-3..5 are the open roadmap. This
 > document is
 > the canonical record of the 2026-10 time-compression investigation: why
 > campaigns were CPU-limited below ~20× while the FreeFalcon reference has
@@ -55,8 +59,8 @@ The user's "<20×" on local hardware sits exactly on this curve.
    passes × `priority()`) ≈ 311–327 µs/tick → a ~48× ceiling with an empty
    war. FID-OPT-1 (active cache), FID-OPT-2 (fusion/air-picture cadences),
    FID-OPT-3 (sensor sweeps) and CAMP-OPT-1 (p7 spinner) attacked this;
-   the residual is named in FID_OPT_PLAN §5 (FM floor, brain glue,
-   unwired `SpatialIndex` radar term).
+   the residual is named in FID_OPT_PLAN §5 (FM floor, brain glue, the
+   SpatialIndex radar term — wired by AGG-2b).
 3. **One-clock coupling (the structural remainder — AGG-1..4).** The
    campaign ladder, ground war, naval war, aggregate flights, damage sync,
    and the eight `emit_*` event walks all ride the 60 Hz accumulator,
@@ -120,7 +124,8 @@ The migration is a re-wiring, not a rewrite. Already landed and reusable:
   AGG-1 clock move.
 - **The FID-OPT walk/sweep repairs** (active behavioral cache, fusion
   cadences, sensor pre-gates, p7 roster cache) and the named residuals
-  (the unwired `SpatialIndex` in f4-entities).
+  (the SpatialIndex radar term — wired since AGG-2b as the air-picture
+  roster).
 - **The honest delivery readouts**: `effective_speed()` EMA,
   `time_dilated()`, and (AGG-0) `delivery_scale()`.
 
@@ -301,14 +306,79 @@ Replace "walk everything, ask each if it's due" with an ordered scheduler:
   the census read (territory-only) + the existing event-stream pins;
   the war harness re-certifies upstream.
 
-#### AGG-2b — open (the SpatialIndex radar term + per-unit detection cadences)
+#### AGG-2b — LANDED (the air-picture roster + the per-unit detection cadences)
 
-- Wire f4-entities' `SpatialIndex` for the radar/detection term (FID_OPT
-  §5's 20.8 s residual) and give the air picture per-unit due cadences
-  with cutoff-ball pruning — the reference's `DetectOneWay` cell-culling
-  with a real index. The due-queue primitive (AGG-2a) is the scheduler:
-  each unit's first detection due = `now + stagger_phase(vu, cadence)`,
-  re-armed from its own pop.
+The two hot walks that paid the full transform bucket every pass to
+reject the same 99.8% of candidates with the same clutter arithmetic
+are wired to one shared membership index:
+
+- **`f4-entities` owns the `AirPictureRoster`** (air_roster.hpp) — the
+  SpatialIndex wiring FID_OPT §5 named. The roster holds the
+  NON-CLUTTER membership (TransformComponent carriers failing
+  `is_ground_clutter()`), in entity-index order, with a SpatialIndex
+  over member positions captured at rebuild (`air_roster_within_radius`
+  — the SAM-ring / formation / threat-query surface, O(ball) instead of
+  O(theater)). Maintenance rule: rebuild when `structural_epoch()`
+  moved (spawn/destroy/component changes — the same events the ref
+  buckets maintain, latency = the next refresh) or on the
+  CALLER-DRIVEN revalidation cadence (the behavioral flips no
+  structural event marks: the taxi launch, the landing stop). The
+  clock is the host-stamped sim time — never wall time — so the
+  refresh schedule is replayable. `EntityWorld` owns one lazily
+  (`refresh_air_roster(now, interval)` / `air_roster()`), the move ops
+  leave the destination's instance empty (the lazy create IS the
+  defensive rebuild, the ref-bucket shape).
+- **The radar scan walks the roster** (f4-sensors): the Search branch
+  refreshes the roster with its stamped sim clock and walks MEMBERS
+  with fresh transform reads, re-applying the clutter + range gates
+  idempotently per member. The per-candidate handle resolution the
+  FID-OPT-3 ref-walk made cheap is now paid on the ~100-200-member
+  air picture instead of ~7,400 transforms per radar per scan — and
+  the bucket COPY per scan is gone with it. Track mode untouched.
+- **The picture walk walks the roster** (f4-simulation,
+  `push_air_picture_`): the contacts loop is the roster walk (same
+  values, same order, the clutter gate re-run fresh per member so a
+  landed member drops exactly when the full walk would drop it); the
+  Step-13 datalink NODES leave the contact walk and collect from
+  their own populations — the AwacsComponent and RadarComponent ref
+  buckets, merged by slot index and deduped (dual-carriers), which
+  reproduces the interleaved walk's node order and team-intern order
+  byte-for-byte. Node liveness (the corpse rule) stays a FRESH
+  per-walk read — the GCI-ghost kill keeps its ≤100 ms bound.
+- **The per-unit detection cadences** — the AGG-2a primitive's named
+  consumer. The radar's own `scan_interval_s` timer was already a
+  self-re-arming per-unit cadence; what it lacked was the reference's
+  HOTSPOT_FIX stagger ("spread the herd", unit.cpp's rand() % interval
+  made deterministic). `RadarSimComponent::scan_phase_s` (default
+  0.0) primes the timer inside its interval; the armed spawn paths
+  fill it from the due-queue's FNV-1a `vu_hash` when the scenario's
+  `stagger_sensor_phases` gate is on (the campaign path keys the
+  flight's VU per arm index; the scenario path keys the radar seed +
+  index; both fold into 1,000 phase slots). Default OFF = every
+  pre-AGG-2b spawn schedule byte-identical (the golden-identity rule);
+  the campaign war's 48 co-mounted radars stop landing their sweeps on
+  the same tick once a session opts in.
+- **The honest delta (the re-pin §5 blesses)**: a behavioral flip is
+  observed within one revalidation window (1 s of sim — the radar's
+  own scan-interval scale) instead of instantly; every VALUE the walks
+  read is a fresh transform read, so the shared population's candidate
+  sets, orders, RNG streams, contacts, and node liveness are exactly
+  the uncached walks'. Pinned: the FID-OPT-3 clutter-invariance pin
+  (0 vs 2,000 parked entities, identical per-seed detection timeline)
+  now runs through the roster path and still passes byte-for-byte; the
+  flip latency itself is pinned (`BehavioralFlipJoinsAtTheRosterCadence`,
+  `LandedMemberLeavesTheCandidatePoolImmediately`); the roster's
+  maintenance rule has its own suite (`test_entities_air_roster`, 11
+  cases: priming, epoch, cadence, both flip directions, order, the
+  radius surface, move-op self-healing); the sim-level pins
+  (`AirPictureRosterHoldsTheNonClutterPopulation`,
+  `StaggerSensorPhasesKeyPrimesTheRadarPhases`) cover the launch
+  joining through the epoch and the phase key's golden identity.
+- **The scenario key**: `combat.stagger_sensor_phases` (scenario.cpp's
+  reader, the session JSON's writer, `CampaignSessionOptions::
+  stagger_sensor_phases` — only read when aa_combat). Flipping the
+  armed war's default is a follow-up certificate action, not part of
+  this tranche.
 
 ### AGG-3 — aggregate-first spawn policy
 
