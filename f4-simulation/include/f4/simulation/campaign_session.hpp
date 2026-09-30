@@ -1139,6 +1139,16 @@ private:
         f4::campaign::VerdictBand::Stalemate;
     int last_verdict_leader_ = -1;
     int last_verdict_swing_ = 0;
+    /// AGG-2a — the verdict emit's transition gate. The coarse state
+    /// (band/leader/swing) moves ONLY when a capture moves the
+    /// territory census (war_verdict's compute reads ownership flips;
+    /// the ledger's loss/strength rows feed the query face's team
+    /// rows, never the event's coarse state), so the emit recomputes
+    /// only after the capture log's tail advanced. TRUE initially:
+    /// the constructor's state is unseen, and the first pass must
+    /// emit exactly what the always-compute pass emitted (a mid-war
+    /// save's loaded advantage is a real verdict event).
+    bool verdict_dirty_ = true;
 
     // Data layer (the lenders).
     f4::world::WorldState ws_;                 // the write-back target

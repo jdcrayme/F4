@@ -60,6 +60,10 @@ void CampaignResultSink::snapshot_objectives_() {
         snap.destroyed_pct_x100 = (value_total > 0.0)
             ? static_cast<int>(10000.0 * value_destroyed / value_total + 0.5)
             : 0;
+        // AGG-2a — the entity→row map the dirty marks resolve through
+        // (built once; the snapshot set never grows mid-run).
+        snapshot_index_.emplace(snap.entity,
+                                objective_snapshots_.size());
         objective_snapshots_.push_back(std::move(snap));
     }
 }
@@ -209,6 +213,13 @@ void CampaignResultSink::handle_bomb_impact(
         const f4::weapons::BombImpactMessage& m) {
     ++stats_.bomb_impacts_seen;
 
+    // AGG-2a — mark the row the bomb touched: the damage is state on
+    // the entity (f4-weapons wrote the face before this event flew),
+    // and the per-pass sync diffs only the marked rows. The mark is by
+    // ENTITY id — it needs no vu resolution to be correct; unknown
+    // entities are a no-op in mark_objective_dirty.
+    if (m.target_id != 0) mark_objective_dirty(m.target_id);
+
     // Resolve the strike target to its objective VU for the log (the
     // damage itself is state on the entity — the sync reads it).
     std::uint32_t objective_vu = 0;
@@ -283,68 +294,106 @@ void CampaignResultSink::handle_unit_loss(
     stats_.unit_vehicles_booked += m.vehicles_killed;
 }
 
-void CampaignResultSink::sync_objective_damage() {
+void CampaignResultSink::mark_objective_dirty(std::uint64_t entity_id) {
+    // Unknown entities are a no-op — only rows in the construction
+    // snapshot can sync (a spawned entity cannot become an objective
+    // mid-run; the snapshot set is fixed at construction).
+    const auto it = snapshot_index_.find(entity_id);
+    if (it != snapshot_index_.end()) {
+        dirty_objectives_.insert(it->second);
+    }
+}
+
+bool CampaignResultSink::sync_objective_row_(ObjectiveSnapshot& snap) {
     auto& mut_world = const_cast<f4::entities::EntityWorld&>(world_);
+    EntityHandle h(EntityId{snap.entity}, &mut_world);
+
+    // Current state — the same read the snapshot took.
+    const auto* fs = h.get<FeatureSetComponent>();
+    if (fs == nullptr || fs->features.empty()) return false;
+    double value_total = 0.0, value_destroyed = 0.0;
+    int destroyed = 0;
+    int damaged = 0;
+    for (const auto& f : fs->features) {
+        const double weight = (f.value > 0) ? f.value : 1.0;
+        value_total += weight;
+        if (f.damage_state == 3) {
+            ++destroyed;
+            value_destroyed += weight;
+        }
+        // CAMP-DOM-2: VIS_REPAIRED (1) is not damage — the repair
+        // cadence's mirror writes it into this face, and counting
+        // healed features as damaged would pin the objective at a
+        // permanent damage story the engine's books say is over.
+        if (f.damage_state == 2 || f.damage_state == 3) {
+            ++damaged;
+        }
+    }
+    const int pct_x100 = (value_total > 0.0)
+        ? static_cast<int>(10000.0 * value_destroyed / value_total + 0.5)
+        : 0;
+    const auto* db = h.get<DamageBitmapComponent>();
+    const std::vector<std::uint8_t> current_fstatus =
+        db ? db->fstatus : std::vector<std::uint8_t>{};
+
+    // Diff against the snapshot: unchanged objectives are NOT sent
+    // (a mid-campaign save's pre-existing damage stays save damage —
+    // only THIS RUN's deltas become result records).
+    if (destroyed == snap.features_destroyed &&
+        pct_x100 == snap.destroyed_pct_x100 &&
+        current_fstatus == snap.fstatus) {
+        return false;
+    }
+
+    f4::campaign::ObjectiveDamageRecord rec;
+    rec.objective = snap.vu;
+    rec.features_total = static_cast<int>(fs->features.size());
+    rec.features_destroyed = destroyed;
+    rec.destroyed_pct = (pct_x100 + 50) / 100;  // hundredths → percent
+    rec.fstatus = current_fstatus;
+    ledger_.apply_objective_damage(rec);
+    damage_synced_.push_back(
+        DamageSync{snap.vu, damaged});   // the session publishes it
+    // The snapshot ADVANCES to what was just reported: the diff is
+    // against the last SYNC, not the pristine state. Without this
+    // the same delta re-reported every pass — the viewer's event
+    // log filled with duplicate "objective damaged:" rows and the
+    // ledger's damage log grew one record per objective per second.
+    snap.features_destroyed = destroyed;
+    snap.destroyed_pct_x100 = pct_x100;
+    snap.fstatus = current_fstatus;
+    ++stats_.objectives_synced;
+    return true;
+}
+
+void CampaignResultSink::sync_objective_damage() {
+    // The FULL walk — every snapshotted objective (the end-of-run
+    // form; the QC/writeback callers). Also consumes any pending
+    // dirt: after this walk everything is synced.
     damage_synced_.clear();
     for (auto& snap : objective_snapshots_) {
-        EntityHandle h(EntityId{snap.entity}, &mut_world);
-
-        // Current state — the same read the snapshot took.
-        const auto* fs = h.get<FeatureSetComponent>();
-        if (fs == nullptr || fs->features.empty()) continue;
-        double value_total = 0.0, value_destroyed = 0.0;
-        int destroyed = 0;
-        int damaged = 0;
-        for (const auto& f : fs->features) {
-            const double weight = (f.value > 0) ? f.value : 1.0;
-            value_total += weight;
-            if (f.damage_state == 3) {
-                ++destroyed;
-                value_destroyed += weight;
-            }
-            // CAMP-DOM-2: VIS_REPAIRED (1) is not damage — the repair
-            // cadence's mirror writes it into this face, and counting
-            // healed features as damaged would pin the objective at a
-            // permanent damage story the engine's books say is over.
-            if (f.damage_state == 2 || f.damage_state == 3) {
-                ++damaged;
-            }
-        }
-        const int pct_x100 = (value_total > 0.0)
-            ? static_cast<int>(10000.0 * value_destroyed / value_total + 0.5)
-            : 0;
-        const auto* db = h.get<DamageBitmapComponent>();
-        const std::vector<std::uint8_t> current_fstatus =
-            db ? db->fstatus : std::vector<std::uint8_t>{};
-
-        // Diff against the snapshot: unchanged objectives are NOT sent
-        // (a mid-campaign save's pre-existing damage stays save damage —
-        // only THIS RUN's deltas become result records).
-        if (destroyed == snap.features_destroyed &&
-            pct_x100 == snap.destroyed_pct_x100 &&
-            current_fstatus == snap.fstatus) {
-            continue;
-        }
-
-        f4::campaign::ObjectiveDamageRecord rec;
-        rec.objective = snap.vu;
-        rec.features_total = static_cast<int>(fs->features.size());
-        rec.features_destroyed = destroyed;
-        rec.destroyed_pct = (pct_x100 + 50) / 100;  // hundredths → percent
-        rec.fstatus = current_fstatus;
-        ledger_.apply_objective_damage(rec);
-        damage_synced_.push_back(
-            DamageSync{snap.vu, damaged});   // the session publishes it
-        // The snapshot ADVANCES to what was just reported: the diff is
-        // against the last SYNC, not the pristine state. Without this
-        // the same delta re-reported every pass — the viewer's event
-        // log filled with duplicate "objective damaged:" rows and the
-        // ledger's damage log grew one record per objective per second.
-        snap.features_destroyed = destroyed;
-        snap.destroyed_pct_x100 = pct_x100;
-        snap.fstatus = current_fstatus;
-        ++stats_.objectives_synced;
+        (void)sync_objective_row_(snap);
     }
+    dirty_objectives_.clear();
+}
+
+void CampaignResultSink::sync_dirty_objective_damage() {
+    // AGG-2a — the per-pass form: only the objectives a transition
+    // marked (bomb impacts resolve their target here; the session's
+    // repair mirror marks explicitly). The set iterates ASCENDING by
+    // snapshot index — wire order — so the changed subset's records
+    // land in exactly the order the full walk would have booked them
+    // (the ledger byte-stream contract: the records move, never
+    // their shape or order). An empty set is an O(1) no-op — the
+    // pass's fixed cost dies here. The collection clears FIRST (the
+    // full walk's own shape): what the caller drains after this call
+    // is what THIS sync collected, never a previous pass's residue.
+    damage_synced_.clear();
+    if (dirty_objectives_.empty()) return;
+    for (const auto idx : dirty_objectives_) {
+        (void)sync_objective_row_(objective_snapshots_[idx]);
+    }
+    dirty_objectives_.clear();
 }
 
 } // namespace f4::simulation

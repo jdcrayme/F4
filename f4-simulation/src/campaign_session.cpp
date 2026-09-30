@@ -949,9 +949,12 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
             evaluate_combat_();
         }
         // The damage sync rides the same pass: final-state diff of
-        // every damaged objective (cheap — the diff walks only
-        // objectives with damage components).
-        sink_->sync_objective_damage();
+        // the objectives the pass's transitions touched (AGG-2a — the
+        // bomb impacts mark through the sink's own subscription, the
+        // repair mirror marks in emit_repair_events_; the O(objectives)
+        // full walk retired from the pass, the end-of-run callers keep
+        // it as their explicit safety net).
+        sink_->sync_dirty_objective_damage();
         // CAMP-HOST-2: the changed objectives publish here (the
         // sink collects; the session fills owner + time).
         emit_damage_events_();
@@ -1473,6 +1476,7 @@ void CampaignSession::emit_cadence_events_() {
 void CampaignSession::emit_capture_events_() {
     namespace api = f4::campaign::api;
     const auto& clog = ledger_->objective_captures();
+    const std::size_t seen = last_capture_record_;
     publish_log_tail(sim_->bus(), last_capture_record_, clog,
                      [](const auto& r, api::CampaignEvent& e) {
                          e.kind = api::CampaignEvent::Kind::ObjectiveCaptured;
@@ -1481,6 +1485,12 @@ void CampaignSession::emit_capture_events_() {
                          e.objective_captured.objective_id = r.objective;
                          e.objective_captured.new_owner = r.to_team;
                      });
+    // AGG-2a — the capture is the verdict's only mover (the census in
+    // war_verdict.cpp is territory-only; the ledger's loss/strength
+    // rows feed the query face's team rows, never the event's coarse
+    // state), so a tail advance is the ONLY thing that can change the
+    // verdict event's band/leader/swing. Re-arm the verdict emit.
+    if (last_capture_record_ != seen) verdict_dirty_ = true;
 }
 
 void CampaignSession::emit_repair_events_() {
@@ -1536,6 +1546,13 @@ void CampaignSession::emit_repair_events_() {
                 auto* db = h.get<f4::entities::DamageBitmapComponent>();
                 if (db == nullptr) db = &h.add<f4::entities::DamageBitmapComponent>();
                 db->fstatus = rp.fstatus;
+                // AGG-2a — the mirror's write IS a transition on the
+                // entity face: mark the objective so the pass's dirty
+                // sync diffs the repair (the full walk would have seen
+                // the fstatus move; the mark is what tells the dirty
+                // walk the same thing, O(changes) instead of
+                // O(objectives)).
+                sink_->mark_objective_dirty(it->second.value);
             }
 
             api::CampaignEvent e;
@@ -1698,6 +1715,15 @@ f4::campaign::TheaterVerdict CampaignSession::verdict() const {
 
 void CampaignSession::emit_verdict_events_() {
     namespace api = f4::campaign::api;
+    // AGG-2a — the transition gate: the coarse state moves only when a
+    // capture moved the census (see emit_capture_events_), so the
+    // O(objectives) verdict compute runs only on re-armed passes — a
+    // quiet pass pays zero for the verdict. The query face (verdict())
+    // stays on-demand for the viewers; only the per-pass EMIT is
+    // gated. Cleared here: the state this pass published IS the
+    // baseline the next comparison diffs against.
+    if (!verdict_dirty_) return;
+    verdict_dirty_ = false;
     const auto v = verdict();
     // Coarse-state diff: the event IS the change signal (the full rows
     // live on the query). A fresh session starts stalemate/no-lead, so

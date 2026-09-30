@@ -48,9 +48,20 @@
 // Objective damage is FINAL-STATE SYNC, not event-driven: bombs update
 // the objective entities' own DamageBitmapComponent/FeatureSetComponent
 // during the run (f4-weapons owns that ledger); the sink snapshots each
-// objective's damage state at construction and, at sync_objective_damage()
-// (end of run), hands every CHANGED objective's final state to the
-// ledger. The entity is authoritative; the events are the log.
+// objective's damage state at construction and, at each sync, hands
+// every CHANGED objective's state to the ledger. The entity is
+// authoritative; the events are the log.
+//
+// AGG-2a — the sync has two forms (Docs/AGGREGATE_CLOCK_PLAN.md §4):
+//   * the FULL walk (sync_objective_damage) — every snapshotted
+//     objective, end of run (the QC/writeback callers). O(objectives).
+//   * the DIRTY walk (sync_dirty_objective_damage) — only the
+//     objectives a TRANSITION marked since the last sync (bomb impacts
+//     resolve their target here; the session's repair mirror marks
+//     explicitly). O(changes). The per-objective diff/book logic is
+//     shared, and the dirty set iterates in snapshot (wire) order, so
+//     the ledger byte-stream for the same transitions is identical to
+//     the full walk's — the records move, never their shape or order.
 //
 // Threading/ownership: same discipline as the spawner — the bus and the
 // world must outlive the sink (or detach() first). Single-threaded
@@ -70,6 +81,8 @@
 #include <f4/weapons/messages.hpp>
 
 #include <cstdint>
+#include <cstddef>
+#include <set>
 #include <unordered_map>
 #include <vector>
 
@@ -138,20 +151,45 @@ public:
     /// identity). Armed: ground losses + per-vehicle ag credit book.
     void set_book_unit_losses(bool on) noexcept { book_unit_losses_ = on; }
 
-    /// End-of-run objective damage sync: walk the world's objectives,
-    /// diff each one's damage state against the construction snapshot,
-    /// and hand every CHANGED objective's final state to the ledger.
-    /// Call after the last tick. Idempotent relative to itself (the
-    /// snapshot never moves); repeated calls re-send the same final
-    /// states (the ledger's last-write-wins makes that a no-op).
+    /// Full objective damage sync: walk EVERY snapshotted objective,
+    /// diff each one's damage state against its snapshot, and hand
+    /// every CHANGED objective's state to the ledger. O(objectives).
+    /// The end-of-run form (QC, writeback, tests) and the safety net —
+    /// the per-pass callers use the dirty form below. Also consumes
+    /// (clears) any pending dirt: everything is synced after the walk.
+    /// Idempotent relative to itself: the snapshot advances to what was
+    /// just reported, so a repeated call re-sends nothing (a repeat
+    /// re-sends a state only if the world moved again between calls).
     void sync_objective_damage();
+
+    // --- AGG-2a: the transition-triggered sync ---------------------------
+
+    /// Mark one objective dirty, by ENTITY id (the id the impact event
+    /// carries). Unknown entities are a no-op — only objectives in the
+    /// construction snapshot can sync. Deterministic: the mark is a
+    /// set insert; the sync walks the marks in wire order.
+    void mark_objective_dirty(std::uint64_t entity_id);
+
+    /// The per-pass form (AGG-2a): sync ONLY the objectives a
+    /// transition marked since the last sync — O(changes), never
+    /// O(objectives). Same per-objective diff/book logic as the full
+    /// walk (the shared row body); the dirty set iterates ASCENDING by
+    /// snapshot index, which IS wire order, so the changed subset's
+    /// records land in exactly the order the full walk would have
+    /// booked them. Consumes the dirt (clears the set).
+    void sync_dirty_objective_damage();
+
+    /// Objectives waiting for the dirty sync (probes/QC).
+    [[nodiscard]] std::size_t dirty_objectives() const noexcept {
+        return dirty_objectives_.size();
+    }
 
     // --- CAMP-HOST-2: the event stream ----------------------------------
 
-    /// One objective the last sync_objective_damage() found CHANGED
-    /// (the kill event publishes inline; damage needs the SESSION's
-    /// owner view, so the sync COLLECTS here and the session publishes
-    /// right after the call — detection and publication stay adjacent).
+    /// One objective the last sync (either form) found CHANGED (the
+    /// kill event publishes inline; damage needs the SESSION's owner
+    /// view, so the sync COLLECTS here and the session publishes right
+    /// after the call — detection and publication stay adjacent).
     struct DamageSync {
         std::uint32_t vu = 0;
         int features_damaged = 0;   ///< features at damage state 1+
@@ -183,10 +221,22 @@ private:
 
     void snapshot_objectives_();
 
+    /// The shared per-objective body (full walk and dirty walk): read
+    /// the entity face, diff against `snap`, book + collect on change,
+    /// advance the snapshot. Returns whether the objective changed.
+    bool sync_objective_row_(ObjectiveSnapshot& snap);
+
     f4::campaign::CampaignResultLedger& ledger_;
     f4::entities::EntityWorld& world_;
 
     std::vector<ObjectiveSnapshot> objective_snapshots_;
+    /// Entity id → the snapshot row it owns (built once, at
+    /// construction — the snapshot set never grows mid-run).
+    std::unordered_map<std::uint64_t, std::size_t> snapshot_index_;
+    /// AGG-2a — the transitions' dirty set: snapshot indices, kept
+    /// ASCENDING so the dirty walk's order == the full walk's wire
+    /// order over the same subset (the ledger byte-stream contract).
+    std::set<std::size_t> dirty_objectives_;
     std::size_t kill_subscription_ = static_cast<std::size_t>(-1);
     std::size_t impact_subscription_ = static_cast<std::size_t>(-1);
     std::size_t unit_loss_subscription_ = static_cast<std::size_t>(-1);

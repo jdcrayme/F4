@@ -5,6 +5,63 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## AGG-2a — the transition-triggered publishers + the due-queue primitive
+
+The AGG-1 follow-up (Docs/AGGREGATE_CLOCK_PLAN.md §4): with the pass
+already off the tick stream, the two remaining O(theater)-per-pass walks
+were the objective-damage sync (every snapshotted objective, every pass)
+and the verdict compute (every objective, every pass, though its event
+fires only on change). Both are now transition-gated, and the plan's
+deterministic scheduler primitive is landed.
+
+- **The damage sync goes dirty** — the sink subscribes to the bomb
+  impact event (it already resolved strike targets there) and marks the
+  touched objective's snapshot row; the session's repair mirror marks
+  the rows it writes. The per-pass call is
+  `sync_dirty_objective_damage()` — the shared per-row diff/book body,
+  iterated ascending by snapshot index (which IS wire order), so the
+  changed subset's records land in exactly the order the O(objectives)
+  walk would have booked them. The full walk survives as the end-of-run
+  form (QC, writeback, tests) and also consumes pending dirt. A quiet
+  pass is an O(1) no-op; the delta buffer clears before the walk, so
+  what the caller drains is what THIS sync collected.
+- **The verdict emit is capture-gated** — the verdict's coarse state
+  (band/leader/swing) moves only when a capture moves the territory
+  census (`compute_theater_verdict` reads ownership flips; the ledger's
+  loss/strength rows feed the query face's team rows, never the event),
+  so the O(objectives) verdict compute runs only on passes whose
+  capture-log tail advanced. The query face (`verdict()`) stays
+  on-demand for the viewers. The gate starts TRUE: a mid-war save's
+  loaded advantage still publishes its first verdict event.
+- **The due-queue primitive lands** — `f4-campaign/due_queue.hpp`:
+  `DueQueue<Payload>` keyed strictly `(due_time, priority,
+  insertion_seq)` (determinism by construction; node-handle pops;
+  visitor-scheduled re-arms fire within the same pass, key-ordered),
+  plus `vu_hash`/`stagger_phase` — FNV-1a over the VU, NOT std::hash
+  (implementation-defined) — phasing per-unit first-due times the way
+  the plan's AGG-2 specifies (the reference's rand() jitter, made
+  deterministic). Consumers: AGG-2b's per-unit detection cadences and
+  AGG-4's discrete-event scheduler.
+- **Verification** — a runtime probe drives two identical 3-objective
+  worlds through the same five passes (quiet / one strike / two strikes
+  / quiet / repair): world A per-pass full-syncs, world B dirty-syncs —
+  the ledgers' byte-stable `to_json()` documents are byte-identical at
+  every pass and at the end, and the negative surface (unknown-entity
+  mark, target-less impact, markless sync) books nothing. 18/18 probe
+  checks pass; 12/12 due-queue primitive checks pass. New tests:
+  `ResultSink.DirtySyncIsTheFullWalksShadow`,
+  `ResultSink.DirtySyncBooksTheRepairMark`, and the
+  `test_due_queue` gtest (registered in f4-campaign/tests).
+- **The δ1 threshold-deferral is retired, honestly** — the plan
+  expected AGG-2's scheduler to defer sub-frame-rate drivers' δ1 passes
+  past a debt threshold. With both fixed walks dirty-gated, a δ1 pass's
+  remaining fixed cost is the engines' O(1) gated ticks plus the
+  O(changes) emits plus the O(flights) tier heartbeat — and the
+  heartbeat (the death fold, the deagg triggers) must NOT be deferred:
+  it watches the sim, and deferral trades observable latency for
+  nothing. The heartbeat's surface shrinks with AGG-3's bubble
+  economics instead (see the plan's as-built note).
+
 ## AGG-1 — the campaign pass leaves the tick stream (the catch-up clock)
 
 The time-compression ceiling's structural remainder

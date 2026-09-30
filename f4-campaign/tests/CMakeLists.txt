@@ -69,6 +69,11 @@ f4_campaign_add_test(test_war_verdict    test_war_verdict.cpp)
 target_link_libraries(test_war_verdict PRIVATE f4-json)
 target_link_libraries(test_ground_war PRIVATE f4-json)
 
+# AGG-2a — the deterministic due-queue + stagger primitives (the
+# aggregate-clock migration's scheduler core; header-only, so the
+# default f4-campaign link carries it).
+f4_campaign_add_test(test_due_queue      test_due_queue.cpp)
+
 # DOM-3 — the personnel layer: AssignPilots (the crew pick + the
 # pick-time gate), the rating-decay arm, the ledger's personnel books,
 # and the write-back's roster face. Links f4-json (the ledger's to_json

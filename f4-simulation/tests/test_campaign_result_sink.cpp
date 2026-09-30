@@ -527,6 +527,166 @@ TEST(ResultSink, PristineObjectivesSyncNothing) {
     EXPECT_EQ(sink.stats().objectives_synced, 0);
 }
 
+// ── 4b. AGG-2a — the transition-triggered sync (the dirty walk) ─────────────
+//
+// The per-pass sync (sync_dirty_objective_damage) diffs ONLY the
+// objectives a transition marked (the bomb-impact subscription; the
+// session's repair mirror marks explicitly). Two identical worlds fed
+// the SAME transitions — A per-pass full-syncs (the pre-AGG-2a shape),
+// B dirty-syncs — must produce byte-identical ledgers (to_json() is
+// byte-stable) and identical delta collections: the dirty walk is the
+// full walk's exact shadow, O(changes) instead of O(objectives).
+
+TEST(ResultSink, DirtySyncIsTheFullWalksShadow) {
+    auto ws_a = make_sink_world();
+    auto ws_b = make_sink_world();
+    EntityWorld ew_a, ew_b;
+    auto pw_a = f4::world::populate_world(ew_a, ws_a);
+    auto pw_b = f4::world::populate_world(ew_b, ws_b);
+    WorldStateAdapters adapters_a(ws_a);
+    WorldStateAdapters adapters_b(ws_b);
+    CampaignResultLedger ledger_a(adapters_a.campaign, adapters_a.teams,
+                                  adapters_a.units);
+    CampaignResultLedger ledger_b(adapters_b.campaign, adapters_b.teams,
+                                  adapters_b.units);
+    CampaignResultSink sink_a(ledger_a, ew_a);
+    CampaignResultSink sink_b(ledger_b, ew_b);
+
+    // Identical worlds → identical entity ids (deterministic creation);
+    // the marks are keyed by ENTITY id, so the pin needs this.
+    const auto ent_a = pw_a.objective_id_map.at(4101);
+    const auto ent_b = pw_b.objective_id_map.at(4101);
+    ASSERT_EQ(ent_a.value, ent_b.value);
+
+    // Pass 1 — quiet. The full walk books nothing; the dirty walk is
+    // an O(1) no-op.
+    sink_a.sync_objective_damage();
+    sink_b.sync_dirty_objective_damage();
+    EXPECT_TRUE(sink_a.damage_synced().empty());
+    EXPECT_TRUE(sink_b.damage_synced().empty());
+
+    // Pass 2 — one bomb (the event marks; the face write is the same
+    // post-blast state f4-weapons leaves behind).
+    f4::weapons::BombImpactMessage impact;
+    impact.sim_time_s = 45.5;
+    impact.target_id = ent_b.value;
+    impact.features_destroyed = 1;
+    impact.destroyed_pct = 33.3;
+    sink_b.handle_bomb_impact(impact);
+    ASSERT_EQ(sink_b.dirty_objectives(), 1u);
+    {
+        auto* fs = EntityHandle(ent_b, &ew_b).get<FeatureSetComponent>();
+        fs->features[1].damage_state = 3;
+        EntityHandle(ent_b, &ew_b).get<DamageBitmapComponent>()->fstatus =
+            kDamagedFstatus;
+    }
+    f4::weapons::BombImpactMessage impact_a = impact;
+    impact_a.target_id = ent_a.value;
+    sink_a.handle_bomb_impact(impact_a);
+    {
+        auto* fs = EntityHandle(ent_a, &ew_a).get<FeatureSetComponent>();
+        fs->features[1].damage_state = 3;
+        EntityHandle(ent_a, &ew_a).get<DamageBitmapComponent>()->fstatus =
+            kDamagedFstatus;
+    }
+    sink_a.sync_objective_damage();
+    sink_b.sync_dirty_objective_damage();
+    ASSERT_EQ(ledger_a.objective_damage().size(), 1u);
+    ASSERT_EQ(ledger_b.objective_damage().size(), 1u);
+    EXPECT_EQ(ledger_b.objective_damage()[0].objective, 4101u);
+    EXPECT_EQ(ledger_b.objective_damage()[0].features_destroyed, 1);
+    EXPECT_EQ(ledger_b.objective_damage()[0].destroyed_pct, 67);
+    EXPECT_EQ(ledger_b.objective_damage()[0].fstatus, kDamagedFstatus);
+    // The records agree field-for-field (ObjectiveDamageRecord has no
+    // operator==; the byte-stable documents carry the full pin below).
+    ASSERT_EQ(ledger_a.objective_damage().size(),
+              ledger_b.objective_damage().size());
+    for (std::size_t i = 0; i < ledger_a.objective_damage().size(); ++i) {
+        EXPECT_EQ(ledger_a.objective_damage()[i].objective,
+                  ledger_b.objective_damage()[i].objective);
+        EXPECT_EQ(ledger_a.objective_damage()[i].features_total,
+                  ledger_b.objective_damage()[i].features_total);
+        EXPECT_EQ(ledger_a.objective_damage()[i].features_destroyed,
+                  ledger_b.objective_damage()[i].features_destroyed);
+        EXPECT_EQ(ledger_a.objective_damage()[i].destroyed_pct,
+                  ledger_b.objective_damage()[i].destroyed_pct);
+        EXPECT_EQ(ledger_a.objective_damage()[i].fstatus,
+                  ledger_b.objective_damage()[i].fstatus);
+    }
+    ASSERT_EQ(sink_b.damage_synced().size(), 1u);
+    ASSERT_EQ(sink_a.damage_synced().size(), 1u);
+    EXPECT_EQ(sink_a.damage_synced()[0].vu, sink_b.damage_synced()[0].vu);
+
+    // Pass 3 — quiet. No residual dirt, no stale delta rows (the dirty
+    // walk clears its collection even when it books nothing — what the
+    // caller drains after the call is what THIS sync collected).
+    sink_a.sync_objective_damage();
+    sink_b.sync_dirty_objective_damage();
+    EXPECT_EQ(sink_b.dirty_objectives(), 0u);
+    EXPECT_TRUE(sink_b.damage_synced().empty());
+
+    // The negative surface: an unknown-entity mark and a target-less
+    // impact are no-ops; a markless dirty sync books nothing.
+    const auto rows = ledger_b.objective_damage().size();
+    sink_b.mark_objective_dirty(0xDEADBEEF);
+    EXPECT_EQ(sink_b.dirty_objectives(), 0u);
+    f4::weapons::BombImpactMessage miss;
+    miss.sim_time_s = 46.0;
+    miss.target_id = 0;
+    sink_b.handle_bomb_impact(miss);
+    EXPECT_EQ(sink_b.dirty_objectives(), 0u);
+    sink_b.sync_dirty_objective_damage();
+    EXPECT_EQ(ledger_b.objective_damage().size(), rows);
+
+    // The finale: the byte-stable documents agree (the impact LOG rows
+    // book identically on both sides — every impact is logged, damage
+    // or not — so the documents stay comparable).
+    EXPECT_EQ(ledger_a.to_json(), ledger_b.to_json());
+}
+
+TEST(ResultSink, DirtySyncBooksTheRepairMark) {
+    // The repair mirror's mark: the session writes VIS_REPAIRED into
+    // the entity face (emit_repair_events_) and marks the row — the
+    // dirty walk must diff the repair the same way the full walk does
+    // (a repaired fstatus is a CHANGE: it is what carries the repair
+    // into the ledger's write-back).
+    auto ws = make_sink_world();
+    // The objective starts DAMAGED (a run repairs it): feature 1
+    // destroyed at snapshot time is not this run's delta, so start the
+    // run at the damaged state — the snapshot takes it as initial.
+    ws.objectives[0].fstatus = kDamagedFstatus;
+    EntityWorld ew;
+    auto pw = f4::world::populate_world(ew, ws);
+    WorldStateAdapters adapters(ws);
+    CampaignResultLedger ledger(adapters.campaign, adapters.teams,
+                                adapters.units);
+    CampaignResultSink sink(ledger, ew);
+    const auto obj = pw.objective_id_map.at(4101);
+    auto* fs = EntityHandle(obj, &ew).get<FeatureSetComponent>();
+    auto* db = EntityHandle(obj, &ew).get<DamageBitmapComponent>();
+    ASSERT_NE(fs, nullptr);
+    ASSERT_NE(db, nullptr);
+
+    // The run repairs feature 1 (VIS_REPAIRED): the mirror's writes,
+    // then the mark the session's emit_repair_events_ makes.
+    fs->features[1].damage_state = 1;
+    db->fstatus = {0x04, 0x00};   // feature 0 normal, feature 1 repaired
+    sink.mark_objective_dirty(obj.value);
+    ASSERT_EQ(sink.dirty_objectives(), 1u);
+    sink.sync_dirty_objective_damage();
+
+    ASSERT_EQ(ledger.objective_damage().size(), 1u);
+    const auto& rec = ledger.objective_damage()[0];
+    EXPECT_EQ(rec.objective, 4101u);
+    EXPECT_EQ(rec.features_destroyed, 0);   // repaired is not destroyed
+    EXPECT_EQ(rec.destroyed_pct, 0);
+    EXPECT_EQ(rec.fstatus, (std::vector<std::uint8_t>{0x04, 0x00}));
+    // The snapshot ADVANCED to the repaired state: a repeat books
+    // nothing new.
+    sink.sync_dirty_objective_damage();
+    EXPECT_EQ(ledger.objective_damage().size(), 1u);
+}
+
 // ── 5. G2 — the interdiction booking (GroundUnitLossMessage) ────────────────
 
 TEST(ResultSink, UnitLossBooksWhenArmed) {
