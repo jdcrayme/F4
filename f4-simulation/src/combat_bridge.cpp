@@ -357,6 +357,19 @@ void attach_combat_loadout(entities::EntityHandle& aircraft,
         pod.own_team = ac.team;
     }
 
+    // Step 13, the scenario half: the per-aircraft "awacs" flag stamps
+    // the datalink-node component — the scenario-mode twin of the two
+    // campaign spawn paths' mission_is_datalink stamp. UNCONDITIONAL,
+    // like the campaign stamps: the walk's "gci_datalink" gate is the
+    // fidelity switch, so a stamped node with the gate off is inert
+    // data nothing ever reads (the header's documented claim — this is
+    // the code delivering it). Geometry rides the component's defaults
+    // (the net's documented v1 shape: 200 NM radius, the flat-earth
+    // horizon clamp at 0); the walk reads exactly these fields.
+    if (ac.awacs) {
+        (void)aircraft.add<AwacsComponent>();
+    }
+
     // Damage endpoint: hit points, not yet killed.
     auto& dmg = aircraft.add<entities::DamageStateComponent>();
     dmg.hit_points = hit_points;

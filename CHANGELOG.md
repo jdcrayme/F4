@@ -5,6 +5,43 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## DATALINK-1 — Step 13 closed out: the sim-side datalink tiers
+
+The AI Implementation Plan's DatalinkTier (§15 Step 13) is complete —
+both halves landed. The f4-ai half (the `DatalinkNet` primitives, the
+fusion's optional net leg, the 15-case geometry/gate suite) arrived in
+f4 batch 2; this tranche lands the f4-simulation remainder:
+
+- **The scenario node stamp** — the per-aircraft `"awacs"` flag now
+  stamps `AwacsComponent` in `attach_combat_loadout`, the scenario-mode
+  twin of the two campaign spawn paths' `mission_is_datalink` stamp
+  (the header's documented claim, previously parsed-but-unconsumed).
+  Unconditional, like the campaign stamps: the walk's `gci_datalink`
+  gate is the fidelity switch.
+- **Liveness on both sides of the mask** — the walk skips killed
+  entities when collecting NODES (the shot-down AWACS stops
+  broadcasting the same walk — no GCI-ghost through a dead radar) and
+  when filling the contact bitmask (a splashed contact's mask entry
+  answers 0 — the policy's corpse early-out, extended to the net leg;
+  aggregate flight VUs are never resolved through the entity
+  database). Verified to catch both bugs: with the fix reverted the
+  new liveness tests fail exactly as the plan's Step-13 test list
+  predicts.
+- **`test_datalink_tiers.cpp` (8 cases)** — the sim-side suite the
+  batch-2 CMake note named: the stamp, the no-nodes twin (gate on ==
+  gate off, TargetInfo member-for-member), the coverage commit beyond
+  own radar (151 NM contact seen through the net alone, `threat_target`
+  commits), the per-team bitmask isolation (blue's node lights blue's
+  leg, never red's, in one run), node death, the corpse rule, the live
+  horizon clamp (the walk re-reads the component's geometry every
+  walk), and the ground-site arm (`gci_ground_sites` collects
+  radar-bearing objectives; the arm off leaves the same world dark).
+
+Gate-off runs remain byte-identical by construction (every change lives
+behind `datalink_gate_on`). Neighboring suites green: passive fusion
+8/8, combat integration 29/29, sensor fidelity 7/7, countermeasures
+4/4, the f4-ai datalink net suite 15/15.
+
 ## AVIONICS-1 — the f4-avionics scaffold: INS + steerpoint navigation
 
 The avionics plan's first tranche (Docs/AVIONICS_PLAN.md §4) — the

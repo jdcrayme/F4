@@ -2630,6 +2630,33 @@ void CampaignSession::handle_mission_intent_(
             }
         }
 
+        // CAMP-TOT-PACE: a delivery cannot precede its own ingress.
+        // The ATM's midpoint TOTs ignore the route length — short-
+        // midpoint profiles on long routes filed deliveries the war
+        // could only fly LATE (the QC's +21-min residual). The TOT
+        // pushes to the earliest feasible time (the ingress plus one
+        // ops window for the ATC sequence); the recovery deadline
+        // follows, and the appointment hold delivers ON it.
+        if (delivery_index > 0) {
+            const std::int64_t floor_tot =
+                campaign_time() +
+                static_cast<std::int64_t>(travel_s) +
+                static_cast<std::int64_t>(
+                    std::max(0, ops_window_sec_));
+            if (tot < floor_tot) {
+                if (seed.mission_over_time > 0) {
+                    seed.mission_over_time =
+                        static_cast<std::int32_t>(
+                            std::clamp<std::int64_t>(
+                                static_cast<std::int64_t>(
+                                    seed.mission_over_time) +
+                                    (floor_tot - tot),
+                                1, 2147483647));
+                }
+                tot = floor_tot;
+            }
+        }
+
         if (airbase_scheduling_ && intent.takeoff > 0) {
             const std::int64_t takeoff_abs =
                 epoch_ + static_cast<std::int64_t>(intent.takeoff);
@@ -2647,6 +2674,16 @@ void CampaignSession::handle_mission_intent_(
             std::clamp<std::int64_t>(depart, 1, 2147483647));
         seed.time_on_target = static_cast<std::int32_t>(
             std::clamp<std::int64_t>(tot, 0, 2147483647));
+        // The TOT APPOINTMENT: the delivery waypoint is not captured
+        // before its time (the SPEED-mode hold — advance_flight_'s and
+        // display_position's appointment gate). A flight with slack
+        // holds short of the target and delivers ON the TOT instead of
+        // transiting whenever its cruise got it there.
+        if (delivery_index > 0) {
+            seed.route[delivery_index].arrive =
+                static_cast<std::int32_t>(
+                    std::clamp<std::int64_t>(tot, 0, 2147483647));
+        }
     }
     if (flights_->register_synthetic(seed) ==
         static_cast<std::size_t>(-1)) {
@@ -3052,6 +3089,61 @@ bool CampaignSession::reaggregate_flight_(std::uint32_t vu) {
                 cruise = std::clamp(
                     fm->ground_speed_fps() * 60.0 / kFtPerGrid,
                     flights_->cruise_grid_per_min(), 40.0);
+            }
+            // CAMP-TOT-PACE — the fold paces the row to ITS OWN TOT:
+            // when a delivery waypoint still lies ahead and the TOT is
+            // in the future, the row's cruise becomes
+            // remaining_distance / time-to-TOT (clamped to [the config
+            // cruise, ~460 kts]). The live windows fly at real speed
+            // and scatter arrivals ±30 min; a TOT-paced fold makes the
+            // aggregate converge on the planned time regardless of how
+            // far the live excursion strayed. When the pace is under
+            // the cruise floor the flight keeps the floor (it arrives
+            // early — there is no hold-at-waypoint vocabulary yet).
+            {
+                const std::size_t ridx = flights_->index_of(vu);
+                const auto& routes = flights_->routes();
+                if (ridx != std::size_t(-1) && ridx < routes.size()) {
+                    const auto& rt = routes[ridx];
+                    int delivery = -1;
+                    for (int k = static_cast<int>(rt.size()) - 1; k >= 0;
+                         --k) {
+                        const std::uint8_t a = rt[k].action;
+                        if (a == 17 || a == 18 || a == 14 || a == 15 ||
+                            a == 19) {
+                            delivery = k;
+                            break;
+                        }
+                    }
+                    const std::size_t cursor =
+                        flights_->flights()[ridx].wp_index;
+                    if (delivery >= 0 &&
+                        cursor <= static_cast<std::size_t>(delivery)) {
+                        const std::int64_t secs =
+                            static_cast<std::int64_t>(
+                                flights_->flights()[ridx].time_on_target) -
+                            campaign_time();
+                        if (secs > 60) {
+                            double dist = 0.0;
+                            for (int k = static_cast<int>(cursor) + 1;
+                                 k <= delivery; ++k) {
+                                const double ddx =
+                                    static_cast<double>(rt[k].x) -
+                                    rt[k - 1].x;
+                                const double ddy =
+                                    static_cast<double>(rt[k].y) -
+                                    rt[k - 1].y;
+                                dist += std::sqrt(ddx * ddx + ddy * ddy);
+                            }
+                            if (dist > 0.0) {
+                                cruise = std::clamp(
+                                    dist / static_cast<double>(secs) *
+                                        60.0,
+                                    flights_->cruise_grid_per_min(), 40.0);
+                            }
+                        }
+                    }
+                }
             }
             flights_->reaggregate(vu, lead_pos.x / kFtPerGrid,
                                   lead_pos.y / kFtPerGrid,

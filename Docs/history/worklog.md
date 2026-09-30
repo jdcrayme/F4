@@ -428,3 +428,72 @@ Stage Summary:
 - The v1 INS is an error model over the IAircraftState seam — the scope
   decision is written into ins.hpp's header comment and the plan's
   as-built note so the next tranche doesn't relitigate it.
+
+---
+
+Task ID: DATALINK-1
+Agent: main
+Task: "Close out AI_IMPLEMENTATION_PLAN §15 Step 13's sim-side remainder —
+the scenario-mode datalink-node stamp, the host walk's liveness
+discipline, and the named test_datalink_tiers suite — with the
+twin/byte-identity contracts held."
+
+Work Log:
+- Mapped the landed f4-batch-2 host half (push_air_picture_'s node
+  collection + bitmask fill + the gated handoff, the campaign stamps in
+  campaign_bridge.cpp, the CombatConfig fields) and found the three
+  gaps: the scenario "awacs" flag parsed but never consumed (the
+  combat_bridge.hpp header claimed the stamp), test_datalink_tiers
+  named in tests/CMakeLists.txt but absent, and the walk collecting
+  nodes/masks with no killed check (the GCI-ghost the tranche's own
+  comments warned about).
+- The stamp: attach_combat_loadout adds AwacsComponent when
+  ScenarioAircraft::awacs — unconditional, mirroring the campaign
+  paths' mission_is_datalink stamps; the walk's gci_datalink gate
+  stays the fidelity switch (a stamped node with the gate off is
+  inert data).
+- Liveness on both mask sides: node collection skips
+  DamageStateComponent::killed entities (a dead AWACS/objective radar
+  stops broadcasting the same walk; entities without the component —
+  bare objectives — are alive by definition), and the mask fill gives
+  killed contacts a 0 entry (the policy corpse early-out extended to
+  the net leg) while never resolving aggregate flight VUs through the
+  entity database (the first_aggregate_index boundary captured before
+  the FID-5 feed appends).
+- test_datalink_tiers.cpp (8 cases, label f4-simulation): the stamp +
+  defaults, the no-nodes twin (gate on == gate off, TargetInfo
+  member-for-member across sequential deterministic runs), the
+  coverage commit (151 NM contact through the net alone,
+  threat_target commits, radar leg provably dark), per-team bitmask
+  isolation (blue node lights blue's leg and never red's, one run),
+  node death, the corpse rule, the live horizon clamp (component
+  mutation drops and re-lights the leg), and the ground-site arm
+  (white-box bare-entity radar objective; arm off leaves the same
+  world dark).
+- Bug-catch verification: stashed the simulation.cpp liveness fix,
+  rebuilt, ran the two liveness tests — both FAIL without the fix
+  exactly as the plan's Step-13 test list predicts; popped, rebuilt,
+  8/8 green.
+- Docs: AI_IMPLEMENTATION_PLAN §Step 13 LANDED note rewritten (both
+  halves, the as-built AwacsComponent shape with no station field);
+  CHANGELOG DATALINK-1 entry; tests/CMakeLists.txt stale follow-up
+  comment replaced (test_flight_persistence's FID-P0 pins had already
+  landed inside test_fidelity_tiers §9).
+
+Tests: test_datalink_tiers 8/8; neighbors green — test_passive_fusion
+8/8, test_combat_integration 29/29, test_sensor_fidelity 7/7,
+test_countermeasure_e2e 4/4, f4-ai test_datalink_net 15/15; boundary
+verifier PASS at configure (headless shape, -DF4_ENFORCE_BOUNDARY=ON
+shape). Full fast f4-simulation tier re-run for the walk change
+(results in the session log; known pre-existing reds unchanged).
+
+Stage Summary:
+- Step 13 is CLOSED: the GCI datalink is now armed end to end from
+  scenario JSON ("awacs" per-aircraft + "gci_datalink"/
+  "gci_ground_sites" combat gates), through the campaign spawn paths,
+  the single host walk, to the fusion's net leg — red/blue information
+  asymmetry is live, and the picture decays the same tick a node dies.
+- The gate-off byte-identity contract holds by construction (every
+  change lives behind datalink_gate_on); the plan's v2 notes (operator
+  lag decay window, beam-physics node geometry) stay named-not-built.
+

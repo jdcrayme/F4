@@ -135,7 +135,14 @@ FlightAggregateEngine::FlightAggregateEngine(
                     break;
                 }
             }
-            if (computable == 0 || all_crawl) timed = false;
+            if (computable == 0 || all_crawl) {
+                timed = false;
+                // The wire's times are the rejected garbage — scrub
+                // them: a SPEED-mode route must not read them as TOT
+                // appointments (the multi-day arrive values would hold
+                // the walk forever).
+                for (auto& w : routes_.back()) w.arrive = 0;
+            }
         }
         time_mode_.push_back(timed);
 
@@ -279,6 +286,15 @@ void FlightAggregateEngine::advance_flight_(
         while (remaining > 0.0 && f.wp_index < route.size() &&
                !f.arrived) {
             const auto& target = route[f.wp_index];
+            // CAMP-TOT-PACE: an appointment time (the seed stamps the
+            // delivery waypoint's arrive = TOT) holds the walk SHORT
+            // of the waypoint until its time — a flight with slack
+            // used to transit the target whenever it got there (the
+            // early side of the ±30-min delivery scatter). TIME mode's
+            // own semantics, borrowed for one appointment.
+            if (target.arrive > 0 && now_abs < target.arrive) {
+                break;
+            }
             const double dx = static_cast<double>(target.x) - f.fx;
             const double dy = static_cast<double>(target.y) - f.fy;
             const double dist = std::sqrt(dx * dx + dy * dy);
@@ -819,6 +835,12 @@ void FlightAggregateEngine::display_position(
     std::size_t wp = f.wp_index < route.size() ? f.wp_index : route.size();
     while (remaining > 0.0 && wp < route.size()) {
         const auto& target = route[wp];
+        // The appointment gate (advance_flight_'s own rule): the
+        // serving face holds short of an appointed waypoint too — one
+        // truth, no pause-then-jump at the hold point.
+        if (target.arrive > 0 && now_abs < target.arrive) {
+            break;
+        }
         const double dx = static_cast<double>(target.x) - px;
         const double dy = static_cast<double>(target.y) - py;
         const double dist = std::sqrt(dx * dx + dy * dy);

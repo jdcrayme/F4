@@ -1629,12 +1629,34 @@ per-team net*).
 
 ### Step 13: DatalinkTier — the AWACS/GCI broadcast (replaces the omniscient leg)
 
-**LANDED (f4 batch 2)** — the f4-ai half matches this design: `datalink_net.hpp`
-(`DatalinkNode` / `DatalinkNet` / `node_sees`, the flat-earth v1 geometry) +
-the fusion's optional net leg (`SensorFusion::set_datalink`, null = the legacy
-omniscient GCI leg, byte-identical) + the twin contract in
-`test_datalink_net.cpp`. The host picture walk and the gate plumbing are the
-f4-simulation tranche.
+**LANDED (f4 batch 2 + DATALINK-1)** — both halves match this design.
+The f4-ai half: `datalink_net.hpp` (`DatalinkNode` / `DatalinkNet` /
+`node_sees`, the flat-earth v1 geometry) + the fusion's optional net leg
+(`SensorFusion::set_datalink`, null = the legacy omniscient GCI leg,
+byte-identical) + the twin contract in `test_datalink_net.cpp`. The
+f4-simulation half: the host picture walk builds the net inside the
+PERF-1 single walk (node collection from `AwacsComponent` +
+radar-bearing entities before the clutter skip, the per-contact team
+bitmask after the aggregate feed, the handoff gated on
+`combat.gci_datalink` AND at least one live node — no nodes = the legacy
+leg), the campaign spawn paths stamp `AwacsComponent` on
+`mission_is_datalink` flights, and `combat.gci_datalink` /
+`combat.gci_ground_sites` flow scenario JSON → CombatConfig → walk.
+**DATALINK-1** closed the tranche's sim-side remainder: the scenario's
+per-aircraft `"awacs"` flag now stamps the component in
+`attach_combat_loadout` (the documented claim, delivered); the walk
+honors liveness on BOTH sides of the mask (a killed node stops
+broadcasting the same walk — no GCI-ghost through a dead radar; a
+killed contact's mask entry answers 0 — the corpse rule the policy's
+early-out gives the sensor legs, extended to the net leg), and the
+`test_datalink_tiers.cpp` suite (8 cases) pins the sim tiers end to
+end: the stamp, the no-nodes twin (gate on == gate off,
+member-for-member), the coverage commit beyond own radar, the per-team
+bitmask isolation, node death, the corpse rule, the live horizon clamp
+(the walk re-reads the component's geometry every walk), and the
+ground-site arm. As-built shape note: the landed `AwacsComponent`
+carries `range_nm`/`min_alt_ft` only (no `station` field — the v1 node
+is a sentinel, the station-keeping brain is Step 15's SupportStationBrain).
 
 **FreeFalcon reference**: the GCI rule lives in the campaign's sensor nets
 (radar-bearing objectives + AWACS flights feeding the queries the digi

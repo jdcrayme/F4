@@ -121,6 +121,14 @@ f4_simulation_add_test(test_passive_fusion         test_passive_fusion.cpp)
 target_compile_definitions(test_passive_fusion PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
 )
+# The sim-side datalink tiers (Step 13): the scenario "awacs" stamp,
+# the gate/host-walk tiers over the shared net geometry the f4-ai
+# suite (test_datalink_net) pins — node death, the corpse rule, the
+# horizon clamp, the ground-site arm.
+f4_simulation_add_test(test_datalink_tiers         test_datalink_tiers.cpp)
+target_compile_definitions(test_datalink_tiers PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
 f4_simulation_add_test(test_countermeasure_e2e     test_countermeasure_e2e.cpp)
 target_compile_definitions(test_countermeasure_e2e PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
@@ -502,7 +510,3 @@ add_executable(run_scenario run_scenario.cpp)
 target_link_libraries(run_scenario PRIVATE f4-simulation GTest::gtest)
 target_compile_definitions(run_scenario PRIVATE
     F4_SCENARIOS_DIR="${CMAKE_BINARY_DIR}/scenarios")
-# The sim-side suites (test_flight_persistence — the FID-P0 fold-race
-# pins — and test_datalink_tiers — the gate/host-walk tiers) are the
-# named follow-up tranche: the f4-ai 15-case net suite (test_datalink_net)
-# rides in this batch and owns the geometry/gate pins.

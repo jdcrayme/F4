@@ -1702,10 +1702,28 @@ void Simulation::push_air_picture_(double dt) {
             // NODE; an AWACS/JSTAR is airborne and passes both. Node
             // team strings intern into the net's own table (above).
             if (datalink_gate_on) {
-                const auto* awacs = h.get<AwacsComponent>();
-                const auto* radar = datalink_ground_sites
-                                        ? h.get<entities::RadarComponent>()
-                                        : nullptr;
+                // The NODE's own liveness first (the corpse rule for the
+                // node side): a killed datalink asset — the shot-down
+                // AWACS, the destroyed objective radar — stops
+                // broadcasting THIS walk. The unconditional clear at the
+                // top of the walk drops the stale entry; re-collection
+                // honoring the killed flag is what keeps it dropped.
+                // Without this check the dead airframe's frozen transform
+                // would keep feeding node_sees() — a GCI-ghost
+                // broadcasting through a dead radar, the exact failure
+                // this tier exists to kill. Entities without a
+                // DamageStateComponent (a bare objective) are alive by
+                // definition.
+                const auto* node_dmg =
+                    h.get<entities::DamageStateComponent>();
+                const bool node_alive =
+                    node_dmg == nullptr || !node_dmg->killed;
+                const auto* awacs =
+                    node_alive ? h.get<AwacsComponent>() : nullptr;
+                const auto* radar =
+                    (node_alive && datalink_ground_sites)
+                        ? h.get<entities::RadarComponent>()
+                        : nullptr;
                 if (awacs != nullptr || radar != nullptr) {
                     f4::ai::DatalinkNode node;
                     node.entity_id = eid.value;
@@ -1786,6 +1804,16 @@ void Simulation::push_air_picture_(double dt) {
             air_picture_.contacts.push_back(c);
         }
 
+        // The world-contact/aggregate boundary (FID-5): indexes BELOW
+        // this are entity-backed contacts (the corpse lookup in the mask
+        // fill below may run); indexes at-or-above are aggregate flights
+        // keyed by flight VUs, NOT entity ids — the mask fill must not
+        // resolve a VU through the entity database (a VU can collide
+        // with a live entity id; the aggregate engine owns their
+        // liveness).
+        const std::size_t first_aggregate_index =
+            air_picture_.contacts.size();
+
         // FID-5 (§4.6): the aggregate feed — the session's Tier-A flights
         // appended AFTER the world walk, in flight order (deterministic:
         // the session rebuilds the buffer in the engine's wire order).
@@ -1834,10 +1862,33 @@ void Simulation::push_air_picture_(double dt) {
             for (std::size_t i = 0; i < air_picture_.contacts.size(); ++i) {
                 const auto& c = air_picture_.contacts[i];
                 std::uint32_t mask = 0;
-                for (const auto& n : datalink_net_.nodes) {
-                    if (n.team < 0) continue;
-                    if (f4::ai::node_sees(n, c.position)) {
-                        mask |= (1u << static_cast<unsigned>(n.team));
+                // The corpse rule for the NET (the sensor-side twin is
+                // the policy's corpse early-out): a splashed contact
+                // stops being a GCI track THIS walk — the mask entry
+                // stays (the vector is parallel to contacts) but answers
+                // 0. Without this, a corpse inside a live node's
+                // geometry would keep painting detected_by_gci through
+                // the fusion's datalink leg — the corpse the policy's
+                // early-out just blanked resurrects one column later.
+                // Aggregate contacts (indexes at/above
+                // first_aggregate_index) are flight VUs, not entities —
+                // always mask-eligible, their liveness owned by the
+                // aggregate engine.
+                bool contact_alive = true;
+                if (i < first_aggregate_index) {
+                    entities::EntityHandle contact(
+                        entities::EntityId{c.entity_id}, &world_);
+                    if (const auto* dmg =
+                            contact.get<entities::DamageStateComponent>()) {
+                        contact_alive = !dmg->killed;
+                    }
+                }
+                if (contact_alive) {
+                    for (const auto& n : datalink_net_.nodes) {
+                        if (n.team < 0) continue;
+                        if (f4::ai::node_sees(n, c.position)) {
+                            mask |= (1u << static_cast<unsigned>(n.team));
+                        }
                     }
                 }
                 datalink_net_.contact_seen_teams.push_back(mask);
