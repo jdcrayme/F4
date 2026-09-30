@@ -5,6 +5,36 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## AVIONICS-1 — the f4-avionics scaffold: INS + steerpoint navigation
+
+The avionics plan's first tranche (Docs/AVIONICS_PLAN.md §4) — the
+engine-agnostic avionics layer exists. New header-only `f4-avionics`
+(namespace `f4::avionics`), runtime-side in the boundary verifier:
+
+- **The INS** (`InsUnit` + `InsConfig`) — alignment as a PURE transition
+  table on f4-state-machine (`make_ins_machine()`: Off → Aligning →
+  Aligned, Shutdown from both live states; side effects in `update()`, the
+  stall-SM polling→event bridge). The align clock accrues only on the
+  ground ("alignment completing on the ground clock"); completion zeroes
+  the chain and seeds the walk. The stored heading/altitude/position
+  chain reports truth-plus-drift; before Aligned it reports raw truth.
+- **The drift integral is a seeded deterministic walk keyed on the
+  airframe's nav data** — `nav_data_key` (FNV-1a) + `nav_data_age_days`
+  seed and scale a bounded rate walk; the sampler is a fully specified
+  splitmix64 (NOT std:: distributions) so the same seed fed the same
+  update stream is byte-identical cross-platform. v1 is an error model
+  over the IAircraftState seam (the strapdown-integrator tranche is
+  named, not built).
+- **Steerpoint navigation** — `SteerpointSequence` (loud
+  `std::out_of_range`, `next()` reports the end wall), `to_steer()` (BRA
+  over f4-geo: slant range, true bearing), `steer_cue()` (the HSI cue,
+  dead-astern pins right — pinned), and `current_steer()` /
+  `current_steer_cue()` reading through the drifting INS.
+- **Tests** — 24 (label `f4-avionics`): the ground-clock align pins, the
+  drift-zero twin equal to raw truth member-for-member, determinism per
+  seed AND per update stream, nav-data keying, clamp bounds, the
+  through-INS vs raw reads, the cue pins.
+
 ## AGG-2a — the transition-triggered publishers + the due-queue primitive
 
 The AGG-1 follow-up (Docs/AGGREGATE_CLOCK_PLAN.md §4): with the pass
@@ -213,6 +243,40 @@ read that frozen position.
   and the A/B divergence's suspended-row fuel pin re-locked to the
   tracking contract. FullFidelitySpawnsAndHasNoEngine now requests the
   policy explicitly (the FID-DEF-GOV sweep missed it).
+
+## CAMP-TOT-PACE — the generated air war learns when its own deliveries are scheduled
+
+The 6-h stock-save QC (test_campaign_airwar_qc, F4_STOCK_WORLD-gated —
+a 524-flight measured war) condemned the pacing: takeoffs worked
+(353 launched, 350 airborne), recoveries worked (265 home, zero
+lost), and **not one of 112 matured deliveries was inside ±5 min of
+its TOT — median +23 minutes late**. Three causes, three fixes:
+
+- **The gate paced nothing** — `TOT − 1200 s` flat, whatever the
+  geometry. The gate now PACES THE LAUNCH: base → the route's
+  delivery waypoint at the aggregate cruise
+  (`gate = TOT − ingress/cruise`), so the aggregate arrives when the
+  plan says. CAP racetracks (no delivery leg) keep the old window.
+- **The ops pin flew the whole ingress live** — a takeoff-window
+  deagg pinned its flight for 2×600 s: 20 minutes at real speed
+  overflew the target long before the TOT, and the post-fold cursor
+  only stumbled past the delivery waypoint minutes later. A pure
+  takeoff-window deagg now takes `Trigger::OpsTakeoff` and the short
+  `takeoff_pin_sec` (300 s default — the ATC sequence: hold,
+  teleport, roll, climb); the delivery and recovery windows keep the
+  full ops pin (the attack and the approach run live).
+- **CAMP-SAVE-WAVE clamped the wrong end** — the initial wave's GATE
+  moved under the planner's 2-h TOT, so the wave launched on load and
+  transited its targets ~90 min early. The clamp now moves the WAVE'S
+  TOT (`now + ingress + 2×ops_window`) with the recovery deadline
+  shifted to match: launch and delivery stay consistent, and the map
+  is still alive inside the first minutes (the takeoff window opens
+  one ops window before the gate).
+
+After: re-run the QC and compare against the baseline above (the
+report prints the same five lines). Pins: InitialWaveLaunchesNear
+re-locked to the clamp semantics (initial gate ≈ 2×ops_window, later
+cycles distance-paced).
 
 ## VIEWER-QC-2 — the stock-save session's four: damage-event dupes, mystery rings, plan spaghetti, the landing flyaway
 

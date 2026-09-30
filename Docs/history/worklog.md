@@ -351,3 +351,80 @@ Stage Summary:
   arc again. Renderer-only change — no geometry, role, or exporter
   changes; the round-trip stays lossless (exporter writes explicit
   viewBox-unit widths).
+
+---
+Task ID: AVIONICS-1
+Agent: main
+Task: "Land the avionics plan's AVIONICS-1 tranche — the f4-avionics
+scaffold (CMake target, the PilotInput/IAircraftState seam), the INS
+(alignment SM, the stored heading/altitude/position chain, the drift
+integral as a seeded deterministic walk keyed on the airframe's nav
+data), and steerpoints (ranges/bearings read through the INS; the
+drift-zero case byte-identical to raw positions)."
+
+Work Log:
+- Read the plan's §4 AVIONICS-1 done-when and the consumers' seams
+  (f4-flight-api's IAircraftState, f4-geo's WorldPosition/BRA/to_bra,
+  f4-state-machine's Builder) before writing anything.
+- Library shape: header-only INTERFACE (the f4-geo discipline), namespace
+  f4::avionics, umbrella f4/avionics/f4_avionics.hpp over ins.hpp +
+  steerpoint.hpp. CMake links f4-flight-api, f4-geo, f4-state-machine and
+  nothing else; root CMakeLists gained the ordered add_subdirectory (after
+  f4-flight-api) and the runtime-side f4_mark_side row.
+- The alignment SM is a PURE transition table (make_ins_machine(), no
+  captures) — Off→Aligning on PowerOn, →Aligned on AlignTimer, →Off on
+  Shutdown from both live states. Side effects live in InsUnit::update()
+  (the stall-SM polling→event bridge): the align clock accrues only while
+  the fed truth is on_ground() (the plan's "ground clock"), AlignTimer is
+  sent when it passes align_time_s, and completion zeroes the chain and
+  seeds the walk.
+- The drift integral: a bounded rate walk — per update each axis's error
+  rate takes one clamped uniform step (fixed sample order east, north,
+  up, heading) and the position error integrates the rate. Seed = config
+  seed, else FNV-1a over nav_data_key; nav_data_age_days scales the step
+  and mixes into the seed. The sampler is a fully specified splitmix64 +
+  53-bit uniform — deliberately NOT std::mt19937/std:: distributions,
+  whose sequences are implementation-defined — so the same seed fed the
+  same update stream is byte-identical cross-platform. Clamps bound the
+  rate; sigma scales with age (old data saturates the limit, never
+  exceeds it).
+- Scope decision recorded in the header and the plan: v1 is an ERROR
+  MODEL over the IAircraftState seam (believed = truth + drift), not an
+  open-loop acceleration integrator — every avionics consumer reads the
+  believed chain relative to steerpoints, and the error model gives that
+  read deterministically without inventing an Euler-integration
+  divergence no consumer asked for. The strapdown integrator is a named
+  later tranche behind the same interface.
+- Steerpoints: Steerpoint/SteerpointSequence (loud out_of_range on
+  empty/out-of-range; next() reports the end wall — overflight is the
+  host's decision), to_steer() = f4-geo's to_bra over the supplied
+  position (slant range, true bearing wrapped [0,2π)), steer_cue() (the
+  HSI cue: signed error wrapped [−π,π], shortest-way flag, dead-astern
+  pins right — pinned), plus current_steer()/current_steer_cue() reading
+  through the INS.
+- Boundary verifier: f4-avionics marked runtime side; configure with
+  -DF4_ENFORCE_BOUNDARY=ON passes (all GUI targets off, CI's headless
+  shape).
+- Docs: AVIONICS_PLAN.md banner + the §4 AVIONICS-1 as-built note,
+  Docs/README.md index row, ARCHITECTURE PROPOSAL §3 (mermaid node +
+  edges, the summary table row, the target count 30→31), CHANGELOG entry.
+
+Tests: 24/24 green (label f4-avionics; test_avionics_ins +
+test_avionics_steer): the ground-clock align completes at exactly
+align_time_s and freezes airborne; align_time 0 completes on the first
+ground tick; shutdown discards the chain from both live states;
+re-alignment resets the walk; determinism per seed AND per update stream
+(same simulated time, different dt stream → different walk); keyed on
+nav data (key and age both move it); drift stays inside the clamps; the
+drift-zero twin compares equal to raw truth member-for-member through
+200 ticks of moving truth (including the through-INS steer read and
+cue); the cue pins (shortest way, dead astern right). f4-geo/f4-flight-
+api/f4-state-machine suites re-run green after the root CMake change.
+
+Stage Summary:
+- f4-avionics exists: the avionics layer's substrate (INS + steerpoint
+  nav) is landed, engine-agnostic and deterministic; AVIONICS-2 (the FCR
+  page SM) is the next rung and consumes f4-sensors beside this scaffold.
+- The v1 INS is an error model over the IAircraftState seam — the scope
+  decision is written into ins.hpp's header comment and the plan's
+  as-built note so the next tranche doesn't relitigate it.

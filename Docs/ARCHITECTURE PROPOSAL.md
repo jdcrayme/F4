@@ -82,7 +82,7 @@ The original often interleaves concerns — `AirframeClass::Exec()` runs atmosph
 
 ## 3. Library Overview & Dependency Graph
 
-As-built: the build defines **30 CMake targets** (27 libraries + 3
+As-built: the build defines **31 CMake targets** (28 libraries + 3
 interactive apps) plus two standalone tools (`campaign_qc`,
 `fm_sysid`). The graph below is extracted from the real
 `target_link_libraries` declarations — each CMakeLists.txt is the
@@ -103,6 +103,7 @@ graph TD
         lzss["f4-lzss"]
         io["f4-io"]
         fapi["f4-flight-api"]
+        avionics["f4-avionics"]
     end
     subgraph Infrastructure["Infrastructure"]
         entities["f4-entities"]
@@ -146,6 +147,10 @@ graph TD
     messaging --> ai
     recorder --> ai
     fsm --> ai
+
+    fapi --> avionics
+    geo --> avionics
+    fsm --> avionics
 
     math --> flight
     data --> flight
@@ -217,6 +222,7 @@ graph TD
 | `f4-lzss` | LZSS decompress/compress (TEX blobs, .cam archives) | — |
 | `f4-io` | Cursor + file primitives shared by converters | — |
 | `f4-flight-api` | PilotInput / IAircraftState / IPilotInputSink interfaces | — |
+| `f4-avionics` | Engine-agnostic avionics logic: INS (alignment SM, deterministic drift) + steerpoint navigation (AVIONICS-1) | f4-flight-api, f4-geo, f4-state-machine |
 | `f4-entities` | Entity handles + typed components, spatial index | f4-geo |
 | `f4-messaging` | Typed message bus, cross-thread queues | — |
 | `f4-world-types` | Runtime-safe enums + JSON class-table loader | f4-io, f4-json |

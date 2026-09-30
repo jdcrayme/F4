@@ -1,6 +1,6 @@
 # Avionics Plan — the engine-agnostic avionics logic layer
 
-> **Status**: Active — the one plan for the avionics subsystem. Nothing landed yet; §4 is the tranche ladder.
+> **Status**: Active — **AVIONICS-1 LANDED** (the `f4-avionics` scaffold: the IAircraftState seam, the INS alignment SM, the stored heading/altitude/position chain, the seeded deterministic drift walk keyed on the airframe's nav data, and steerpoint navigation with the HSI steering cue — 24 tests, label `f4-avionics`; see §4's as-built note). AVIONICS-2–4 open.
 > **Source of Truth**: [FreeFalcon/freefalcon-central](https://github.com/FreeFalcon/freefalcon-central) (develop branch), `sim/avio*`, HUD/MFD source under `sim/`
 > **Companions**: [Architecture Proposal](ARCHITECTURE%20PROPOSAL.md) §1 (scope), [Falcon4 File Layout](FALCON4_FILE_LAYOUT.md), [AI Implementation Plan](AI_IMPLEMENTATION_PLAN.md)
 
@@ -75,7 +75,7 @@ per-station counts — `expend()`), `f4-flight-api` (`PilotInput`,
 
 ## 4. Tranche ladder
 
-### AVIONICS-1 — the library scaffold + INS + steerpoint navigation
+### AVIONICS-1 — the library scaffold + INS + steerpoint navigation — **LANDED**
 `f4-avionics` scaffold (the CMake target, the `PilotInput`/`IAircraftState`
 seam), then the INS: alignment SM (align states, drift integral as a
 seeded deterministic walk keyed on the airframe's nav data), the stored
@@ -86,6 +86,60 @@ reports *aircraft position through the drifting INS* vs the steerpoint).
 drift accumulating deterministically, and steerpoint ranges/bearings
 reading through the INS; the drift-zero case is byte-identical to raw
 positions.
+
+**LANDED (AVIONICS-1)** — as-built, against this done-when:
+
+- **The scaffold** — `f4-avionics`, header-only (the f4-geo discipline),
+  namespace `f4::avionics`, umbrella `f4/avionics/f4_avionics.hpp`. Links
+  `f4-flight-api` (the seam), `f4-geo` (WorldPosition + BRA/to_bra),
+  `f4-state-machine` (the alignment table). Nothing else. Marked runtime
+  side in the boundary verifier. The seam is read-side for now: the INS
+  consumes `IAircraftState`; `PilotInput` emission arrives with the page
+  models (AVIONICS-2+).
+- **The alignment SM is a pure transition table** (`make_ins_machine()`:
+  Off → Aligning on PowerOn, → Aligned on AlignTimer, → Off on Shutdown
+  from both live states — no captures). Side effects live in
+  `InsUnit::update()`, the polling→event bridge, the stall-SM discipline:
+  the align clock accrues ONLY while the fed truth is `on_ground()` (the
+  ground clock), and `AlignTimer` is sent when it passes `align_time_s`.
+  Completion zeroes the chain against the align truth (that is what
+  alignment IS) and seeds the walk.
+- **The drift integral is a bounded rate walk** — per update, each axis's
+  error rate takes one clamped uniform step (fixed sample order: east,
+  north, up, heading) and the position error integrates the rate. The
+  seed is the config's `seed`, else FNV-1a over `nav_data_key` (the
+  airframe's nav-database identity); `nav_data_age_days` scales the step
+  and mixes into the seed. The SAMPLER is a fully specified splitmix64 —
+  NOT std::mt19937 + std:: distributions, whose sequences are
+  implementation-defined — so the same seed fed the same update stream is
+  byte-identical on every platform. Clamps bound the rate (sigma scales
+  with age; the clamp does not — old data saturates the limit).
+- **The scope decision (v1, an error model)** — the INS maintains the
+  BELIEVED chain as truth-plus-error over the `IAircraftState` the host
+  feeds, not an open-loop acceleration integrator: every avionics consumer
+  reads the believed chain relative to steerpoints, and the error model
+  gives that read honestly and deterministically without inventing an
+  Euler-integration divergence no consumer asked for. A full strapdown
+  integrator behind the same interface is a named later tranche if a host
+  ever pins one.
+- **Steerpoints** — `Steerpoint`/`SteerpointSequence` (ordered plan + a
+  selected point; overflight is the host's decision — `next()` reports the
+  wall, empty/out-of-range are loud `std::out_of_range`), `to_steer()`
+  (f4-geo's BRA over the supplied position — slant range, true bearing
+  wrapped [0, 2π)), `steer_cue()` (the HSI cue: signed bearing error
+  wrapped [−π, π], shortest-way flag, dead-astern pins right — pinned so
+  two renderers agree), and the `current_steer()` / `current_steer_cue()`
+  through-the-INS conveniences.
+- **Tests** — 24 (label `f4-avionics`, `test_ins.cpp` +
+  `test_steerpoint.cpp`): alignment completes on the ground clock at
+  exactly `align_time_s` (and the clock freezes airborne); shutdown from
+  both live states; re-alignment resets the walk; determinism per seed
+  AND per update stream (same time, different dt stream → different
+  walk); keyed on nav data (key and age both move it); clamps bound the
+  drift; the drift-zero twin compares equal to raw truth member-for-member
+  through 200 ticks of moving truth; the through-INS steer reads differ
+  from raw under drift and equal it with drift off; the cue pins (shortest
+  way, the dead-astern pin).
 
 ### AVIONICS-2 — the FCR page model (the radar page as an SM)
 RWS → TWS/VS mode SM over `f4-sensors`' radar component (the AI's

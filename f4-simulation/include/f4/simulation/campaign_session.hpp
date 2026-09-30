@@ -416,6 +416,13 @@ struct CampaignSessionOptions {
     double combat_envelope_ft = 30000.0;
     /// FID-5: the convergence lookahead (campaign seconds).
     int combat_lookahead_sec = 120;
+    /// CAMP-TOT-PACE: how long a pure takeoff-window deagg stays live
+    /// (the ATC sequence: hold, teleport, roll, climb) before the
+    /// standard reagg rules may fold it back to aggregate pacing. The
+    /// full ops pin (2×600 s) flew the whole ingress at real speed and
+    /// overflew the target long before its TOT. 0 = fold at the first
+    /// unobserved pass.
+    int takeoff_pin_sec = 300;
     /// FID-5: the combat deagg pin (campaign seconds) — a combat-
     /// triggered deaggregation stays live this long before the standard
     /// reagg rules apply (the transient window; the phase pin).
@@ -1009,8 +1016,17 @@ private:
         /// FID-5 adds Combat: a commit/convergence trigger deaggregated
         /// the flight into a transient fight window (the plan §4.5 —
         /// both flights of a convergence deagg, seeded, deterministic).
-        enum class Trigger : std::uint8_t { Force, Ops, Bubble, Combat }
-            trigger;
+        enum class Trigger : std::uint8_t {
+            Force,
+            Ops,
+            /// CAMP-TOT-PACE: a pure takeoff-window deagg — the ATC
+            /// sequence runs live (takeoff_pin_sec), then the flight
+            /// folds back to aggregate pacing so the ingress reaches
+            /// the target on the TOT.
+            OpsTakeoff,
+            Bubble,
+            Combat
+        } trigger;
         std::int64_t deagg_time = 0;     ///< campaign time of the deagg
         std::int64_t pinned_until = 0;   ///< ops/combat pin (0 = none)
     };
@@ -1260,6 +1276,9 @@ private:
     /// CAMP-SAVE-WAVE: the initial cycle's wave launches near (the
     /// options' near_initial_wave doc — the stock-save first-hour fix).
     bool near_initial_wave_ = false;
+    /// CAMP-TOT-PACE: the pure takeoff-window deagg's live hold (the
+    /// options' takeoff_pin_sec doc).
+    int takeoff_pin_sec_ = 300;
     bool combat_deagg_ = true;
     double combat_envelope_ft_ = 30000.0;
     /// CAMP-SCALE-1: the pilot-skill flow gate (the tables ride

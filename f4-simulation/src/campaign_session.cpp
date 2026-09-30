@@ -537,6 +537,7 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     // the engine below (the intent handler checks flights_ itself).
     session->synthetic_as_aggregates_ = opts.synthetic_as_aggregates;
     session->near_initial_wave_ = opts.near_initial_wave;
+    session->takeoff_pin_sec_ = opts.takeoff_pin_sec;
     session->combat_deagg_ = opts.combat_deagg;
     session->combat_envelope_ft_ = opts.combat_envelope_ft;
     session->pilot_skill_flow_ = opts.pilot_skill_flow;
@@ -1379,10 +1380,20 @@ void CampaignSession::evaluate_tiers_() {
         if (!takeoff_window && !recovery_window && !tot_window &&
             !in_bubble) continue;
 
-        deaggregate_flight_(
-            i, (takeoff_window || recovery_window || tot_window)
-                   ? DeaggregatedFlight::Trigger::Ops
-                   : DeaggregatedFlight::Trigger::Bubble);
+        // CAMP-TOT-PACE: a pure takeoff-window deagg (no recovery/TOT
+        // need in the same pass) takes OpsTakeoff — the ATC sequence
+        // only needs minutes live, and a 20-min live ingress at real
+        // speed overflew the target long before its TOT (the +23-min
+        // median delivery). The delivery/recovery windows keep the
+        // full ops pin (the attack and the approach run live).
+        DeaggregatedFlight::Trigger trig =
+            DeaggregatedFlight::Trigger::Bubble;
+        if (takeoff_window || recovery_window || tot_window) {
+            trig = (takeoff_window && !recovery_window && !tot_window)
+                       ? DeaggregatedFlight::Trigger::OpsTakeoff
+                       : DeaggregatedFlight::Trigger::Ops;
+        }
+        deaggregate_flight_(i, trig);
     }
 }
 
@@ -2547,48 +2558,95 @@ void CampaignSession::handle_mission_intent_(
         seed.route.push_back(w);
     }
     // The takeoff gate: the flight holds at its base until the first
-    // waypoint departs. Two ops windows before TOT — the ATC's whole
-    // window to fly it off before the delivery — clamped forward so a
-    // late TOT never walks the aggregate immediately (the TOT window
-    // arms the ground spawn for late missions anyway).
+    // waypoint departs.
+    // CAMP-TOT-PACE — the gate PACES THE LAUNCH to arrive at the
+    // target ON the TOT: base → delivery waypoint at the aggregate
+    // cruise. The flat TOT − 1200 gate ignored geometry — the 6-h
+    // stock-save QC measured a +23-min median delivery with 0/112
+    // inside ±5 min (short strikes transited early, long ones late).
     // CAMP-DOM-4: the scheduling arm arms the window against the
-    // flight's SCHEDULED slot instead — the aggregate materializes one
-    // ops window before the grid's own minute and rolls ON it (the
-    // delivery then lands at slot + travel, the engine's own TOT
-    // estimate — the FIDELITY_TIERS §7 divergence closes). Flights
-    // without a slot (the save's own, the legacy ladder, a base-less
-    // filing) and disarmed sessions keep the TOT-anchored gate.
+    // flight's SCHEDULED slot instead (unchanged). Flights without a
+    // delivery leg (CAP racetracks and friends) keep the TOT-anchored
+    // gate.
     if (!seed.route.empty()) {
         const std::int64_t earliest = campaign_time() + 1;
         std::int64_t depart;
+
+        int delivery_index = -1;
+        for (int k = static_cast<int>(seed.route.size()) - 1; k >= 0;
+             --k) {
+            const std::uint8_t a = seed.route[k].action;
+            if (a == 17 || a == 18 || a == 14 || a == 15 || a == 19) {
+                delivery_index = k;
+                break;
+            }
+        }
+        double travel_s = 0.0;
+        if (delivery_index > 0) {
+            double dist = 0.0;
+            for (int k = 1; k <= delivery_index; ++k) {
+                const double dx = static_cast<double>(seed.route[k].x) -
+                                  seed.route[k - 1].x;
+                const double dy = static_cast<double>(seed.route[k].y) -
+                                  seed.route[k - 1].y;
+                dist += std::sqrt(dx * dx + dy * dy);
+            }
+            travel_s = dist /
+                       std::max(1.0, flights_->cruise_grid_per_min()) *
+                       60.0;
+        }
+
+        // CAMP-SAVE-WAVE: the INITIAL cycle's wave (intents filed at
+        // ladder time 0) files NEAR strikes — the TOT clamps to
+        // now + ingress + two ops windows (launch in ~one window,
+        // deliver ~20 min later) instead of the ATM's 2-h midpoints:
+        // a freshly loaded stock save1 sat dead, ~100 filed missions
+        // and not one launching, for that first hour and a half. The
+        // recovery deadline shifts by the same clamp so the books
+        // follow the delivery. (The old shape clamped the GATE under
+        // the planner's TOT — the wave then transited its targets
+        // ~90 min early; clamping the TOT keeps launch and delivery
+        // consistent.)
+        std::int64_t tot = tot_abs;
+        if (near_initial_wave_ && intent.issued_time == 0 &&
+            delivery_index > 0) {
+            const std::int64_t clamped =
+                std::min(tot_abs,
+                         campaign_time() +
+                             static_cast<std::int64_t>(travel_s) +
+                             2 * static_cast<std::int64_t>(
+                                     std::max(0, ops_window_sec_)));
+            if (clamped < tot) {
+                const std::int64_t shift = tot - clamped;
+                if (seed.mission_over_time > 0) {
+                    seed.mission_over_time = static_cast<std::int32_t>(
+                        std::clamp<std::int64_t>(
+                            static_cast<std::int64_t>(
+                                seed.mission_over_time) -
+                                shift,
+                            1, 2147483647));
+                }
+                tot = clamped;
+            }
+        }
+
         if (airbase_scheduling_ && intent.takeoff > 0) {
             const std::int64_t takeoff_abs =
                 epoch_ + static_cast<std::int64_t>(intent.takeoff);
             depart = std::max(takeoff_abs, earliest);
+        } else if (delivery_index > 0) {
+            depart = std::max(
+                tot - static_cast<std::int64_t>(travel_s), earliest);
         } else {
             depart =
-                std::max(tot_abs - 2 * static_cast<std::int64_t>(
+                std::max(tot - 2 * static_cast<std::int64_t>(
                                            std::max(0, ops_window_sec_)),
                          earliest);
         }
-        // CAMP-SAVE-WAVE: the INITIAL cycle's wave (intents filed at
-        // ladder time 0) launches inside the first ops window. The
-        // stock saves carry zero flight entities — the whole visible
-        // war is generated — and the ATM's TOT midpoints file its
-        // deliveries a median 2 h out, gates riding TOT − 1200 s: a
-        // freshly loaded save1 sat dead, ~100 filed missions and not
-        // one launching, for that first hour and a half. The delivery
-        // TOT stays the planner's; only the LAUNCH comes near (the
-        // aggregate streams the route; the TOT window still arms the
-        // delivery at the target).
-        if (near_initial_wave_ && intent.issued_time == 0) {
-            depart = std::min(depart,
-                              campaign_time() +
-                                  static_cast<std::int64_t>(
-                                      std::max(0, ops_window_sec_)));
-        }
         seed.route.front().depart = static_cast<std::int32_t>(
             std::clamp<std::int64_t>(depart, 1, 2147483647));
+        seed.time_on_target = static_cast<std::int32_t>(
+            std::clamp<std::int64_t>(tot, 0, 2147483647));
     }
     if (flights_->register_synthetic(seed) ==
         static_cast<std::size_t>(-1)) {
@@ -2917,7 +2975,10 @@ void CampaignSession::deaggregate_flight_(
     // the standard reagg rules may fold it; a bubble deagg obeys the
     // hysteresis + cooldown immediately.
     rec.pinned_until =
-        trigger == DeaggregatedFlight::Trigger::Ops
+        trigger == DeaggregatedFlight::Trigger::OpsTakeoff
+            ? rec.deagg_time +
+                  static_cast<std::int64_t>(std::max(0, takeoff_pin_sec_))
+        : trigger == DeaggregatedFlight::Trigger::Ops
             ? rec.deagg_time +
                   2 * static_cast<std::int64_t>(std::max(0, ops_window_sec_))
         : trigger == DeaggregatedFlight::Trigger::Combat

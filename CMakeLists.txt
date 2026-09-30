@@ -83,6 +83,7 @@ endif()
 # f4-campaign comment below). Raylib/ImGui targets it also needs
 # (f4-renderer, f4-models) are all added above this point.
 add_subdirectory(f4-flight-api)      # Flight model API interfaces (PilotInput, IAircraftState, IPilotInputSink)
+add_subdirectory(f4-avionics)        # Engine-agnostic avionics logic: INS + steerpoints (AVIONICS-1, Docs/AVIONICS_PLAN.md)
 add_subdirectory(f4-flight-model)
 add_subdirectory(f4-recorder)        # Flight recording, replay, and LLM-friendly data export
 add_subdirectory(f4-ai)             # AI brain: SensorFusion + tactic modules (composed)
@@ -231,7 +232,7 @@ f4_mark_side(importer
 f4_mark_side(runtime
     f4-renderer f4-simulation f4-assets f4-gltf f4-world f4-terrain
     f4-flight-model f4-ai f4-campaign f4-flight-api f4-recorder
-    f4-campaign-api
+    f4-campaign-api f4-avionics
     f4-sensors f4-weapons f4-entities f4-messaging f4-state-machine
     f4-data f4-geo f4-math f4-units f4-json f4-xml f4-io
     f4_world_viewer

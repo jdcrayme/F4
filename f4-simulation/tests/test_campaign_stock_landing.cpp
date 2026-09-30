@@ -253,3 +253,4 @@ TEST(CampaignStockLanding, AbortedWaveFlightConvergesAndLands) {
         << "the landing FSM sat in RequestApproach for " << stuck
         << " of 120 samples";
 }
+
