@@ -285,6 +285,13 @@ LandingModule::build_sm()
         .on(LandingState::ProceedToFix, LandingState::InterceptFinal,
             LandingEvent::FixReached,
             nullptr, nullptr, "approach_fix_reached")
+        // REPAIR-T4b: the grounded short-touchdown strand — the guard in
+        // check_fix_reached fires GoAround from the deck; without this
+        // edge the event had no transition from ProceedToFix (no path
+        // ever fired it before) and the strand persisted.
+        .on(LandingState::ProceedToFix, LandingState::GoAround,
+            LandingEvent::GoAround,
+            nullptr, nullptr, "grounded_on_iap")
         .on(LandingState::ProceedToFix, LandingState::PatternDownwind,
             LandingEvent::PatternEntry,
             nullptr, nullptr, "pattern_entry_fix_reached")
@@ -511,28 +518,55 @@ void LandingModule::initialize(std::uint64_t ownship_id,
                 intercept_lead_ft = std::max(intercept_lead_ft, R_ft);
             }
         }
-        // CAMP-FAF — anchor a REAL final approach fix when the
-        // configured entry fix is not one. The campaign's approach
-        // hands off at the route's last waypoint — the landing
-        // waypoint at the AIRBASE CENTER: along ≈ 0..+3500 ft, i.e.,
-        // ON the runway. ProceedToFix from there captures the fix
-        // over the field, fails the establish floor immediately (the
-        // aircraft is past it), and go-arounds — forever (the user's
-        // "overflying the runway, always going around"). The scenario
-        // path's authors place the entry fix out on the approach; the
-        // campaign path gets a FAF synthesized from the clearance:
-        // 5 nm out on the extended centerline, where the 3-deg beam
-        // sits at ~1,570 ft — the intercept's tuned pattern-altitude
-        // catch-down envelope. The along guard keeps hand-authored
-        // scenario fixes (30k ft out) untouched.
+        // CAMP-FAF — anchor a REAL final approach fix when the configured
+        // entry fix is not one. The campaign's approach hands off at the
+        // route's last waypoint — the landing waypoint at the AIRBASE
+        // CENTER: along ≈ 0..+3500 ft, i.e., ON the runway. ProceedToFix
+        // from there captures the fix over the field, fails the establish
+        // floor immediately (the aircraft is past it), and go-arounds —
+        // forever (the user's "overflying the runway, always going
+        // around"). The scenario path's authors place the entry fix out on
+        // the approach; the campaign path gets a FAF synthesized from the
+        // clearance: 5 nm out on the extended centerline, where the 3-deg
+        // beam sits at ~1,570 ft — the intercept's tuned pattern-altitude
+        // catch-down envelope.
+        //
+        // REPAIR-T4b — the acceptance WINDOW adds a lateral gate to the
+        // old along-only guard. The old guard (`along_fix > -15,000`)
+        // kept the configured fix whenever it sat more than 15,000 ft
+        // before the threshold — but the campaign's route-end waypoint is
+        // the FIELD CENTER, and on a long runway (or a complex wide of
+        // the runway) that point projects 15,000+ ft down the field from
+        // the landing threshold AND up to tens of thousands of feet off
+        // the extended centerline. Measured on the stock-save run: 7 of
+        // the 13 fields with approach traffic kept such raw fixes; the
+        // biggest drew 15,247 ProceedToFix telemetry rows — aircraft
+        // orbiting a point 37,000-63,000 ft off the course line, where
+        // the T4 fix-7 centerline capture gate (|course_lateral| < 8,000
+        // ft) can never pass. The rule now keeps a configured fix only
+        // when it IS an approach fix: the old along bound (15,000+ ft out
+        // — close-in fixes still re-anchor to the 5-nm FAF, which leaves
+        // the intercept room the establish floor needs) AND on the course
+        // (within 2,000 ft of the extended centerline). Everything else
+        // synthesizes the standard FAF.
         {
             const double cx = std::sin(runway_heading_rad_);
             const double cy = std::cos(runway_heading_rad_);
             const double along_fix =
                 (entry_fix_.x - threshold_position_.x) * cx +
                 (entry_fix_.y - threshold_position_.y) * cy;
+            const double lat_fix =
+                (entry_fix_.x - threshold_position_.x)
+                    * std::cos(runway_heading_rad_)
+              - (entry_fix_.y - threshold_position_.y)
+                    * std::sin(runway_heading_rad_);
             constexpr double kFafOutFt = 30000.0;   // 5 nm
-            if (along_fix > -kFafOutFt * 0.5) {
+            constexpr double kFafLatTolFt = 2000.0;
+            constexpr double kFafMinOutFt = 15000.0;
+            const bool hand_authored_faf =
+                std::abs(lat_fix) < kFafLatTolFt &&
+                along_fix <= -kFafMinOutFt;
+            if (!hand_authored_faf) {
                 entry_fix_.x = threshold_position_.x - cx * kFafOutFt;
                 entry_fix_.y = threshold_position_.y - cy * kFafOutFt;
                 entry_fix_.z = threshold_alt_ft_ + 1500.0;
@@ -921,6 +955,19 @@ bool LandingModule::waypoint_captured(const geo::WorldPosition& target,
 // ============================================================================
 
 void LandingModule::check_fix_reached() {
+    // REPAIR-T4b: the short-touchdown strand. An aircraft that meets the
+    // deck during the IAP-leg catch-down is forgiven by the T1 ground
+    // sweep (the Approach phase is a landing-owned context — no crash is
+    // booked) but ProceedToFix had NO ground recovery: it drove the leg
+    // at approach power forever, the sibling of the OnFinal deadfall
+    // (fix 2). On the deck mid-approach the only honest way out is to fly
+    // again — the go-around's low-altitude law is a rotation attempt
+    // (MIL + pitch-up), which from the deck is a touch-and-go.
+    if (on_ground_) {
+        ga_reason_ = "grounded_on_iap";
+        sm_.process(LandingEvent::GoAround);
+        return;
+    }
     // STAB-E48: past-the-fix capture (the start_in_approach handoff). An
     // aircraft ALREADY established inbound past the entry fix — projection
     // onto the course beyond the fix, inside the lateral corridor, rolling
@@ -975,7 +1022,24 @@ void LandingModule::check_fix_reached() {
         const double rel_along = dx * nx + dy * ny;   // + = the fix ahead
         const double rel_lat = dx * std::cos(current_heading_rad_) -
                                dy * std::sin(current_heading_rad_);
-        const double lead = std::max(intercept_lead_ft, fix_radius_ft);
+        const double lead_base = std::max(intercept_lead_ft, fix_radius_ft);
+        // REPAIR-T4b: the lead is also bounded below by the turn radius at
+        // the CURRENT speed — the capture must start the intercept turn
+        // early enough to roll out on the course. The approach-speed
+        // radius (intercept_lead_ft, ~6,500 ft) is unreachable for a fast
+        // handoff: at 250 kts / 23 deg bank the radius is ~13,100 ft and
+        // the old 6,462-ft window let the aircraft close on the fix
+        // without ever sequencing (the turn radius exceeded the capture
+        // window — the orbit never tightened). The ProceedToFix leg is
+        // flown with the pattern tune's bank cap, so that is the bank the
+        // turn will actually use.
+        double lead = lead_base;
+        if (current_vcas_kts_ > 60.0) {
+            const double turn_radius_ft =
+                (current_vcas_kts_ * current_vcas_kts_)
+                / (11.25 * std::tan(pattern_steering.max_bank_rad));
+            lead = std::max(lead, turn_radius_ft);
+        }
         // REPAIR-T4: the capture requires the LANDING direction — a
         // wrong-side arrival (heading against the runway) must not
         // sequence into the intercept (it would flip outbound; see the
@@ -1161,11 +1225,12 @@ void LandingModule::check_established() {
         ga_reason_ = "intercept_not_established";
         if (std::getenv("F4_LAND_DEBUG") != nullptr) {
             std::fprintf(stderr,
-                         "[land-dbg] floor: along %.0f vcas %.0f alt %.0f agl %.0f vs %.0f on_ground %d\n",
-                         " hdg %.2f lat %.0f beam %.0f settled %.0f\n",
+                         "[land-dbg] floor: along %.0f vcas %.0f alt %.0f agl %.0f vs %.0f"
+                         " on_ground %d hdg %.2f lat %.0f\n",
                          course_along_ft(), current_vcas_kts_, current_alt_msl_ft_,
                          current_alt_agl_ft_, current_vs_fpm_,
-                         on_ground_ ? 1 : 0);
+                         on_ground_ ? 1 : 0,
+                         hdg_now, lat_now);
         }
         sm_.process(LandingEvent::GoAround);
         return;
@@ -1397,17 +1462,32 @@ AIControlOutput LandingModule::controls_for_request_approach() const {
 }
 
 AIControlOutput LandingModule::controls_for_proceed_to_fix() const {
-    // REPAIR-T4 telemetry: the IAP leg's geometry, 1 Hz.
+    // REPAIR-T4b telemetry: the IAP leg's geometry AND its capture-window
+    // state, 1 Hz — the orbit diagnosis needs to see which of the fix-
+    // capture gates is closed at each pass (T4b: the aircraft orbited the
+    // fix for 100+ minutes without the capture ever firing).
     if (std::getenv("F4_LAND_DEBUG") != nullptr) {
         static int dbg_ptf = 0;
         if (++dbg_ptf % 60 == 1) {
+            const double dx = entry_fix_.x - current_position_.x;
+            const double dy = entry_fix_.y - current_position_.y;
+            const double nx = std::sin(current_heading_rad_);
+            const double ny = std::cos(current_heading_rad_);
+            const double rel_along = dx * nx + dy * ny;
+            const double rel_lat = dx * std::cos(current_heading_rad_)
+                                 - dy * std::sin(current_heading_rad_);
+            const double hdg_rw = AirSteering::heading_error(
+                runway_heading_rad_, current_heading_rad_) / D2R;
             std::fprintf(stderr,
                          "[ptf] id %llu pos %.0f,%.0f fix %.0f,%.0f alt %.0f "
-                         "pattern %.0f beam %.0f\n",
+                         "pattern %.0f beam %.0f vcas %.0f hdgrw %+.0f "
+                         "rAlng %+.0f rLat %+.0f cLat %+.0f\n",
                          (unsigned long long)ownship_id_,
                          current_position_.x, current_position_.y,
                          entry_fix_.x, entry_fix_.y, current_alt_msl_ft_,
-                         pattern_altitude_ft_, glide_slope_alt_ft());
+                         pattern_altitude_ft_, glide_slope_alt_ft(),
+                         current_vcas_kts_, hdg_rw, rel_along, rel_lat,
+                         course_lateral_ft());
         }
     }
     // REPAIR-T4: aim PAST the fix, in the landing direction. The fix is

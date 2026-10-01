@@ -835,3 +835,84 @@ TEST_F(PatternTestFixture, PatternBaseCommandsGearDown) {
     ASSERT_EQ(mod.state(), LandingState::PatternBase);
     EXPECT_TRUE(out.gear_handle_down);
 }
+
+// ============================================================================
+// REPAIR-T4b — the campaign end-to-end gate pins
+// ============================================================================
+
+TEST_F(LandingTestFixture, FieldCenterEntryFixIsSynthesizedToAFaf) {
+    // The campaign RTB route ends at the FIELD CENTER. The stock-save's
+    // worst case: 40,000 ft east of the extended centerline, 16,000 ft
+    // down the field from the landing threshold — the old along-only
+    // guard kept it as the "FAF" and ProceedToFix orbited it forever
+    // (the T4 fix-7 centerline capture gate can never pass from 40,000
+    // ft off the course line). The acceptance window must reject it and
+    // synthesize the standard 5-nm FAF on the centerline: an aircraft
+    // 1,000 ft past the SYNTHESIZED position captures (with the raw fix
+    // it is 58,000 ft from a point behind its nose and sequences never).
+    LandingModule m;
+    m.configure(geo::WorldPosition(40000.0, -11000.0, 0.0), {});
+    m.initialize(7, world, bus);
+
+    auto s = on_final(0.0, 29000.0, 1500.0);   // 1,000 ft past the 5-nm FAF
+    m.update(0.1, s.get());
+    // The capture may chain Established in the same update (the aircraft
+    // is on the centerline near the beam) — past ProceedToFix is the pin.
+    EXPECT_TRUE(m.state() == LandingState::InterceptFinal ||
+                m.state() == LandingState::OnFinal)
+        << "the synthesized FAF must capture; state "
+        << m.state_name();
+}
+
+TEST_F(LandingTestFixture, HandAuthoredFarFixIsKept) {
+    // No far bound: the digi fixtures hand-author 20-nm finals on the
+    // centerline. The acceptance window must KEEP them.
+    LandingModule m;
+    m.configure(geo::WorldPosition(0.0, -116522.0, 1500.0), {});
+    m.initialize(8, world, bus);
+
+    auto s = on_final(0.0, 120522.0, 1500.0);  // 1,000 ft past the fix
+    m.update(0.1, s.get());
+    EXPECT_TRUE(m.state() == LandingState::InterceptFinal ||
+                m.state() == LandingState::OnFinal)
+        << "a hand-authored far fix must be kept; state "
+        << m.state_name();
+}
+
+TEST_F(LandingTestFixture, GroundedProceedToFixGoesAround) {
+    // The short-touchdown strand: an aircraft that meets the deck during
+    // the IAP-leg catch-down is forgiven by the T1 sweep (Approach is a
+    // landing-owned context) and ProceedToFix had NO ground recovery —
+    // it drove the leg forever. On the deck mid-approach the only way
+    // out is to fly again: the go-around's low-altitude law (MIL +
+    // pitch-up) is a rotation attempt.
+    bool went_around = false;
+    std::string reason;
+    bus.subscribe<GoAroundMessage>([&](const GoAroundMessage& msg) {
+        if (msg.aircraft_id == 1u) {
+            went_around = true;
+            reason = msg.reason;
+        }
+    });
+    auto s = on_final(0.0, 30000.0, 0.0, 0.0, 150.0);
+    s->on_ground_ = true;
+    const auto out = mod.update(0.1, s.get());
+    EXPECT_EQ(mod.state(), LandingState::GoAround);
+    EXPECT_TRUE(went_around);
+    EXPECT_EQ(reason, "grounded_on_iap");
+    EXPECT_NEAR(out.throttle_cmd, 1.0, 1e-9) << "MIL climb-out";
+    EXPECT_GT(out.pitch_cmd, 0.0) << "rotation attempt";
+}
+
+TEST_F(LandingTestFixture, FixCaptureLeadScalesWithTurnRadius) {
+    // The capture lead is bounded below by the turn radius at the
+    // CURRENT speed: at 250 kts / 23 deg bank the radius is ~13,100 ft,
+    // so a fix 10,000 ft ahead must sequence the intercept (the old
+    // approach-speed lead, 6,462 ft, let the aircraft close on the fix
+    // without ever sequencing — the turn radius exceeded the capture
+    // window and the orbit never tightened).
+    ASSERT_EQ(mod.state(), LandingState::ProceedToFix);
+    auto s = on_final(0.0, 30000.0, 2700.0, 0.0, 250.0);  // fix 10k ahead
+    mod.update(1.1, s.get());                  // the 1-s dwell gate
+    EXPECT_EQ(mod.state(), LandingState::InterceptFinal);
+}

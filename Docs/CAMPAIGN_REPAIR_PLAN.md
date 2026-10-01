@@ -235,8 +235,7 @@ Remaining in flight-control (the plan's forward queue):
   touchdown): liftoff → route at waypoint altitudes → RTB → approach →
   Rollout.
 
-### T4 — the approach chain closes — **LANDED (2026-10-01), the campaign
-### end-to-end gate partially open (see T4b)**
+### T4 — the approach chain closes — **LANDED (2026-10-01)** (T4b below)
 
 Eight fixes landed as-built, each instrumented against the F4_LAND_DEBUG
 telemetry chain ([ptf]/[final]/[flare]/[ga]/[land-dbg], all id-tagged):
@@ -298,18 +297,103 @@ telemetry chain ([ptf]/[final]/[flare]/[ga]/[land-dbg], all id-tagged):
 Gates: landing module suite 28/28 (the two flare pins re-contracted to
 the servo law + the new TouchdownGateZeroesTheEnergyDriver pin);
 landing_only exit 0 with the full chain; digi_full_mission + takeoff_only
-exit 0. **Still open (T4b, the campaign end-to-end gate)**: the
-stock-landing observed flight now flies full approach cycles at the
-correct altitudes/fixes (ProceedToFix → InterceptFinal → GoAround,
-12+ attempts) but does not complete: two blockers named by the
-instrumented runs — (a) the short-touchdown strand (an aircraft that
-meets the deck during the catch-down strands in ProceedToFix; T1
-forgives the Approach phase and the FSM's grounded guard does not fire
-— the sibling of fix 2), and (b) the ProceedToFix convergence geometry
-at 250 kts: the turn radius (~11,900 ft) exceeds the capture window and
-the orbit never tightens; the speed loop also holds pattern speed where
-the IAP leg commands approach speed (185). The digi suite's 13 reds are
-pre-existing (was 14; the deadfall fix cured one).
+exit 0. The digi suite's 13 reds are pre-existing (was 14; the deadfall
+fix cured one).
+
+### T4b — the campaign end-to-end gate closes — **LANDED (2026-10-01)**
+
+The instrumented stock-save run named the two blockers and then
+exonerated half of one: the extended [ptf] telemetry (now carrying vcas
++ the fix-capture window locals — heading-to-runway, nose projection,
+fix-relative and centerline lateral) showed the observed flight flying
+the IAP leg at 193-196 kts — the 185 command's mid+integral throttle
+equilibrium at the clean drag bucket, an 8-11 kt residual, not a
+routing error. The REAL blocker sat one layer up:
+
+**The CAMP-FAF synthesis guard left 7 of the 13 fields flying to the
+raw field center.** The guard kept the configured entry fix whenever it
+projected more than 15,000 ft before the threshold — but the campaign's
+route-end waypoint is the FIELD CENTER, and on a long runway (or a
+complex wide of the runway) that point projects 15,000+ ft down the
+field from the landing threshold AND tens of thousands of feet off the
+extended centerline (measured: 37,000-63,000 ft). Aircraft assigned
+such fixes orbited them forever: the T4 fix-7 centerline capture gate
+(|course_lateral| < 8,000 ft) can never pass from that far out. The
+worst field drew 15,247 ProceedToFix telemetry rows; the observed
+flight spent 100+ minutes orbiting one (the old "12+ approach cycles"
+run was the same mechanism one field over). Only the eight SYNTHESIZED
+fixes (the non-grid coordinates) ever got aircraft onto the
+centerline. The ProceedToFix convergence blocker (b) was never about
+250 kts — it was about a fix that is not on the approach at all.
+
+Fixes (f4-ai):
+
+1. **The acceptance window** (blocker b, the mass fix): the configured
+   entry fix is kept only when it IS an approach fix — the old along
+   bound (15,000+ ft before the threshold; close-in fixes still
+   re-anchor, which leaves the intercept the room the establish floor
+   needs) AND on the course (within 2,000 ft of the extended
+   centerline). Everything else synthesizes the standard 5-nm FAF.
+   Hand-authored scenario fixes (unit fixture 20k, landing_only 30k,
+   the digi fixtures' 20-nm final) are untouched — the lateral gate is
+   the only behavior change.
+2. **The scaled capture lead** (blocker b, the geometry): the
+   fix-capture lead is bounded below by the turn radius at the CURRENT
+   speed (V²/(11.25·tan(bank)) at the pattern tune's 23-deg cap): at
+   250 kts that is ~13,100 ft against the old 6,462-ft approach-speed
+   lead — the "turn radius exceeds the capture window" half of the
+   named blocker. The intercept turn now starts at the radius, not at
+   the approach-speed radius.
+3. **The short-touchdown strand** (blocker a): ProceedToFix gained the
+   grounded recovery its sibling states already had — an aircraft on
+   the deck mid-approach fires GoAround ("grounded_on_iap"; the
+   go-around's low-altitude law is a rotation attempt, i.e. a
+   touch-and-go from the deck). The state machine was missing the
+   ProceedToFix--GoAround edge entirely: no path had ever fired the
+   event from that state, so the strand was structural, not just a
+   missing guard.
+4. Telemetry repairs: the [ptf] row carries vcas + the capture-window
+   locals; the establish-floor row's double-format-string bug (its
+   hdg/lat tail printed pointer garbage) fixed.
+
+Measured (Release, this machine):
+
+- **The stock-landing gate is GREEN** (`test_campaign_stock_landing`,
+  F4_STOCK_WORLD=testcamp.world.json, exit 0): the observed wave
+  flight touches down — plan §1's FAIL retires.
+- **BARCAP 40-min filtered run** (exit 0, zero losses): entity
+  4294971680 flew the full chain ProceedToFix (out of a 416-kt cruise
+  descent) → InterceptFinal (196 kts) → OnFinal (579 ft) → Flare →
+  **Rollout → Parked** — a real campaign RTB flight completing a
+  full-stop landing 11.4 minutes into the mission. The wingman flew a
+  legitimate missed approach (predicted touchdown short of the
+  threshold) and re-flew cleanly (still airborne at run end,
+  mid-second-attempt — the go-around → ProceedToFix cycle the
+  straight-in re-fly owns).
+- The armed 0.3-h war: all four C5 verdicts green (deterministic=yes,
+  drift/leak/alive ok), 15 honest A/A losses / 12 retires over 18
+  cycles.
+- Regression surface: the landing module suite **32/32** (the four new
+  T4b pins: field-center synthesis, kept far fix, grounded
+  ProceedToFix go-around, scaled capture lead); GroundContact 5/5;
+  combat integration 29/31 (the two pre-existing guns-merge reds —
+  T5's first named items); the brain/air-steering/navigation/takeoff/
+  ground-steering/tower suites green; landing_only + takeoff_only +
+  digi_full_mission exit 0.
+
+Notes carried forward:
+
+- The followed flight in the stock-landing harness may be an
+  instant-RTB splice flight (the nearest-waypoint resume picks the
+  route's LAST waypoint for a flight standing at home — the T3 splice
+  concern): its landing is a REAL full chain over a degenerate
+  mission. The BARCAP run is the real-mission evidence; T6's verify
+  script should keep both.
+- The IAP leg's ~193-vs-185 kt residual is the throttle PI's
+  equilibrium, not a defect: the scaled lead removes its sting (a
+  7,800-ft radius at 193 kts is inside the window). Not chased.
+- T3 remains open (the ground-spawned Enroute contract: the NAV-D1
+  airborne check and the one-splice handoff).
 
 ### T5 — the A/A seam
 

@@ -5,6 +5,41 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## REPAIR-T4b — the campaign end-to-end gate closes: the observed flight lands
+
+CAMPAIGN_REPAIR_PLAN.md's T4b tranche, landed as-built. The instrumented
+stock-save run exonerated half of its own blocker list: the IAP leg's
+"holds pattern speed" was an 8-11 kt throttle-PI residual (193 vs the
+185 command), while the real ProceedToFix orbit sat one layer up — the
+CAMP-FAF synthesis guard left 7 of the 13 stock-save fields flying to
+the RAW FIELD CENTER (the guard kept any fix projecting 15,000+ ft
+before the threshold; a long runway's field center projects that far
+down the field AND 37,000-63,000 ft off the extended centerline, where
+the T4 fix-7 centerline capture gate can never pass). The worst field
+drew 15,247 orbit telemetry rows; the observed flight orbited one for
+100+ minutes. Fixes: the acceptance window (keep a configured fix only
+if it is on the approach course within 2,000 ft AND 15,000+ ft out —
+everything else synthesizes the 5-nm FAF; all hand-authored scenario
+fixes untouched), the scaled capture lead (bounded below by the turn
+radius at the CURRENT speed — ~13,100 ft at 250 kts vs the 6,462-ft
+approach-speed lead), and the short-touchdown strand (grounded
+ProceedToFix fires GoAround — the SM was missing the ProceedToFix →
+GoAround edge entirely, so the strand was structural; the grounded
+go-around is a touch-and-go) — plus the [ptf] telemetry extension and
+the establish-floor row's format-string fix.
+
+Gates: the stock-landing harness is GREEN (the observed wave flight
+touches down — plan §1's FAIL retires); the BARCAP 40-min run flies a
+REAL campaign RTB flight end to end (ProceedToFix → InterceptFinal →
+OnFinal → Flare → Rollout → Parked, 11.4 min into the mission, zero
+losses) with the wingman's missed approach re-flown cleanly; the armed
+0.3-h war keeps all four C5 verdicts green (deterministic, 15 honest
+A/A losses / 12 retires); the landing module suite 32/32 (four new T4b
+pins); GroundContact 5/5; combat integration 29/31 (the pre-existing
+guns-merge pair, T5's items); landing_only + takeoff_only +
+digi_full_mission exit 0. T3 remains open (the ground-spawned Enroute
+contract).
+
 ## REPAIR-T4 — the approach chain closes: eight fixes, landing_only end to end
 
 CAMPAIGN_REPAIR_PLAN.md's approach/flare tranche, landed as-built with
