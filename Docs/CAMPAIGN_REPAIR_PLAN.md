@@ -1,0 +1,186 @@
+# Campaign Repair — the ground-truth tranches (REPAIR)
+
+> **Status**: Active plan. **Directive: the campaign must WORK end to end
+> before any new feature tranche starts.** This plan freezes feature work
+> until T1–T5's gates are green on the dev machine and T6's all-up verify
+> script exists. The diagnosis below was measured 2026-10-01 on this
+> machine at HEAD `bd4b2ee` (Release, rebuilt from clean sources) — the
+> evidence artifacts regenerate under `qc/diag_*`.
+>
+> **The one-paragraph diagnosis.** The campaign aircraft were never
+> "misbehaving" at random: they are being silently destroyed by the sim's
+> own ground. A flight takes off correctly, climbs correctly, then its
+> route legs command it back down into terrain; the flight model's
+> airborne→ground transition is SILENT (no event, no kill, no booking), so
+> the aircraft becomes an immortal on-ground zombie that the war books as
+> "not airborne" — the mass disappearance. Everything the user sees
+> (flights vanishing, nothing landing, ground-ops stalls, an armed war
+> with zero kills) hangs off that one missing truth, plus three named
+> seam defects that keep flights from ever reaching a landing.
+
+---
+
+## 1. The evidence (measured, this machine, HEAD bd4b2ee)
+
+| Harness | Result | Artifact |
+|---|---|---|
+| `test_campaign_stock_landing` (TestCamp, Tiered, 150-min observed mission) | FAIL — the observed wave flight at 6 ft MSL the whole mission, nav cursor frozen at wp3 (waypoint alt 500 ft), landing state never leaves RequestApproach | `F4_LAND_DEBUG` telemetry (`[roll]` pitch −2.0° at 140 kts, repeated vcas resets 140→8) |
+| `campaign_qc --war 0.3 --war-sample 60 --tasking-cycle 60 --aa-combat` | All four C5 verdicts green; airborne **96 → 4** in 5 min of war time then flat; **0 A/A kills, 0 losses, 0 recoveries, 0 retires** across 18 cycles | `qc/diag_war/campaign_war_diary.json` |
+| BARCAP filtered run, 40 min, 2 flights | **Exit 3** — and the trace tells the real story: liftoff at t=57 s ✓, climb to 3,194 ft ✓, descent back into terrain at t≈3.7 min, then a 36-minute on-ground zombie (state ToWaypoint, on_ground=true, 102 kts indicated, position frozen) | `qc/diag_barcap/trace.json` |
+| `campaign_qc --scenario landing_only` | Exit 24 — Flare entered at 6 ft / 203 kts; GoAround at 6 ft / 173 kts exactly at the 15 s flare timeout | `qc/diag_landing_only/trace.json` |
+| `campaign_qc --scenario takeoff_only` / `digi_full_mission` | Exit 0 — the full taxi → takeoff → climb → cruise cycle WORKS on the scenario path | `qc/diag_takeoff_only`, `qc/diag_digi_full` |
+| f4-ai unit suites (brain, BVR, nav, landing, takeoff, strike) | 110/110 green — the brains are individually sound | — |
+| `test_combat_integration` | **15 of 31 FAIL** — every AI-vs-AI fight ("the AI never fired", "the victim's fusion never saw the incoming missile"). STEP-15's log records this suite 31/31 in the Linux sandbox; this Windows tree was last assembled Sep 24, so these reds were never measured locally | — |
+
+Caveat carried honestly: the STEP-13/14/15 and AGG-3/4 commits were built
+and verified in the agent's sandbox, not assembled here. The T6 tranche
+exists precisely so "green at landing" and "green on the dev machine"
+stop being different claims.
+
+## 2. The root causes, each pinned to code
+
+1. **SILENT GROUND CONTACT (the keystone).** The FM's touchdown
+   transition (`flight_model.cpp` `updateGear`: `if (g.inAir &&
+   anyOnGround) g.inAir = false;`) publishes NOTHING. There is no crash
+   handling anywhere in f4-flight-model or f4-simulation: the C1 sink
+   books only kills that arrive as `EntityKilledMessage` from weapon
+   damage. An aircraft that touches ground outside a landing FSM becomes
+   an immortal on-ground entity — alive, ticking, never booked, never
+   retired. Every "disappearance" is this.
+
+2. **Route legs command terrain impact.** The BARCAP flight descended
+   from its cruise altitude back to the ground during route following —
+   at least one route producer (C3 builder, the ATM pipeline, the
+   saved-route decode, or the splice) emits deck-level legs after
+   departure. The nav then does its job faithfully: it descends to the
+   altitude it was given.
+
+3. **The pitch channel is structurally dead on the ground.** The FCS
+   zeroes the G-error whenever `!inAir && gearPos > 0.5 && nzcgs < 0.8`
+   (`fcs.cpp` ground guard) — always true in a ground roll, because lift
+   cannot reach 0.8G with alpha pinned at −2°. AI pitch commands
+   physically cannot rotate a ground-launched aircraft (`[roll]`
+   telemetry: pitch −2.0° through 140 kts, across aircraft). The
+   scenario path's aircraft fly because they spawn airborne; the
+   campaign's ground-spawned flights that DO reach the takeoff FSM
+   liftoff only via the CAMP-ROTATE gate's lift-margin release.
+
+4. **Ground-spawned flights skip takeoff entirely.** FID-4's ops-window
+   deaggs ground-spawn, but their plans carry `StartPhase::Enroute` (the
+   air-spawn contract). NAV-D1 (`brain_component.hpp`: `phase_ == Ground
+   && start_phase == Enroute && !route.empty()`) fires with NO airborne
+   check — the brain jumps to Enroute on the runway, gear down, and the
+   nav module drag-races it down the runway at deck level. The
+   takeoff-complete handoff's double splice (`resume_from(1)` then the
+   nearest-waypoint override) rides the same confusion.
+
+5. **The flare cannot close the last 6 feet.** `landing_only`: flare
+   entered at 6 ft / 203 kts; the sink floor's push side is capped
+   (−0.25 stick), ground effect floats the aircraft, and the 15 s flare
+   timeout — designed as a safety valve — is the thing that ends every
+   attempt (GoAround at exactly +900 ticks).
+
+6. **A/A combat dead on this platform.** 15/31 combat-integration
+   failures; brains never see missiles, never fire. f4-ai units green ⇒
+   a host-level seam (air picture / radar / fusion wiring) or a
+   platform FP divergence — never bisected because the suite was never
+   red *here* before.
+
+## 3. The tranches
+
+Ordering is by leverage: T1+T2 kill the disappearances, T3+T4 complete
+the takeoff→fly→land chain, T5 restores the fight, T6 keeps it fixed.
+**No feature tranche starts before all gates are green.**
+
+### T1 — ground-contact truth (the keystone)
+
+- `f4-flight-model`: the touchdown transition sets a one-shot
+  per-tick flag (the FM stays dumb — it does not know landing intent).
+- `f4-simulation`: after `update_all`, the tick's aircraft walk reads
+  the flag + the brain's phase and decides: a touchdown in a
+  takeoff/landing-owned context (Ground/Approach/GoAround/Pattern) is
+  aviation; anything else is a CRASH — publish
+  `EntityKilledMessage` (cause=terrain, no killer), let the C1 sink
+  book the loss and the reaper retire the wreck.
+- The zombie detector rides the same walk: a brain in Enroute while the
+  FM reads on-ground for more than a bounded grace (the NAV-D1
+  ground-spawned flight never has a touchdown transition to catch) is
+  the same crash.
+- **Gate**: the BARCAP 40-min run books honest losses (or stays
+  airborne); the war harness's airborne collapse turns into booked
+  losses + retires (the ledger is non-empty); new unit tests pin
+  flag-on-touchdown, crash-on-unintended, forgive-on-landing-context,
+  and the zombie detector. The stock-landing test stays RED until T3+T4
+  (its flight now dies honestly instead of zombie-cruising — expected).
+
+### T2 — waypoint altitude hygiene
+
+- Audit every route producer: the C3 `RouteBuilder`, the ATM pipeline's
+  route planning, the saved-route decode, the splice/append paths.
+  Every waypoint carries MSL altitude = the planned AGL over the
+  terrain it sits on; departure legs carry climb-to-cruise, delivery
+  legs the profile altitude, home legs the descent — never deck.
+- Nav-side floor: the altitude command clamps to ≥ terrain MSL + a
+  safety AGL along the leg (3-sample check — the threat sampler's own
+  shape).
+- **Gate**: no generated route leg descends below terrain+AGL (pinned
+  by test over the fixture save); the BARCAP flight holds cruise to its
+  station; exit 3's zombie window is gone.
+
+### T3 — the ground-spawned Enroute contract
+
+- NAV-D1 gains the airborne check (`on_ground() == false`); a grounded
+  aircraft with an Enroute-start plan runs the takeoff FSM like any
+  ground launch.
+- The takeoff-complete handoff collapses to ONE splice decision (the
+  nearest-waypoint resume, route[0] excluded — the CAMP-GATE-ROLL
+  concern is a special case of it, not a second rule).
+- **Gate**: `test_campaign_stock_landing` green end to end (with T4's
+  touchdown): liftoff → route at waypoint altitudes → RTB → approach →
+  Rollout.
+
+### T4 — the flare closes
+
+- A final-20-ft law: below threshold height the flare drives target
+  sink to the gear-tolerable figure and lets the strut absorb it (the
+  reference's own retard shape); the 15 s timeout becomes the
+  arms-length backstop, not the primary exit.
+- **Gate**: `landing_only` exit 0 with touchdown; the campaign approach
+  lands (the CAMP-LAND chain closes end to end).
+
+### T5 — the A/A seam
+
+- Bisect `d3a912b..HEAD` for the 15 combat-integration reds; if the
+  tree bisects clean, it is platform FP — widen the specific margins or
+  pin the FP contract and say so in the test.
+- **Gate**: `test_combat_integration` 31/31 on the dev machine;
+  `--war --aa-combat` books air kills on this machine.
+
+### T6 — the all-up verify (the process fix)
+
+- `scripts/verify.cmd` (Windows-first): build Release → the fast sim
+  tier → the three scenario gates (takeoff_only, landing_only,
+  digi_full_mission) → the stock-landing harness
+  (`F4_STOCK_WORLD=testcamp.world.json`) → a 0.3-h armed war — one
+  command, loud exit code, run before every push.
+- The documented CAMP-TOT-PACE re-pin set moves into an explicit
+  known-red list file; anything red OUTSIDE that list fails the verify.
+  Then the set is actually re-pinned — a permanently red suite hides
+  real regressions (the exact mechanism that let the combat suite rot).
+
+## 4. What does NOT change
+
+- The FID tier machinery, the aggregate clock, the ledger's write
+  model, the ATM pipeline — this plan repairs the sim's truthfulness,
+  not the war's architecture.
+- The CAMP-ROTATE liftoff gate (lift margin) stands.
+- Determinism: the crash decision reads only sim state in walk order —
+  no RNG, no wall clock; the war's ledger MD5s re-pin as the reapers
+  start firing (a deliberate §5-style re-pin, recorded per tranche).
+
+---
+
+*Evidence artifacts regenerate via the commands in §1; the qc/diag_* dirs
+are gitignored. Each landed tranche records its as-built notes in its own
+section, the CHANGELOG gets its line, and the known-gaps ledgers
+(CAMPAIGN_LOOP_PLAN §7) retire the entries this plan closes.*
