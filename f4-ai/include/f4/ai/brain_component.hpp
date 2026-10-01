@@ -65,6 +65,7 @@
 #include "f4/ai/modules/wvr_module.hpp"
 #include "f4/ai/modules/wingman_module.hpp"
 #include "f4/ai/modules/flight_lead_module.hpp"   // Step 14 (the lead half)
+#include "f4/ai/modules/fac_talk_on_module.hpp"   // Step 15 (the talk-on)
 #include "f4/ai/modules/strike_module.hpp"
 #include "f4/ai/wingradio.hpp"                     // Step 14 (the vocabulary)
 #include "f4/ai/modules/ground_avoid_module.hpp"
@@ -294,6 +295,81 @@ public:
     // real tanker-side brain with its own SM) is a follow-up.
     void set_tanker(bool t) noexcept { is_tanker_ = t; }
     [[nodiscard]] bool is_tanker() const noexcept { return is_tanker_; }
+
+    // --- Support-station profile (Step 15 — the SupportStationBrain
+    // composition, AI_IMPLEMENTATION_PLAN.md §16) --------------------
+    // Set by the host for the support roles — tanker / AWACS / ECM
+    // (scenario "tanker"/"awacs"/"ecm", campaign support missions).
+    // This IS the composition the plan names: no new brain class — the
+    // profile arms a DIFFERENT MODULE SET inside this brain:
+    //   - the mission modules unchanged (the NavigationModule's station
+    //     hold flies the racetrack; CollisionAvoid stays always-armed);
+    //   - the ENGAGEMENT rungs (BVR / WVR) stand down — the reference
+    //     support aircraft run away, they do not fight; the defensive
+    //     MissileDefeat rung stays armed (defense is doctrine, the same
+    //     rule the shipped defensive archetypes fly under).
+    // Gated by the host's Part-III arm (the scenario ai block's
+    // "flight_lead") — unset, the brain is byte-identically what it
+    // was (a support role that still fights when attacked fights on).
+    void set_support_profile(bool t) noexcept { support_profile_ = t; }
+    [[nodiscard]] bool is_support_profile() const noexcept {
+        return support_profile_;
+    }
+
+    // --- FAC profile (Step 15 — the FACBrain composition) -------------
+    // Set by the host for the FAC role (scenario "fac": true). Implies
+    // the support-station profile (the FAC is a defensive-only station
+    // aircraft) and arms the talk-on publisher: the FacTalkOnModule
+    // below turns "on station + live mark + assigned flight" into ONE
+    // FacTalkOn row (wingradio v1) that the host delivers to the strike
+    // brain as a targeting hint. v1 marks ONE target — set_fac_mark()
+    // at spawn, reset_fac() is the only re-mark path.
+    void set_fac(bool t) noexcept {
+        fac_armed_ = t;
+        if (t) support_profile_ = true;
+    }
+    [[nodiscard]] bool is_fac() const noexcept { return fac_armed_; }
+    /// The marked entity (the host resolves the scenario's mark_feature
+    /// to the spawned entity id at arming time).
+    void set_fac_mark(std::uint64_t target_id) noexcept {
+        fac_talk_on_.set_mark(target_id);
+    }
+    /// The assigned strike flight's picture for this tick (the host
+    /// pushes before the brains run — v1: the nearest same-team
+    /// non-support aircraft; the host is the FAC's eyes).
+    void report_strike_flight(
+        const modules::FacTalkOnModule::AddresseeEcho& echo) {
+        fac_talk_on_.report_addressee(echo);
+    }
+    /// The pending talk-on this brain published this tick (the host
+    /// drains after update_all and delivers to the addressed strike
+    /// brain). One slot — draining consumes it.
+    [[nodiscard]] std::optional<WingRadioMessage> drain_fac_talk_on() {
+        auto m = pending_fac_talk_on_;
+        pending_fac_talk_on_.reset();
+        return m;
+    }
+    [[nodiscard]] const modules::FacTalkOnModule& fac_talk_on()
+        const noexcept {
+        return fac_talk_on_;
+    }
+
+    // --- The talk-on HINT (Step 15 — the strike side) -----------------
+    // The FAC's talk-on arrives through the host (the Step-14 hint
+    // pipe — the brain never reads the bus for commands). v1: the
+    // marked entity's id fills any UNMARKED A-G delivery (a route
+    // waypoint that carries a delivery action but no target — the
+    // planner knew the area, the FAC named the point). A route target
+    // is never overridden (the hint is not a re-tasking), and the hint
+    // persists for the flight (one FAC, one mark — every unmarked
+    // delivery prosecutes THE mark).
+    void offer_fac_talk_on(const WingRadioMessage& m) {
+        if (m.event != WingRadio::FacTalkOn || m.target_id == 0) return;
+        talk_on_target_id_ = m.target_id;
+    }
+    [[nodiscard]] std::uint64_t talk_on_target_id() const noexcept {
+        return talk_on_target_id_;
+    }
 
     void update(double dt, messaging::MessageBus& bus) override {
         if (!owner_.valid()) return;  // not attached to any entity — no-op
@@ -619,7 +695,44 @@ public:
                         break;
                     case WingRadio::Ack:
                         break;  // not a lead-issued order
+                    case WingRadio::FacTalkOn:
+                        break;  // not a lead-issued order (a hint, no ack)
                 }
+            }
+        }
+
+        // =================================================================
+        // FAC TALK-ON (Step 15 — the FACBrain composition's publisher):
+        // the orbit is the NavigationModule's station hold (the P7
+        // racetrack); the mark + the assigned strike flight ride the
+        // host pushes; the FacTalkOnModule is the one-shot decision.
+        // The published row goes on the bus (the transcript renders it)
+        // AND stashes for the host to deliver to the strike brain (the
+        // Step-14 hint pipe — the same push discipline the lead's
+        // orders ride). An unarmed FAC never runs this — the
+        // byte-identical gate.
+        // =================================================================
+        if (fac_armed_ && phase_ == Phase::Enroute && owner_alive()) {
+            modules::FacTalkOnModule::MarkPicture mp{};
+            if (fac_talk_on_.mark_id() != 0 && owner_.world() != nullptr) {
+                const entities::EntityHandle mark(
+                    entities::EntityId{fac_talk_on_.mark_id()},
+                    owner_.world());
+                const auto* mark_dmg =
+                    mark.get<entities::DamageStateComponent>();
+                if (const auto* mark_tf =
+                        mark.get<entities::TransformComponent>()) {
+                    mp.position = mark_tf->position;
+                    mp.alive = mark_dmg == nullptr || !mark_dmg->killed;
+                }
+            }
+            if (auto talk = fac_talk_on_.update(
+                    owner_.id().value, mp,
+                    modules::FacTalkOnModule::TalkOnInput{
+                        nav_.holding_station()},
+                    host_time())) {
+                bus.publish(*talk);
+                pending_fac_talk_on_ = *talk;
             }
         }
 
@@ -753,18 +866,24 @@ public:
                         wvr_.reset();
                     }
                     bvr_.reset();
-                } else if (!archetype_allows(
-                               f4::data::BrainModeKey::BVREngage) &&
-                           !archetype_allows(
-                               f4::data::BrainModeKey::WVREngage)) {
-                    // ARCHETYPE STAND-DOWN (BRAINDAT.brn): the shipped
+                } else if (support_profile_ ||
+                           (!archetype_allows(
+                                f4::data::BrainModeKey::BVREngage) &&
+                            !archetype_allows(
+                                f4::data::BrainModeKey::WVREngage))) {
+                    // ENGAGEMENT STAND-DOWN. Two shapes share this rung:
+                    // (a) ARCHETYPE STAND-DOWN (BRAINDAT.brn): the shipped
                     // SEAD / Strike / Waypointer archetypes disarm every
                     // engagement mode — defensive, formation-flying
-                    // mission aircraft that never pick a fight. The
+                    // mission aircraft that never pick a fight; (b) the
+                    // SUPPORT-STATION PROFILE (Step 15): the tanker /
+                    // AWACS / ECM / FAC compositions — the reference
+                    // support aircraft run away, they do not fight. The
                     // running engagement (if one was live when the
-                    // archetype was installed) ends the same clean way
-                    // bingo ends it; the formation/mission rungs below
-                    // take over.
+                    // stand-down armed) ends the same clean way bingo
+                    // ends it; the formation/mission rungs below take
+                    // over. The defensive MissileDefeat rung ABOVE stays
+                    // armed for both — defense is doctrine.
                     if (in_wvr_) {
                         in_wvr_ = false;
                         wvr_.reset();
@@ -916,8 +1035,17 @@ public:
                 wp_index < plan_.route.size() &&
                 modules::is_ag_delivery_action(
                     plan_.route[wp_index].action);
-            if (strike_wp && plan_.route[wp_index].target_id != 0 &&
-                !strike_.delivered()) {
+            // The delivery's aim target (Step 15): the route waypoint's
+            // own target; an UNMARKED delivery (target 0 — the planner
+            // knew the area, nobody had named the point) fills from the
+            // FAC talk-on hint. A route target is never overridden.
+            std::uint64_t aim_target_id =
+                wp_index < plan_.route.size()
+                    ? plan_.route[wp_index].target_id : 0;
+            const bool talk_on_aim =
+                aim_target_id == 0 && talk_on_target_id_ != 0;
+            if (talk_on_aim) aim_target_id = talk_on_target_id_;
+            if (strike_wp && aim_target_id != 0 && !strike_.delivered()) {
                 // Resolve the aim point from the target entity (the brain
                 // is the module's eyes — engine-agnostic module, the
                 // world access lives here).
@@ -925,8 +1053,7 @@ public:
                 bool aim_valid = false;
                 if (auto* w = owner_.world()) {
                     const entities::EntityHandle tgt(
-                        entities::EntityId{plan_.route[wp_index].target_id},
-                        w);
+                        entities::EntityId{aim_target_id}, w);
                     if (const auto* tf =
                             tgt.get<entities::TransformComponent>()) {
                         aim = tf->position;
@@ -939,16 +1066,21 @@ public:
                         // center aim can never kill anything.
                         // EMPL-2d — the save's own per-mission
                         // AIM-POINT ELEMENT is the rule now (see
-                        // resolve_feature_aim).
+                        // resolve_feature_aim). A talk-on aim has no
+                        // inner aimpoint element (the mark IS the
+                        // feature) — the nominal rule there.
                         if (const auto* fs =
                                 tgt.get<entities::FeatureSetComponent>()) {
                             aim = resolve_feature_aim(
-                                *fs, plan_.route[wp_index].aimpoint_feature,
+                                *fs,
+                                talk_on_aim ? std::uint8_t{255}
+                                            : plan_.route[wp_index]
+                                                  .aimpoint_feature,
                                 aim);
                         }
                     }
                 }
-                strike_.set_target(plan_.route[wp_index].target_id);
+                strike_.set_target(aim_target_id);
                 strike_.update(dt, state, aim, aim_valid);
                 combat_intent_.bomb_release =
                     strike_.release_pulse() && !hold_fire_;
@@ -1757,6 +1889,23 @@ private:
     // not the receiver). The tanker-side protocol is handled by the
     // StubATC for now; a dedicated TankerModule is a follow-up.
     bool is_tanker_{false};
+
+    // Support-station profile (Step 15 — the SupportStationBrain
+    // composition): the engagement rungs stand down, the defensive
+    // MissileDefeat rung stays armed, the mission modules unchanged.
+    // See set_support_profile() for the composition note.
+    bool support_profile_{false};
+
+    // FAC profile (Step 15 — the FACBrain composition): implies the
+    // support profile and arms the talk-on publisher. fac_talk_on_ is
+    // the pure one-shot decision (mark + addressee pushed by the host);
+    // pending_fac_talk_on_ is the published row stashed for the host's
+    // drain; talk_on_target_id_ is the STRIKE side — the delivered hint
+    // that fills an unmarked A-G delivery (see the A-G rung).
+    bool fac_armed_{false};
+    modules::FacTalkOnModule fac_talk_on_{};
+    std::optional<WingRadioMessage> pending_fac_talk_on_{};
+    std::uint64_t talk_on_target_id_{0};
 
     // AAR role (Tranche D): the refuel module + the host-driven arming
     // flag + the lazy-init guard. refuel_ is default-constructed; it

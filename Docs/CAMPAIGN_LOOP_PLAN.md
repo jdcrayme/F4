@@ -785,13 +785,21 @@ follow-up refinement, documented here.
   gated INBOUND (the nose-to-end projection — a round-trip route ends
   near its start, and the old unconditional handoff "landed"
   freshly-launched outbound aircraft at their departure field).
-  REMAINING (measured): the first approach after the fixes still
-  overshoots the threshold once (threshold_overflown — the descent
-  from the 5-nm/1,500-ft entry is marginal) and the re-attack can
-  hold in InterceptFinal; the abort QC now pins the RECOVERY (the
-  sortie closes, the aircraft on the deck at its home field) instead
-  of the FSM path, which the abort's plan swap legitimately keeps in
-  Enroute.
+  REMAINING (measured, the live-landing tranche): the instrumented
+  observed-mission run (test_campaign_stock_landing::
+  LiveWaveFlightFliesMissionAndTouchesDown — the bubble rides the
+  flight for 90 min) shows the wave launching and flying correctly,
+  but the ENROUTE→APPROACH handoff never fires on the inbound leg —
+  the landing module stays at its idle RequestApproach for the whole
+  flight, so nothing reaches OnFinal/touchdown live. The go-arounds
+  the user sees are the module's go-around turns at pattern altitude
+  during earlier partial engagements. The handoff condition (within
+  33000 ft INBOUND of the route end) fires only in a narrow window;
+  it needs to arm the approach from the route's inbound leg start
+  (the IAP role) with the descent beginning there — the FF ladder's
+  own shape. The unit suite (landing module, 27 tests) lands
+  start-in-approach aircraft reliably; the gap is purely the
+  campaign arrival-path engagement.
 
 - **AIRWAR-QC — TOT adherence (QC 2026-09-30, open)** — the
   F4_STOCK_WORLD-gated harness (test_campaign_airwar_qc) ran a

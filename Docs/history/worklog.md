@@ -896,3 +896,96 @@ Stage Summary:
   never existed), and the kill/loss half of the wing vocabulary rides
   the existing M4 narration (no duplicate radio lines).
 - Produced 0006-STEP-14.patch for the user's commit-and-push flow.
+
+---
+Task ID: STEP-15
+Agent: main
+Task: AI_IMPLEMENTATION_PLAN.md §16 Step 15 — the specialist support
+brains (FAC + the station brains): the SupportStationBrain and FACBrain
+compositions, the talk-on pipe, and the Appendix A index closure
+(flitlead/facbrain/tankbrn all mapped to landed code).
+
+Work Log:
+- Read the Step-15 spec + the Step-12/14 as-built notes; mapped the
+  compositions onto the delivered architecture (BrainComponent IS the
+  FrameExec skeleton — profiles, not a new class hierarchy).
+- wingradio v1.1: the fifth row `FacTalkOn` + the closed
+  `TalkOnDesc` enum (v1: GroundAssets) + the talk-on payload fields on
+  WingRadioMessage (bra_deg / range_ft / desc — zeros on every other
+  row). Enum row + test per the risk-table contract.
+- FacTalkOnModule (f4-ai, pure — the FlightLeadModule discipline): the
+  one-shot talk-on decision. Mark + addressee pushed by the
+  host/brain; the addressee picture is consumed per-update (a stale
+  position can never put a second BRA on the radio); the BRA is
+  computed from the ADDRESSEE to the mark (radio convention: degrees
+  true, 000 north); the latch closes after one row (v1 marks ONE
+  target; reset() is the only re-arm).
+- BrainComponent: `set_support_profile` (the engagement rungs stand
+  down at the shared archetype rung; MissileDefeat stays armed),
+  `set_fac` (implies the profile, arms the publisher), the mark and
+  addressee pushes, the pending-row drain, and the STRIKE side:
+  `offer_fac_talk_on` stores the hint; the A-G rung fills an UNMARKED
+  delivery (action 14/15/17/18/19 with target 0) from the hint — the
+  aim resolves from the marked entity (a talk-on aim reads the
+  nominal rule; a route target is never overridden).
+- f4-simulation: scenario `fac` + `mark_feature` per aircraft; the P7
+  station-hold contract (`station_time_s`/`loop_waypoints`) parses on
+  per-aircraft routes and threads through the plan mapping (the
+  scenario path could not express a racetrack hold before);
+  `arm_support_brains` (after the features spawn; the mark resolves to
+  the feature entity; loud on an unmarked/out-of-range FAC),
+  `push_fac_marks` (nearest same-team non-support addressee, before
+  the brains run), `apply_fac_talk_ons` (after update_all, beside the
+  lead orders). The transcript renders the talk-on
+  ("<strike>, talk-on bearing 002 for 8.2, ground assets.").
+- Gates: `ai.flight_lead` arms the arming + the pushes + the drain
+  (the plan's "no new flags" rule); `combat.gci_datalink` stays the
+  AWACS node's arm. Scenario-list path only this tranche.
+- Tests: test_fac_talk_on_module.cpp (19 — the gates, the BRA
+  arithmetic 000/090/180/270/diagonal, the message shape, the one-shot
+  latch + re-target/reset semantics, the consumed picture, the hint
+  API, the drain); test_support_fac_e2e.cpp (5 tiers — the tanker's
+  racetrack through a full boom cycle, the support stand-down with the
+  gate-off twin engaging a hold-fire bandit in fusion range, the AWACS
+  stationing while the datalink net carries its contact, the FAC
+  talk-on driving the strike's unmarked delivery onto the marked
+  feature (release target == the mark, impact on it), and the gate-off
+  twin).
+- BUG FIX the E2E caught (navigation_module.cpp): the P7 wrap check
+  rode an `else if` AFTER the route-completion check — a hold whose
+  span ends at the route's LAST waypoint completed the route on the
+  first lap (the station silently became a fly-through; the campaign's
+  orbit-to-end synth hid it behind its long tails). The wrap now rides
+  before completion; the release path is unchanged. Found because the
+  tanker tier's first geometry put the span on the whole route.
+- E2E debugging notes: a Ground-phase airframe is not a fightable
+  contact (the combat class heuristic needs speed/alt — the bandit
+  tiers cruise racetracks now); the AAR rendezvous needs the
+  co-located spawn the tanker_track rig uses (a chase start never
+  closes against a matched-speed orbit); an F-16 cannot carry
+  356,000 lbs (the KC-10's tank — the FM sank to ground state and the
+  picture went invalid; the tier flies realistic fuel now).
+- Verification: f4-ai label 366/366; the affected sim suites green
+  (aar e2e, campaign aar, navigation 26, flight lead 5, datalink tiers
+  8, simdata 13, formation, strike 12+6, scenario loader 36, feature
+  spawning 8, combat transcript 3); the fast sim label's failures are
+  EXACTLY the documented CAMP-TOT-PACE set (verified identical on the
+  stashed clean tree); the new suites + the nav module + both AAR
+  suites green under ASan+UBSan with zero reports (the campaign_aar
+  sanitizer run needed /tmp pruned — the disk was full, not a code
+  failure). Gate-off twin pins the byte-identity shape.
+
+Stage Summary:
+- Step 15 is CLOSED as-built: the Part-III chapters close the Appendix
+  A index — flitlead (STEP-14), facbrain + tankbrn (STEP-15) all map
+  to landed code, and every flight type the scenario authoring names
+  (strike, CAP, support, FAC) flies a composed brain from the same
+  module library. The campaign-side FAC filing (the ATM tranche) and
+  the re-mark priority loop are the documented v2 data tranche.
+- As-built deviations documented in the plan: profiles on
+  BrainComponent instead of DigitalBrain subclasses (the Step-12
+  collapse note's architecture); the "strike flight does not yet see"
+  guard is structural (the fusion ladder is air-only — a ground mark
+  cannot arrive through the strike's own sensors first) with the
+  one-shot latch as the duplicate suppressor.
+- Produced 0007-STEP-15.patch for the user's commit-and-push flow.

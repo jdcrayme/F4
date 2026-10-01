@@ -5,6 +5,54 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## Step 15 — the specialist support brains (FAC + the station brains)
+
+AI_IMPLEMENTATION_PLAN.md §16's Step 15, landed as-built: the Part-III
+module library now flies every flight TYPE — the support roles
+(tanker / AWACS / ECM) get the defensive-only station composition, the
+FAC gets it plus the talk-on that steers a strike flight's bombs onto
+a mark the strike's own sensors never saw.
+
+- **SupportStationBrain** (`tankbrn.cpp` → `set_support_profile`): no
+  new brain class — a profile on BrainComponent that stands the
+  engagement rungs (BVR/WVR) down and keeps the defensive MissileDefeat
+  rung armed (the reference support aircraft run away, they do not
+  fight), while the P7 station hold flies the racetrack and CollisionAvoid
+  stays always-armed. The host arms it on the support roles.
+- **FACBrain** (`facbrain.cpp` → `set_fac` + `FacTalkOnModule`): the
+  orbit station + ONE talk-on (wingradio's fifth row, `FacTalkOn`,
+  carrying the BRA from the assigned flight and the closed
+  `TalkOnDesc::GroundAssets` row). The host resolves the scenario's
+  `mark_feature` to the spawned feature entity, pushes the nearest
+  same-team non-support flight's picture, and delivers the published
+  row through the Step-14 hint pipe. The strike brain's UNMARKED
+  delivery (delivery-action waypoint, target 0) prosecutes the mark —
+  a route target is never overridden; v1 marks ONE target (the
+  re-mark priority loop is the v2 data tranche).
+- **Scenario surface**: `fac` + `mark_feature` per aircraft; the
+  station-hold contract (`station_time_s` / `loop_waypoints`) now
+  parses on per-aircraft routes (the P7 mechanics already lived in
+  the NavigationModule — the scenario path just couldn't express the
+  contract). The talk-on renders as host text
+  ("STRIKE1, talk-on bearing 002 for 8.2, ground assets.").
+- **Gates**: `ai.flight_lead` arms everything (the plan's "no new
+  flags" rule) — off, every brain is byte-identically what it was.
+  The AWACS node stays on `combat.gci_datalink`.
+- **P7 BUG FIX the E2E caught** (`navigation_module.cpp`): the station
+  hold's wrap check rode an `else if` AFTER the route-completion check —
+  a hold whose span ends at the route's LAST waypoint completed the
+  route on the first lap (the "station" silently became a fly-through).
+  The wrap now rides before completion: an active hold wraps to the
+  anchor; an expired hold at the last corner completes (orbit-to-end).
+- **Tests**: `test_fac_talk_on_module.cpp` (19 — the gates, the BRA
+  arithmetic, the one-shot latch, the hint API, the drain) and
+  `test_support_fac_e2e.cpp` (5 tiers — the tanker's racetrack through
+  a full boom cycle, the support stand-down with the gate-off twin
+  engaging, the AWACS stationing while the net carries it, the talk-on
+  driving the strike's unmarked delivery onto the mark, and the
+  gate-off twin). f4-ai label 366/366; the affected sim suites green;
+  the new suites green under ASan+UBSan with zero reports.
+
 ## Step 14 — FlightLeadModule: the lead half of flight command
 
 AI_IMPLEMENTATION_PLAN.md §16's flight-lead chapter, landed as-built:

@@ -239,6 +239,14 @@ void Simulation::initialize() {
     apply_simdata_ai_profiles();
     spawn_airfield_features();  // Phase 2A: features spawn after aircraft
 
+    // Step 15 (support/FAC brains): arm the compositions after BOTH the
+    // aircraft and the airfield features exist — the FAC's mark resolves
+    // a feature entity, the support profiles arm brains that already
+    // carry their roles. Gated by the scenario's Part-III arm
+    // ("ai"."flight_lead") — off, this is a no-op and every brain stays
+    // byte-identically what it was.
+    arm_support_brains();
+
     // Mode B: spawn parked aircraft from Squadrons (after the airfield is
     // derived, so parking spots are available). Squadrons don't move, so
     // these are spawned once at initialize() — no per-tick re-deaggregation.
@@ -872,8 +880,15 @@ void Simulation::spawn_from_scenario_list() {
             ? scenario_.waypoints : sc.route;
         plan.route.reserve(route_source.size());
         for (const auto& wp : route_source) {
-            plan.route.push_back(modules::NavigationModule::Waypoint{
-                wp.name, wp.position, wp.speed_kts, wp.action});
+            modules::NavigationModule::Waypoint nav_wp{
+                wp.name, wp.position, wp.speed_kts, wp.action};
+            // Step 15: the scenario route can now carry the P7 station
+            // hold contract (the racetrack anchor) — the same fields the
+            // campaign bridge threads through for the support flights.
+            // Zero defaults keep every pre-Step-15 route byte-identical.
+            nav_wp.station_time_s = wp.station_time_s;
+            nav_wp.loop_waypoints = wp.loop_waypoints;
+            plan.route.push_back(nav_wp);
         }
         plan.taxi_in_route = scenario_.airfield.taxi_in_route;
         // STAB-E50: the taxi-in route must TERMINATE at this aircraft's own
@@ -1307,6 +1322,166 @@ void Simulation::apply_flight_lead_orders() {
         if (wing_brain == nullptr) continue;
         wing_brain->queue_flight_order(f4::ai::FlightOrder{
             pair.lead.value, order->target_id, order->event});
+    }
+}
+
+void Simulation::arm_support_brains() {
+    // Step 15 (support/FAC brains): the SupportStationBrain + FACBrain
+    // compositions. The support roles (tanker / AWACS / ECM) get the
+    // defensive-only profile — the reference support aircraft run away,
+    // they do not fight; the engagement rungs stand down, MissileDefeat
+    // stays armed. The FAC gets the same profile plus the talk-on
+    // publisher, with the scenario's marked feature resolved to its
+    // spawned entity id (v1 marks ONE target).
+    //
+    // THE GATE is the scenario's Part-III arm ("ai"."flight_lead" —
+    // the same session option the hint pipe rides; the plan's "no new
+    // flags" rule). Unarmed, this function does nothing and every
+    // support brain behaves byte-identically to the pre-Step-15 world.
+    // Scenario-list path only: the fields are per-aircraft scenario
+    // authoring, exactly like tanker/awacs/lead_callsign (the campaign
+    // roster's support flights already fly station-hold routes through
+    // the CAMP-ATM tranche; their profile stamp rides the campaign arm
+    // when the ATM files FAC missions — the v2 data tranche).
+    if (!scenario_.ai.flight_lead) return;
+    if (scenario_.spawn_mode != SpawnMode::ScenarioList ||
+        scenario_.aircraft.size() != aircraft_entities_.size()) {
+        return;
+    }
+
+    for (std::size_t i = 0; i < scenario_.aircraft.size(); ++i) {
+        const auto& sc = scenario_.aircraft[i];
+        const bool support_role = sc.tanker || sc.awacs || sc.ecm;
+        if (!support_role && !sc.fac) continue;
+
+        entities::EntityHandle h(aircraft_entities_[i], &world_);
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        if (brain == nullptr) continue;
+
+        if (support_role) brain->set_support_profile(true);
+        if (sc.fac) {
+            brain->set_fac(true);
+            if (sc.mark_feature >= 0) {
+                if (std::size_t(sc.mark_feature) >=
+                    feature_entities_.size()) {
+                    throw std::runtime_error(
+                        "Simulation::arm_support_brains: aircraft '" +
+                        sc.callsign + "' marks feature " +
+                        std::to_string(sc.mark_feature) +
+                        " but the scenario spawns " +
+                        std::to_string(feature_entities_.size()) +
+                        " airfield features");
+                }
+                brain->set_fac_mark(feature_entities_[sc.mark_feature]
+                                        .value);
+            }
+            // An FAC without a mark is an authoring hole — the orbit
+            // flies, the talk-on never fires. Loud at arm time, where
+            // the scenario author is looking (the wingman-ref checks'
+            // convention).
+            if (sc.mark_feature < 0) {
+                throw std::runtime_error(
+                    "Simulation::arm_support_brains: FAC '" +
+                    sc.callsign +
+                    "' declares no mark_feature (v1 marks ONE target)");
+            }
+        }
+    }
+}
+
+void Simulation::push_fac_marks() {
+    // Step 15: the FAC's addressee push — the host is the FAC's eyes on
+    // its assigned strike flight (the same push discipline the wingman
+    // lead pictures and the flight-lead echoes ride). v1 assigns the
+    // talk-on to the NEAREST same-team non-support aircraft with a
+    // brain (deterministic; the re-mark/priority loop is the v2 data
+    // tranche). Pushed BEFORE the brains run so the talk-on's BRA is
+    // computed from this tick's geometry.
+    if (!scenario_.ai.flight_lead ||
+        scenario_.spawn_mode != SpawnMode::ScenarioList ||
+        scenario_.aircraft.size() != aircraft_entities_.size()) {
+        return;
+    }
+
+    for (std::size_t i = 0; i < scenario_.aircraft.size(); ++i) {
+        if (!scenario_.aircraft[i].fac) continue;
+        entities::EntityHandle fac(aircraft_entities_[i], &world_);
+        auto* fac_brain = fac.get<f4::ai::BrainComponent>();
+        if (fac_brain == nullptr || !fac_brain->is_fac()) continue;
+        if (fac_brain->fac_talk_on().published() ||
+            fac_brain->fac_talk_on().mark_id() == 0) {
+            continue;  // latched (v1's one talk-on) or no mark — inert
+        }
+
+        // The addressee: nearest same-team aircraft that is not the FAC
+        // itself, carries no support role, has a brain, and is alive.
+        const auto* fac_tf = fac.get<entities::TransformComponent>();
+        if (fac_tf == nullptr) continue;
+        const auto fac_team = scenario_.aircraft[i].team;
+        std::size_t best = SIZE_MAX;
+        double best_d2 = 0.0;
+        for (std::size_t j = 0; j < scenario_.aircraft.size(); ++j) {
+            if (j == i) continue;
+            const auto& sc = scenario_.aircraft[j];
+            if (sc.team != fac_team) continue;
+            if (sc.tanker || sc.awacs || sc.ecm || sc.fac) continue;
+            entities::EntityHandle h(aircraft_entities_[j], &world_);
+            if (h.get<f4::ai::BrainComponent>() == nullptr) continue;
+            const auto* dmg = h.get<entities::DamageStateComponent>();
+            if (dmg != nullptr && dmg->killed) continue;
+            const auto* tf = h.get<entities::TransformComponent>();
+            if (tf == nullptr) continue;
+            const double dx = tf->position.x - fac_tf->position.x;
+            const double dy = tf->position.y - fac_tf->position.y;
+            const double d2 = dx * dx + dy * dy;
+            if (best == SIZE_MAX || d2 < best_d2) {
+                best = j;
+                best_d2 = d2;
+            }
+        }
+        if (best == SIZE_MAX) continue;  // nobody assigned this tick
+
+        entities::EntityHandle addressee(aircraft_entities_[best],
+                                         &world_);
+        const auto* tf = addressee.get<entities::TransformComponent>();
+        const auto* dmg = addressee.get<entities::DamageStateComponent>();
+        fac_brain->report_strike_flight(
+            f4::ai::modules::FacTalkOnModule::AddresseeEcho{
+                aircraft_entities_[best].value, tf->position,
+                dmg == nullptr || !dmg->killed});
+    }
+}
+
+void Simulation::apply_fac_talk_ons() {
+    // Step 15: the talk-ons (published during update_all) deliver to the
+    // addressed strike brains — the hint the A-G rung consumes on an
+    // unmarked delivery. The message names its addressee (peer_id); the
+    // host resolves it the same way resolve_wingman_refs resolves a
+    // callsign. Gate: the Part-III arm (nothing is ever published
+    // without it, so the drain is a no-op in an unarmed world — the
+    // explicit check keeps the walk free).
+    if (!scenario_.ai.flight_lead) return;
+
+    for (std::size_t i = 0; i < scenario_.aircraft.size(); ++i) {
+        if (!scenario_.aircraft[i].fac) continue;
+        entities::EntityHandle fac(aircraft_entities_[i], &world_);
+        auto* fac_brain = fac.get<f4::ai::BrainComponent>();
+        if (fac_brain == nullptr || !fac_brain->is_fac()) continue;
+
+        const auto talk = fac_brain->drain_fac_talk_on();
+        if (!talk) continue;
+
+        // Deliver by peer id: find the aircraft entity with that id
+        // (the addressee the FAC named) and offer the hint.
+        for (const auto eid : aircraft_entities_) {
+            if (eid.value != talk->peer_id) continue;
+            entities::EntityHandle h(eid, &world_);
+            auto* strike_brain = h.get<f4::ai::BrainComponent>();
+            if (strike_brain != nullptr) {
+                strike_brain->offer_fac_talk_on(*talk);
+            }
+            break;
+        }
     }
 }
 
@@ -2884,6 +3059,16 @@ void Simulation::tick(double dt) {
         }
     }
 
+    // Step 15 (support/FAC brains): the FAC's addressee push rides the
+    // same pre-update window as the pictures/echoes above — independent
+    // of the wingman pairs (an FAC world may have no two-ships at all).
+    // The host clock stamp is already armed by the flight-lead block
+    // when the Part-III gate is on (this push is a no-op without it).
+    if (scenario_.ai.flight_lead) {
+        f4::ai::BrainComponent::set_host_time(t_now);
+        push_fac_marks();
+    }
+
     // Tranche D (AAR): advance the scripted tanker + push its picture to
     // every receiver armed for refuel, BEFORE the brains run — the
     // RefuelModule is engine-agnostic, the host is its eyes. No-op when
@@ -2942,6 +3127,13 @@ void Simulation::tick(double dt) {
     // carries). Gate: the tranche armed.
     if (!wingman_pairs_.empty() && scenario_.ai.flight_lead) {
         apply_flight_lead_orders();
+    }
+
+    // Step 15: the FAC talk-ons (published during update_all) deliver
+    // to the addressed strike brains — the same post-update window the
+    // lead orders ride. Gate: the Part-III arm.
+    if (scenario_.ai.flight_lead) {
+        apply_fac_talk_ons();
     }
 
     // Throttle-driven IR band (the ir_power tranche): the FM's

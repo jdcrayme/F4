@@ -243,6 +243,34 @@ void CombatTranscript::attach(Simulation& sim) {
                 case f4::ai::WingRadio::Ack:
                     push(m.time_s, speaker, "Copy.", Severity::Info);
                     break;
+                case f4::ai::WingRadio::FacTalkOn: {
+                    // Step 15 (FAC talk-on): the mark's BRA + the closed
+                    // description row render as the talk-on prose. The
+                    // AI published the enum row + numbers only — the
+                    // text lives here, exactly like the order rows.
+                    // Bearing reads zero-padded three-digit radio style
+                    // (090); the range reads NM with one decimal.
+                    const int bra =
+                        static_cast<int>(m.target_bra_deg) % 360;
+                    const double range_nm =
+                        m.target_range_ft / f4::ai::kDatalinkFeetPerNm;
+                    const char* desc = "unknown";
+                    switch (m.target_desc) {
+                        case f4::ai::TalkOnDesc::GroundAssets:
+                            desc = "ground assets";
+                            break;
+                        case f4::ai::TalkOnDesc::None:
+                            break;  // a talk-on without a desc row — the
+                                    // renderer still says something sane
+                    }
+                    char buf[96];
+                    std::snprintf(buf, sizeof buf,
+                                  "%s, talk-on bearing %03d for %.1f, %s.",
+                                  callsign_of(m.peer_id).c_str(), bra,
+                                  range_nm, desc);
+                    push(m.time_s, speaker, buf, Severity::Info);
+                    break;
+                }
             }
         });
 }

@@ -535,6 +535,28 @@ private:
     /// host push carries. No-op unless the scenario armed
     /// ai.flight_lead.
     void apply_flight_lead_orders();
+    /// Step 15 (support/FAC brains): arm the compositions after the
+    /// aircraft AND the airfield features exist — the support roles
+    /// (tanker / AWACS / ECM) get the defensive-only profile, the FAC
+    /// gets it plus the talk-on publisher with the scenario's
+    /// "mark_feature" resolved to the spawned feature entity (v1 marks
+    /// ONE target; an unmarked or out-of-range mark fails initialize()
+    /// loudly — the wingman-ref checks' convention). Gated by the
+    /// scenario's "ai"."flight_lead" — off, this is a no-op and every
+    /// brain stays byte-identically what it was. Scenario-list path
+    /// only (the fields are per-aircraft scenario authoring).
+    void arm_support_brains();
+    /// Step 15: push the FAC's addressee picture every tick BEFORE the
+    /// brains run — v1 assigns the talk-on to the nearest same-team
+    /// non-support aircraft with a brain (deterministic; the re-mark
+    /// loop is the v2 data tranche). No-op unless the Part-III arm is
+    /// on.
+    void push_fac_marks();
+    /// Step 15: drain each FAC's published talk-on and deliver it to
+    /// the addressed strike brain (the hint the A-G rung consumes on
+    /// an unmarked delivery). Runs after update_all, beside
+    /// apply_flight_lead_orders. No-op unless the Part-III arm is on.
+    void apply_fac_talk_ons();
     /// Tranche D (AAR): construct the ScriptedTanker from the scenario's
     /// tanker block (initialize(), if present), advance it kinematically
     /// each tick (tick(), BEFORE the brains run), and push its picture to

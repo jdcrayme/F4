@@ -35,6 +35,7 @@ f4_ai_add_test(test_bvr_module      test_bvr_module.cpp)
 f4_ai_add_test(test_wvr_module      test_wvr_module.cpp)
 f4_ai_add_test(test_wingman_module test_wingman_module.cpp)
 f4_ai_add_test(test_flight_lead_module test_flight_lead_module.cpp)   # Step 14
+f4_ai_add_test(test_fac_talk_on_module test_fac_talk_on_module.cpp)   # Step 15
 f4_ai_add_test(test_gun_module     test_gun_module.cpp)
 f4_ai_add_test(test_ground_avoid_module test_ground_avoid_module.cpp)
 f4_ai_add_test(test_collision_avoid_module test_collision_avoid_module.cpp)

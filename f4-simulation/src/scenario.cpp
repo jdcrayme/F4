@@ -107,6 +107,8 @@ ScenarioAircraft read_aircraft(f4::json::Reader& r) {
         else if (key == "tanker")           a.tanker = r.read_bool();
         else if (key == "ecm")              a.ecm = r.read_bool();
         else if (key == "awacs")            a.awacs = r.read_bool();
+        else if (key == "fac")             a.fac = r.read_bool();
+        else if (key == "mark_feature")    a.mark_feature = static_cast<int>(r.read_int());
         else if (key == "route") {
             // Per-aircraft route (AAR redesign). Empty = use shared waypoints.
             r.expect('[');
@@ -153,6 +155,8 @@ ScenarioWaypoint read_waypoint(f4::json::Reader& r) {
         else if (key == "position")   w.position = read_world_position(r);
         else if (key == "speed_kts")  w.speed_kts = r.read_number();
         else if (key == "action")     w.action = static_cast<std::uint8_t>(r.read_int());
+        else if (key == "station_time_s") w.station_time_s = r.read_number();
+        else if (key == "loop_waypoints") w.loop_waypoints = static_cast<std::uint8_t>(r.read_int());
         else                          skip_unknown(r);
     }
     return w;

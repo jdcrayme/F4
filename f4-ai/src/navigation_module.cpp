@@ -351,21 +351,28 @@ void NavigationModule::check_waypoint_capture()
 
         ++wp_index_;
         wp_timer_ = 0.0;
-        if (wp_index_ >= route_.size()) {
-            sm_.process(NavigationEvent::WaypointCaptured);
-        } else if (holding_ && wp_index_ - 1 == loop_end_) {
-            // The span's last corner was just captured: wrap back to
-            // the anchor while the station timer still runs (the next
-            // leg is corner→anchor, the circuit's closing leg),
-            // release the hold and continue out of the span when it
-            // has expired (leg_from_ is already this corner — the
-            // egress leg departs from where the hold ended).
+        // P7 — the wrap check rides BEFORE the completion check: a hold
+        // whose span ends at the route's LAST waypoint must wrap back to
+        // the anchor while the timer runs (the circuit IS the hold), not
+        // complete the route. The Step-15 support-brain E2E caught the
+        // ordering: the old else-if let a span-that-is-the-whole-route
+        // fall into the Done path on the first lap and the "station"
+        // silently became a fly-through. The release path is unchanged:
+        // an expired hold at the last corner completes the route (the
+        // orbit-to-end shape — the flight ends in the stack), a hold
+        // with a tail sequences out of the span.
+        if (holding_ && wp_index_ - 1 == loop_end_) {
             if (station_elapsed_ < route_[loop_start_].station_time_s) {
                 wp_index_ = loop_start_;
             } else {
                 holding_ = false;
                 station_done_ = true;
+                if (wp_index_ >= route_.size()) {
+                    sm_.process(NavigationEvent::WaypointCaptured);
+                }
             }
+        } else if (wp_index_ >= route_.size()) {
+            sm_.process(NavigationEvent::WaypointCaptured);
         }
     }
 }

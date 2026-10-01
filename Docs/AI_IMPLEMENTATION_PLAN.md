@@ -1832,6 +1832,58 @@ the radio log showing the closed vocabulary.
 
 ### Step 15: the specialist support brains (FAC + the station brains)
 
+> **STATUS: LANDED (STEP-15)** — the chapter closed as-built. The two
+> compositions are PROFILES on `BrainComponent` (the Step-12 note's
+> delivered architecture: the brain component IS the FrameExec
+> skeleton — no new brain class hierarchy), mapped to the Appendix A
+> index below:
+>
+> - **SupportStationBrain** (`tankbrn.cpp`) — `set_support_profile(true)`:
+>   the mission modules unchanged (the NavigationModule's P7 station
+>   hold flies the racetrack; CollisionAvoid stays always-armed), the
+>   ENGAGEMENT rungs (BVR/WVR) stand down, the defensive MissileDefeat
+>   rung stays armed — the same shape the shipped defensive archetypes
+>   fly, forced by the profile instead of a BRAINDAT row. The host arms
+>   it on the support roles (scenario `tanker`/`awacs`/`ecm`; the
+>   campaign's support flights already fly station-hold routes through
+>   CAMP-ATM-1).
+> - **FACBrain** (`facbrain.cpp`) — `set_fac(true)` (implies the support
+>   profile) + the talk-on publisher: `FacTalkOnModule`
+>   (f4-ai/modules/fac_talk_on_module.hpp) is the pure one-shot decision
+>   beside `FlightLeadModule` — mark (scenario `mark_feature` resolved
+>   to the spawned feature entity) + addressee (the host pushes the
+>   nearest same-team non-support flight) + on-station → ONE
+>   `WingRadio::FacTalkOn` row (the closed vocabulary's fifth row, with
+>   the BRA + the closed `TalkOnDesc` row) on the bus, delivered through
+>   the Step-14 hint pipe; the strike brain's UNMARKED A-G delivery
+>   (a delivery-action waypoint with target 0) prosecutes the mark.
+>   A route target is never overridden; the re-mark priority loop is
+>   the v2 data tranche (v1 marks ONE target).
+> - **Gates**: the plan's "no new flags" holds — the hint pipe rides the
+>   existing `ai.flight_lead` session option (the support/FAC arming +
+>   the talk-on push/apply all no-op without it), the AWACS node stays
+>   on `combat.gci_datalink`. Scenario-only this tranche (the fields
+>   are per-aircraft authoring, like tanker/awacs); the campaign FAC
+>   filing rides the ATM tranche.
+> - **E2E** (`test_support_fac_e2e.cpp`, 5 tiers): the tanker's
+>   racetrack through a full boom cycle; the support stand-down (the
+>   gate-off twin engages the bandit in range, the profiled tanker
+>   never does); the AWACS flying its station while the datalink net
+>   carries it; the FAC talk-on driving the strike's unmarked delivery
+>   onto the marked feature (released, impact on the mark); the
+>   gate-off twin (no hint, no release, no radio line). Unit suite:
+>   `test_fac_talk_on_module.cpp` (19 — the gates, the BRA arithmetic,
+>   the one-shot latch, the hint API).
+> - **BUG FIX the E2E caught** (navigation_module.cpp): the P7 station
+>   hold's wrap check rode an `else if` AFTER the route-completion
+>   check — a hold whose span ends at the route's LAST waypoint fell
+>   into the Done path on the first lap and the "station" silently
+>   became a fly-through. The wrap check now rides BEFORE completion:
+>   an active hold wraps to the anchor (the circuit IS the hold); an
+>   expired hold at the last corner completes (the orbit-to-end shape).
+>   The release path and every route without the contract are
+>   byte-identical.
+
 **FreeFalcon reference**: `facbrain.cpp` (FACBrain — target marking,
 talk-on); `tankbrn.cpp` (the tanker/support station brain — the ATM
 strategy layer's FindSupportFlights already files these with station

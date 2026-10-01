@@ -1181,6 +1181,19 @@ void LandingModule::check_established() {
 }
 
 void LandingModule::check_flare_or_goaround() {
+    // CAMP-FAF descent telemetry: the final-approach profile, 1 Hz.
+    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        static int dbg_fin = 0;
+        if (++dbg_fin % 60 == 1) {
+            std::fprintf(stderr,
+                         "[final] along %+.0f agl %.0f beam %.0f err %+.0f vs %+.0f vcas %.0f cleared %d\n",
+                         course_along_ft(), current_alt_agl_ft_,
+                         glide_slope_alt_ft(),
+                         current_alt_msl_ft_ - glide_slope_alt_ft(),
+                         current_vs_fpm_, current_vcas_kts_,
+                         cleared_to_land_ ? 1 : 0);
+        }
+    }
     // Tranche A2/39: the OnFinal lateral bounds guard is REMOVED. The
     // guard was too aggressive — it fired GoAround at 200-300 ft when the
     // aircraft was 100-200 ft off centerline (the normal localizer tracking

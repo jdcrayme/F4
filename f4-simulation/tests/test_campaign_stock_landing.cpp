@@ -32,6 +32,17 @@ using namespace f4::simulation;
 
 namespace {
 
+int st_live(const std::unique_ptr<CampaignSession>& s) {
+    int n = 0;
+    for (const auto& f : s->flight_engine()->flights()) {
+        if (f.suspended) ++n;
+    }
+    return n;
+}
+int st_deaggs(const std::unique_ptr<CampaignSession>& s) {
+    return s->stats().tier_deaggs;
+}
+
 std::filesystem::path stock_world() {
     const char* env = std::getenv("F4_STOCK_WORLD");
     if (env == nullptr || *env == '\0') return {};
@@ -57,7 +68,7 @@ namespace {
 std::int64_t g_epoch = 0;
 } // namespace
 
-TEST(CampaignStockLanding, AbortedWaveFlightRecoversHome) {
+TEST(CampaignStockLanding, LiveWaveFlightFliesMissionAndTouchesDown) {
     auto world = stock_world();
     if (world.empty()) {
         GTEST_SKIP() << "set F4_STOCK_WORLD to a converted stock save";
@@ -85,9 +96,38 @@ TEST(CampaignStockLanding, AbortedWaveFlightRecoversHome) {
     auto session = CampaignSession::create(opts, &err);
     ASSERT_NE(session, nullptr) << err;
 
-    // The wave launches staggered (15 min per base): ~20 min of
-    // campaign time puts the first departures airborne and mid-route.
-    session->advance(1200.0);
+    for (int probe = 0; probe < 10; ++probe) {
+        session->advance(60.0);
+        const auto& rr = session->flight_engine()->flights();
+        const auto& rt0 = session->flight_engine()->routes()[0];
+        std::fprintf(stderr,
+                     "[wave %3d s] susp %d deaggs %d row0 to_depart %d "
+                     "gate %ld\n",
+                     (probe + 1) * 60, st_live(session), st_deaggs(session),
+                     session->flight_engine()->seconds_to_depart(0),
+                     rt0.empty() ? -1L
+                                 : static_cast<long>(rt0.front().depart));
+    }
+    {
+        const auto& rr = session->flight_engine()->flights();
+        int susp = 0, agg = 0, scrub = 0;
+        long first_gate = -1, second_gate = -1;
+        for (const auto& f : rr) {
+            if (f.suspended) ++susp;
+            else if (f.scrubbed) ++scrub;
+            else ++agg;
+        }
+        for (std::size_t i = 0; i + 1 < rr.size() && second_gate < 0; ++i) {
+            const auto& rt = session->flight_engine()->routes()[i];
+            if (rt.empty()) continue;
+            if (first_gate < 0) first_gate = rt.front().depart;
+            else if (second_gate < 0) second_gate = rt.front().depart;
+        }
+        std::fprintf(stderr, "[wave probe] rows %d susp %d agg %d scrub %d "
+                             "gate1 %ld gate2 %ld deaggs %d\n",
+                     static_cast<int>(rr.size()), susp, agg, scrub,
+                     first_gate, second_gate, session->stats().tier_deaggs);
+    }
     const auto tiers = session->flight_tiers();
     const auto live_it = std::find_if(tiers.begin(), tiers.end(),
                                       [](const auto& t) { return t.live; });
@@ -95,39 +135,82 @@ TEST(CampaignStockLanding, AbortedWaveFlightRecoversHome) {
         << "no live aircraft after the initial wave window";
     const std::uint32_t vu = live_it->vu;
 
-    // Abort: the sortie's books close NOW and the aircraft recovers
-    // home. The recovery rides the flight's OWN base queue (the wave
-    // staggers per base) — the aircraft lands at its home field.
-    const auto ack = session->apply_abort_command(vu);
-    ASSERT_EQ(ack.status, CampaignSession::CommandWrite::Applied)
-        << ack.detail;
-
-    // Within 45 min the sortie must be CLOSED: the row aborted
-    // (scrubbed/arrived/destroyed) — the aircraft on the deck at its
-    // home field, not flying the sortie forever. The ATC chain pin
-    // (the clearance names the flight's own base) lives in the
-    // module's unit suite and the airwar QC's recoveries.
-    bool closed = false;
-    double home_x = -1.0, home_y = -1.0;
-    for (const auto& t : session->flight_tiers()) {
-        if (t.vu == vu) {
-            // home = the row's own last-known position won't do; the
-            // abort's landing waypoint is what it flew to. Recovery =
-            // the row left the live set (scrubbed/arrived).
-            closed = t.aborted || t.arrived || !t.live;
+    // Keep the flight OBSERVED for its whole mission: the bubble rides
+    // with it (the user's camera selection does the same), so the tier
+    // machinery never folds it back to an aggregate. This is the LIVE
+    // landing path the user watches in 3D.
+    std::string last_state;
+    bool touched_down = false;
+    for (int i = 0; i < 540; ++i) {   // 90 min of campaign time
+        double px = 0.0, py = 0.0;
+        bool found = false;
+        for (const auto& t : session->flight_tiers()) {
+            if (t.vu == vu) {
+                px = t.x_grid;
+                py = t.y_grid;
+                found = true;
+                if (i % 30 == 29) {
+                    std::fprintf(stderr,
+                                 "[tier +%4d s] live %d arr %d dst %d abt %d"
+                                 " at %.1f,%.1f\n",
+                                 (i + 1) * 10, t.live ? 1 : 0,
+                                 t.arrived ? 1 : 0, t.destroyed ? 1 : 0,
+                                 t.aborted ? 1 : 0, px, py);
+                }
+                if (t.live) {
+                    // follow only while live
+                } else {
+                    found = false;
+                }
+                break;
+            }
         }
-        (void)home_x;
-        (void)home_y;
-    }
-    for (int i = 0; i < 180 && !closed; ++i) {   // +30 min
+        if (found) {
+            session->set_view_bubble(
+                8192.0, f4::geo::WorldPosition(px * 1024.0, py * 1024.0,
+                                               0.0));
+        }
         session->advance(10.0);
-        for (const auto& t2 : session->flight_tiers()) {
-            if (t2.vu != vu) continue;
-            closed = t2.aborted || t2.arrived || !t2.live;
+        for (const auto eid : session->sim().aircraft_entities()) {
+            f4::entities::EntityHandle h(eid, &session->sim().world());
+            const auto* org = h.get<CampaignOriginComponent>();
+            if (org == nullptr || org->flight_vu != (vu & 0xFFFFu))
+                continue;
+            const auto* brain = h.get<f4::ai::BrainComponent>();
+            const auto* tfr = h.get<f4::entities::TransformComponent>();
+            if (brain != nullptr) {
+                const std::string st = brain->landing().state_name();
+                if (i % 30 == 29) {
+                    std::fprintf(stderr,
+                                 "[mission +%4d s] phase %s landing %s "
+                                 "alt %.0f at %.1f,%.1f (sample)
+",
+                                 (i + 1) * 10, brain->phase_name(),
+                                 st.c_str(),
+                                 tfr ? tfr->position.z : -1.0,
+                                 tfr ? tfr->position.x / 1024.0 : -1.0,
+                                 tfr ? tfr->position.y / 1024.0 : -1.0);
+                }
+                if (st != last_state) {
+                    std::fprintf(stderr,
+                                 "[mission +%4d s] phase %s landing %s "
+                                 "alt %.0f at %.1f,%.1f\n",
+                                 (i + 1) * 10, brain->phase_name(),
+                                 st.c_str(),
+                                 tfr ? tfr->position.z : -1.0,
+                                 tfr ? tfr->position.x / 1024.0 : -1.0,
+                                 tfr ? tfr->position.y / 1024.0 : -1.0);
+                    last_state = st;
+                }
+                if (st == "Rollout" || st == "TaxiIn" || st == "Parked") {
+                    touched_down = true;
+                }
+            }
             break;
         }
+        if (touched_down) break;
     }
-    EXPECT_TRUE(closed)
-        << "the aborted flight never closed its sortie (still live 45 "
-           "min after the abort)";
+    EXPECT_TRUE(touched_down)
+        << "the observed wave flight never touched down in 90 min (last "
+           "landing state: " << last_state << ")";
 }

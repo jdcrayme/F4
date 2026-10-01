@@ -152,6 +152,15 @@ f4_simulation_add_test(test_flight_lead_e2e        test_flight_lead_e2e.cpp)
 target_compile_definitions(test_flight_lead_e2e PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
 )
+# Step 15 (support/FAC brains): the tanker's racetrack through an AAR
+# cycle, the support stand-down (the gate-off twin engages), the AWACS
+# node flying its station while the net carries it, the FAC talk-on
+# driving the strike's unmarked delivery, and the gate-off twin (no
+# hint, no release, no radio line).
+f4_simulation_add_test(test_support_fac_e2e        test_support_fac_e2e.cpp)
+target_compile_definitions(test_support_fac_e2e PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
 f4_simulation_add_test(test_register_aircraft      test_register_aircraft.cpp)
 f4_simulation_add_test(test_spinner_roster         test_spinner_roster.cpp)
 f4_simulation_add_test(test_campaign_session       test_campaign_session.cpp)

@@ -45,6 +45,18 @@ struct ScenarioWaypoint {
     /// MissionPlan::route, and uses it to arm the receiver's refuel rung
     /// when action == f4::ai::modules::WP_REFUEL. Default 0 = plain nav.
     std::uint8_t action{0};
+    /// Step 15 — the P7 STATION-HOLD CONTRACT, scenario-side: the same
+    /// fields the campaign bridge threads through for the support
+    /// flights' racetrack stations (RouteBuilder's TPROF_LOITER
+    /// circuit). A waypoint with station_time_s > 0 and loop_waypoints
+    /// >= 2 is the RACETRACK ANCHOR: once captured, the aircraft holds
+    /// station (looping the anchor + corners span) for this long before
+    /// sequencing on. Zero defaults keep every pre-Step-15 route
+    /// byte-identically hold-free.
+    double station_time_s{0.0};
+    /// The hold loop's waypoint span INCLUDING this anchor (0 = no
+    /// loop; the module requires >= 2 for the contract to arm).
+    std::uint8_t loop_waypoints{0};
 };
 
 /// One aircraft in the scenario.
@@ -131,6 +143,22 @@ struct ScenarioAircraft {
     /// flat-earth horizon clamp at 0). Default false — the pre-Step-13
     /// shape.
     bool awacs{false};
+    /// FAC ROLE (AI_IMPLEMENTATION_PLAN §16 Step 15): this aircraft is a
+    /// Forward Air Controller — a defensive-only station brain (the
+    /// support profile) that ORBITS the marked area and publishes ONE
+    /// FacTalkOn row to the assigned strike flight once on station (the
+    /// Step-14 hint pipe carries it; the strike's unmarked A-G delivery
+    /// prosecutes the mark). Only takes effect when the ai block's
+    /// "flight_lead" gate is also on (the hint pipe's gate — no new
+    /// session flags). Requires "mark_feature" (v1 marks ONE target —
+    /// an FAC without one fails initialize() loudly).
+    bool fac{false};
+    /// The FAC's MARK: the index into the scenario's airfield_features
+    /// the talk-on names (the spawned feature entity's id rides the
+    /// hint; the strike delivery aims at it). -1 = no mark (only legal
+    /// for non-FAC aircraft). Resolved at arm time, after the features
+    /// spawn.
+    int mark_feature{-1};
     /// Per-aircraft route (AAR redesign). Empty = use the shared
     /// scenario_.waypoints (the legacy behavior — one route for all
     /// aircraft). When non-empty, this aircraft flies its own route.
