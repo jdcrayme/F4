@@ -1204,16 +1204,35 @@ void CampaignSession::advance_flights_(
 
     // The engine's tick() accumulates on its own clock (the ground
     // war's shape): feed it the campaign pass's whole-second delta in
-    // ONE call.
+    // ONE call. Inside, the TIME rows' waypoint arrivals pop the
+    // due-queue and the SPEED rows keep the chunk walk (AGG-4) — a
+    // TIME row's propagation cost between events is zero.
     flights_->tick(delta_sec);
 
-    // Mirror whenever the engine actually advanced, then one tier pass
-    // (per campaign pass — O(flights), all distance tests).
-    if (flights_->stats().updates != flight_synced_updates_) {
-        flight_synced_updates_ = flights_->stats().updates;
-        sync_flight_entities_();
-    }
+    // Mirror per pass (AGG-4): a TIME row's serving face moves with
+    // the schedule continuously, so the entity transforms track it at
+    // the pass's own cadence — read-first-write, a quiet row writes
+    // nothing. A SPEED row's stored face changes only at its updates,
+    // so its writes land exactly where they always did.
+    sync_flight_entities_();
     evaluate_tiers_();
+}
+
+void CampaignSession::aggregate_face_(std::size_t index, double& fx,
+                                      double& fy, float& altitude_ft) const {
+    const auto& f = flights_->flights()[index];
+    fx = f.fx;
+    fy = f.fy;
+    altitude_ft = f.altitude_ft;
+    // A TIME-mode row's truth is the schedule — the query face (the
+    // suspended/terminal rows get their stored field back from
+    // display_position itself, which is the same value the callers
+    // used to read). SPEED rows keep their stored field: the walk owns
+    // them and its display extrapolation is display-only.
+    if (flights_->is_time_mode(index)) {
+        flights_->display_position(index, flights_->now(), fx, fy,
+                                   altitude_ft);
+    }
 }
 
 void CampaignSession::sync_flight_entities_() {
@@ -1224,27 +1243,40 @@ void CampaignSession::sync_flight_entities_() {
     // rows track the lead on the tier pass's own cadence instead
     // (sync_live_flight_rows_, FID-P1).
     auto& world = sim_->world();
-    for (const auto& f : flights_->flights()) {
+    for (std::size_t i = 0; i < flights_->flights().size(); ++i) {
+        const auto& f = flights_->flights()[i];
         if (f.suspended) continue;
         const auto it = unit_id_map_.find(f.vu);
         if (it == unit_id_map_.end()) continue;
         f4::entities::EntityHandle h(it->second, &world);
 
+        // AGG-4: a TIME row mirrors its SCHEDULE face (the stored field
+        // materializes only at the queue's arrival events); a SPEED row
+        // mirrors its stored field exactly as before. Fuel comes from
+        // the same split (the closed form steps on the update grid, so
+        // the burn writes land where they always did).
+        double fx = f.fx, fy = f.fy;
+        float alt = f.altitude_ft;
+        if (flights_->is_time_mode(i)) {
+            flights_->display_position(i, flights_->now(), fx, fy, alt);
+        }
+        const std::int32_t burnt = flights_->fuel_burnt_now(i);
+
         if (auto* tf = h.get<f4::entities::TransformComponent>()) {
             const f4::geo::WorldPosition want{
-                f.fx * kFtPerGrid, f.fy * kFtPerGrid,
-                static_cast<double>(f.altitude_ft)};
+                fx * kFtPerGrid, fy * kFtPerGrid,
+                static_cast<double>(alt)};
             if (want.x != tf->position.x || want.y != tf->position.y ||
                 want.z != tf->position.z) {
                 tf->position = want;
             }
         }
         if (auto* fp = h.get<f4::entities::FlightPlanComponent>()) {
-            if (fp->fuel_burnt != f.fuel_burnt) {
-                fp->fuel_burnt = f.fuel_burnt;
+            if (fp->fuel_burnt != burnt) {
+                fp->fuel_burnt = burnt;
             }
-            if (fp->altitude != f.altitude_ft) {
-                fp->altitude = f.altitude_ft;
+            if (fp->altitude != alt) {
+                fp->altitude = alt;
             }
         }
     }
@@ -1380,8 +1412,14 @@ void CampaignSession::evaluate_tiers_() {
         const bool tot_window = to_tot > 0 && to_tot <= window;
         bool in_bubble = false;
         if (air_bubble_active_) {
-            const double dx = f.fx * kFtPerGrid - air_bubble_center_.x;
-            const double dy = f.fy * kFtPerGrid - air_bubble_center_.y;
+            // AGG-4: the trigger judges the flight where its schedule
+            // says it is (the query face), not where its last arrival
+            // event materialized the stored field.
+            double fx = f.fx, fy = f.fy;
+            float alt = f.altitude_ft;
+            aggregate_face_(i, fx, fy, alt);
+            const double dx = fx * kFtPerGrid - air_bubble_center_.x;
+            const double dy = fy * kFtPerGrid - air_bubble_center_.y;
             in_bubble = dx * dx + dy * dy <=
                         air_bubble_radius_ft_ * air_bubble_radius_ft_;
         }
@@ -2746,12 +2784,17 @@ void CampaignSession::rebuild_aggregate_feed_() {
         // could otherwise resurrect a closed sortie.
         if (f.suspended || f.destroyed || f.arrived || f.scrubbed) continue;
         if (aborted_flights_.count(f.vu) != 0) continue;
-        if (f.altitude_ft < 8000.0f) continue;
+        // AGG-4: the picture reads the schedule face for TIME rows (the
+        // stored field materializes only at arrivals).
+        double fx = f.fx, fy = f.fy;
+        float alt = f.altitude_ft;
+        aggregate_face_(i, fx, fy, alt);
+        if (alt < 8000.0f) continue;
         f4::ai::AggregateContact c;
         c.flight_vu = f.vu;
         c.position = f4::geo::WorldPosition{
-            f.fx * kFtPerGrid, f.fy * kFtPerGrid,
-            static_cast<double>(f.altitude_ft)};
+            fx * kFtPerGrid, fy * kFtPerGrid,
+            static_cast<double>(alt)};
         // Cruise velocity along the leg: the aggregate's own heading ×
         // ITS OWN effective cruise (the fold may have booked the lead's
         // real ground speed). Compass → ENU (0 = north/+y).
@@ -2811,14 +2854,28 @@ void CampaignSession::evaluate_combat_() {
         return false;
     };
     std::vector<std::size_t> eligible;
+    // AGG-4: the eligible rows' schedule faces (TIME rows read the
+    // query; SPEED rows their stored field) — the convergence test and
+    // the spawn poses share them.
+    std::vector<double> ex, ey;
+    std::vector<float> ea;
     eligible.reserve(fleet.size());
+    ex.reserve(fleet.size());
+    ey.reserve(fleet.size());
+    ea.reserve(fleet.size());
     for (std::size_t i = 0; i < fleet.size(); ++i) {
         const auto& f = fleet[i];
         if (f.suspended || f.destroyed || f.arrived || f.scrubbed) continue;
         if (aborted_flights_.count(f.vu) != 0) continue;   // CAMP-CMD-2
-        if (f.altitude_ft < 8000.0f) continue;
+        double fx = f.fx, fy = f.fy;
+        float alt = f.altitude_ft;
+        aggregate_face_(i, fx, fy, alt);
+        if (alt < 8000.0f) continue;
         if (!at_war(f.team)) continue;
         eligible.push_back(i);
+        ex.push_back(fx);
+        ey.push_back(fy);
+        ea.push_back(alt);
     }
     for (std::size_t a = 0; a < eligible.size(); ++a) {
         const std::size_t i = eligible[a];
@@ -2829,8 +2886,8 @@ void CampaignSession::evaluate_combat_() {
             flights_->effective_cruise_grid_per_min(i) * kFtPerGrid / 60.0;
         const double vx_i = std::sin(hdg_i) * cruise_i;
         const double vy_i = std::cos(hdg_i) * cruise_i;
-        const double px_i = fi.fx * kFtPerGrid + vx_i * T;
-        const double py_i = fi.fy * kFtPerGrid + vy_i * T;
+        const double px_i = ex[a] * kFtPerGrid + vx_i * T;
+        const double py_i = ey[a] * kFtPerGrid + vy_i * T;
         for (std::size_t b = a + 1; b < eligible.size(); ++b) {
             const std::size_t j = eligible[b];
             const auto& fj = fleet[j];
@@ -2838,10 +2895,10 @@ void CampaignSession::evaluate_combat_() {
             if (fj.team == fi.team) continue;   // allies do not merge
             // Current separation + closing rate (relative velocity along
             // the line of sight — negative = closing).
-            const double rx = (fi.fx - fj.fx) * kFtPerGrid;
-            const double ry = (fi.fy - fj.fy) * kFtPerGrid;
-            const double rz = static_cast<double>(fi.altitude_ft) -
-                              static_cast<double>(fj.altitude_ft);
+            const double rx = (ex[a] - ex[b]) * kFtPerGrid;
+            const double ry = (ey[a] - ey[b]) * kFtPerGrid;
+            const double rz = static_cast<double>(ea[a]) -
+                              static_cast<double>(ea[b]);
             const double hdg_j = flights_->current_heading_rad(j);
             const double cruise_j =
                 flights_->effective_cruise_grid_per_min(j) * kFtPerGrid /
@@ -2858,8 +2915,8 @@ void CampaignSession::evaluate_combat_() {
                 continue;
             }
             if (rx * rvx + ry * rvy >= 0.0) continue;   // opening
-            const double px_j = fj.fx * kFtPerGrid + vx_j * T;
-            const double py_j = fj.fy * kFtPerGrid + vy_j * T;
+            const double px_j = ex[b] * kFtPerGrid + vx_j * T;
+            const double py_j = ey[b] * kFtPerGrid + vy_j * T;
             const double miss_x = px_i - px_j;
             const double miss_y = py_i - py_j;
             const double miss = std::sqrt(miss_x * miss_x +
@@ -2969,9 +3026,14 @@ void CampaignSession::deaggregate_flight_(
                 sim_->theater_tables(), pilot_skill_flow_);
         } else {
             f4::simulation::AirSpawnPose pose;
+            // AGG-4: the spawn lands where the flight's schedule says
+            // it is (the query face), with the closed-form burn.
+            double fx = f.fx, fy = f.fy;
+            float alt = f.altitude_ft;
+            aggregate_face_(index, fx, fy, alt);
             pose.position = f4::geo::WorldPosition{
-                f.fx * kFtPerGrid, f.fy * kFtPerGrid,
-                static_cast<double>(f.altitude_ft)};
+                fx * kFtPerGrid, fy * kFtPerGrid,
+                static_cast<double>(alt)};
             pose.heading_rad = flights_->current_heading_rad(index);
             // Cruise: the row's OWN effective cruise (a folded flight's
             // booked ground speed; else the engine constant) — grid/min
@@ -2981,7 +3043,8 @@ void CampaignSession::deaggregate_flight_(
                 kFtPerGrid / 60.0;
             const double capacity = cfg_.geometry.internalFuel.value();
             pose.fuel_lbs = std::max(
-                0.0, capacity - static_cast<double>(f.fuel_burnt));
+                0.0,
+                capacity - static_cast<double>(flights_->fuel_burnt_now(index)));
             spawned = f4::simulation::spawn_aircraft_for_intent(
                 sim_->world(), intent, unit_id_map_, ct_, cfg_, airfield_,
                 spawn_tpl_, 0,
@@ -3001,9 +3064,14 @@ void CampaignSession::deaggregate_flight_(
             pilot_skill_flow_);
     } else {
         f4::simulation::AirSpawnPose pose;
+        // AGG-4: the spawn lands where the flight's schedule says it is
+        // (the query face), with the closed-form burn.
+        double fx = f.fx, fy = f.fy;
+        float alt = f.altitude_ft;
+        aggregate_face_(index, fx, fy, alt);
         pose.position = f4::geo::WorldPosition{
-            f.fx * kFtPerGrid, f.fy * kFtPerGrid,
-            static_cast<double>(f.altitude_ft)};
+            fx * kFtPerGrid, fy * kFtPerGrid,
+            static_cast<double>(alt)};
         pose.heading_rad = flights_->current_heading_rad(index);
         // Cruise: the row's OWN effective cruise (grid/min → ft/s).
         pose.vt_fps =
@@ -3014,7 +3082,8 @@ void CampaignSession::deaggregate_flight_(
         // config default — the scenario path's own rule.
         const double capacity = cfg_.geometry.internalFuel.value();
         pose.fuel_lbs =
-            std::max(0.0, capacity - static_cast<double>(f.fuel_burnt));
+            std::max(0.0, capacity - static_cast<double>(
+                                       flights_->fuel_burnt_now(index)));
         spawned = f4::simulation::spawn_aircraft_for_flight(
             sim_->world(), entity_it->second, ct_, cfg_, airfield_,
             spawn_tpl_,
@@ -3172,7 +3241,7 @@ bool CampaignSession::reaggregate_flight_(std::uint32_t vu) {
                         }
                     }
                     const std::size_t cursor =
-                        flights_->flights()[ridx].wp_index;
+                        flights_->waypoint_cursor(ridx);
                     if (delivery >= 0 &&
                         cursor <= static_cast<std::size_t>(delivery)) {
                         const std::int64_t secs =
@@ -3281,7 +3350,7 @@ CampaignSession::flight_tiers() const {
                 v.altitude_ft = static_cast<float>(pos.z);
             }
         }
-        v.fuel_burnt = f.fuel_burnt;
+        v.fuel_burnt = flights_->fuel_burnt_now(i);
         v.live = f.suspended;
         v.arrived = f.arrived;
         v.destroyed = f.destroyed;

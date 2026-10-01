@@ -156,8 +156,26 @@ FlightAggregateEngine::FlightAggregateEngine(
         }
         schedule_end_index_.push_back(sched_end);
 
+        // AGG-4 — the lazy row's books: schedule generation 0 (its
+        // arrival events arm under it) and the fuel anchor at the
+        // epoch (the save's own burn seeds the stored field; the
+        // closed form counts eligible updates from here).
+        arrival_gen_.push_back(0);
+        fuel_anchor_.push_back(epoch_);
+
         flights_.push_back(f);
         ++taken;
+    }
+
+    // AGG-4: a mid-war save's TIME rows materialize their schedule
+    // state at the epoch (the walk's own overrides — a loaded flight
+    // past its first arrivals starts at the schedule's position with
+    // the right cursor and terminal flag, exactly what the first
+    // update's walk used to paste), then arm their first arrival.
+    for (std::size_t i = 0; i < flights_.size(); ++i) {
+        if (!time_mode_[i] || !flights_[i].has_route) continue;
+        materialize_time_state_(i, epoch_);
+        reschedule_arrivals_(i);
     }
 
     refresh_stats();
@@ -170,21 +188,201 @@ FlightAggregateEngine::FlightAggregateEngine(
 void FlightAggregateEngine::tick(CampaignTime delta_sec) {
     if (delta_sec <= 0) return;
     clock_ += delta_sec;
+    const std::int64_t now_abs = epoch_ + clock_;
+
+    // AGG-4 — the TIME rows' discrete transitions first: the waypoint
+    // arrivals fire at the schedule's own seconds, key-ordered by the
+    // queue's (due, priority, seq) contract. Between events a TIME row
+    // costs NOTHING — the query faces derive its state from (route,
+    // now) on read.
+    arrivals_.pop_due(now_abs, [this](ArrivalEvent&& ev) {
+        fire_arrival_(ev, ev.due);
+    });
+
+    // The chunk walk: SPEED rows only. A TIME row's position is the
+    // schedule — stepping it through 60-s quanta was the propagation
+    // cost AGG-4 deletes (the plan's `MoveUnit`-shape residue).
     while (clock_ >= next_update_ + cfg_.update_sec) {
         next_update_ += cfg_.update_sec;
 
-        const std::int64_t now_abs = epoch_ + next_update_;
+        const std::int64_t update_now = epoch_ + next_update_;
         for (std::size_t i = 0; i < flights_.size(); ++i) {
             FlightAggregateState& f = flights_[i];
-            if (f.suspended || f.arrived || f.destroyed || f.scrubbed) {
+            if (f.suspended || f.arrived || f.destroyed || f.scrubbed ||
+                time_mode_[i]) {
                 continue;
             }
-            advance_flight_(f, i, routes_[i], now_abs);
+            advance_flight_(f, i, routes_[i], update_now);
         }
 
         ++stats_.updates;
         refresh_stats();
     }
+}
+
+// ============================================================================
+// AGG-4 — the arrival events (the TIME rows' discrete transitions)
+// ============================================================================
+
+void FlightAggregateEngine::fire_arrival_(const ArrivalEvent& ev,
+                                          std::int64_t due_abs) {
+    if (ev.index >= flights_.size()) return;
+    if (flights_[ev.index].vu != ev.vu) return;
+    if (arrival_gen_[ev.index] != ev.gen) return;   // re-armed by a mutation
+    FlightAggregateState& f = flights_[ev.index];
+    const auto& route = routes_[ev.index];
+    if (!time_mode_[ev.index] || !f.has_route || route.empty() ||
+        f.suspended || f.arrived || f.destroyed || f.scrubbed ||
+        ev.wp >= route.size()) {
+        return;   // stale shape — the generation check's belt and braces
+    }
+
+    // Materialize exactly what the update walk used to write when its
+    // quanta crossed this arrival: the waypoint snap, the cursor, and
+    // (at the schedule's end) the terminal flag. The dirty/last_move
+    // stamps ride along (the writeback and the fold read them).
+    f.fx = static_cast<double>(route[ev.wp].x);
+    f.fy = static_cast<double>(route[ev.wp].y);
+    f.altitude_ft = static_cast<float>(route[ev.wp].z);
+    f.wp_index = ev.wp;
+    f.dirty = true;
+    f.last_move = static_cast<std::int32_t>(
+        std::min<std::int64_t>(due_abs, 2147483647));
+    if (ev.wp == schedule_end_index_[ev.index]) {
+        f.arrived = true;   // the last scheduled waypoint reached
+        refresh_stats();
+        return;             // terminal — the row leaves the machinery
+    }
+    // The cursor-chase: arm the next scheduled arrival (strictly after
+    // this one — the fired event is done; the row was not mutated, so
+    // its generation stands).
+    arm_next_arrival_(ev.index, ev.gen, due_abs);
+}
+
+void FlightAggregateEngine::arm_next_arrival_(std::size_t index,
+                                              std::uint32_t gen,
+                                              std::int64_t after_abs) {
+    const auto& route = routes_[index];
+    for (std::size_t j = 1; j < route.size(); ++j) {
+        if (route[j].arrive > after_abs) {
+            ArrivalEvent ev;
+            ev.vu = flights_[index].vu;
+            ev.gen = gen;
+            ev.index = index;
+            ev.wp = j;
+            ev.due = route[j].arrive;
+            arrivals_.schedule(route[j].arrive, 0, std::move(ev));
+            return;
+        }
+    }
+    // No future arrival — unscheduled tail already past the schedule's
+    // end, or nothing scheduled ahead. The row flies (or sits) without
+    // events until a mutation re-arms it.
+}
+
+void FlightAggregateEngine::reschedule_arrivals_(std::size_t index) {
+    if (index >= flights_.size()) return;
+    const std::uint32_t gen = ++arrival_gen_[index];
+    const FlightAggregateState& f = flights_[index];
+    if (!time_mode_[index] || !f.has_route || routes_[index].empty() ||
+        f.suspended || f.arrived || f.destroyed || f.scrubbed) {
+        return;   // the bump retired the row's stale events; none re-arm
+    }
+    // Inclusive from now: an arrival landing exactly on the mutation's
+    // second still owes its stored-face materialization (the fire's own
+    // re-arm is strict, so this cannot loop).
+    arm_next_arrival_(index, gen, epoch_ + clock_ - 1);
+}
+
+void FlightAggregateEngine::materialize_time_state_(std::size_t index,
+                                                    std::int64_t now_abs) {
+    FlightAggregateState& f = flights_[index];
+    const auto& route = routes_[index];
+    if (route.empty()) return;
+
+    // The advance walk's own gate and overrides, read-only face → the
+    // row: a flight past its first arrivals starts where the schedule
+    // says (a mid-war save), a pre-departure flight keeps its save
+    // position.
+    const std::int64_t first_depart = route.front().depart;
+    if (first_depart > 0 && now_abs < first_depart) return;
+    for (std::size_t i = 1; i < route.size(); ++i) {
+        const auto& to = route[i];
+        if (to.arrive <= 0) continue;   // leg without a schedule
+        if (now_abs >= to.arrive) {
+            f.fx = static_cast<double>(to.x);
+            f.fy = static_cast<double>(to.y);
+            f.altitude_ft = static_cast<float>(to.z);
+            f.wp_index = i;
+            if (i + 1 == route.size()) f.arrived = true;
+            continue;
+        }
+        if (now_abs > route[i - 1].depart) {
+            const double t = frac(now_abs, route[i - 1].depart, to.arrive);
+            f.fx = static_cast<double>(route[i - 1].x) +
+                   t * (static_cast<double>(to.x) - route[i - 1].x);
+            f.fy = static_cast<double>(route[i - 1].y) +
+                   t * (static_cast<double>(to.y) - route[i - 1].y);
+            f.altitude_ft = static_cast<float>(
+                static_cast<double>(route[i - 1].z) +
+                t * (static_cast<double>(to.z) - route[i - 1].z));
+            f.wp_index = i;
+        }
+        break;   // mid-leg or still holding at route[i-1]
+    }
+    const std::size_t end_i = schedule_end_index_[index];
+    if (!f.arrived && end_i != static_cast<std::size_t>(-1) &&
+        now_abs >= route[end_i].arrive) {
+        f.arrived = true;   // the unscheduled-tail rule
+    }
+}
+
+std::int64_t FlightAggregateEngine::count_burn_updates_(
+    std::size_t index, std::int64_t from_abs, std::int64_t to_abs) const {
+    if (to_abs <= from_abs) return 0;
+    const auto& route = routes_[index];
+    if (route.size() < 2) return 0;
+    const std::size_t end_i = schedule_end_index_[index];
+    if (end_i == static_cast<std::size_t>(-1)) return 0;
+    const std::int64_t a_end = route[end_i].arrive;
+    if (a_end <= 0) return 0;
+
+    // The walk's moved() predicate as one integer threshold. An update
+    // moves the row when the takeoff gate is open AND (a scheduled
+    // arrival has passed OR the first upcoming scheduled leg is being
+    // flown — `now > its from.depart`). Before the first scheduled
+    // arrival the "first upcoming leg" is the route's first scheduled
+    // one, so the threshold is exact for the whole pre-arrival span;
+    // past it the arrival disjunct owns the answer.
+    std::int64_t a_first = -1;
+    std::int64_t d_first = 0;
+    for (std::size_t i = 1; i < route.size(); ++i) {
+        if (route[i].arrive > 0) {
+            a_first = route[i].arrive;
+            d_first = route[i - 1].depart;
+            break;
+        }
+    }
+    if (a_first <= 0) return 0;
+    std::int64_t t_act = a_first < d_first + 1 ? a_first : d_first + 1;
+    const std::int64_t gate = route.front().depart;
+    if (gate > 0 && gate > t_act) t_act = gate;
+
+    // Eligible grid updates: u = epoch_ + k·update_sec (k ≥ 1) with
+    // u ≥ t_act, u > from_abs, u ≤ to_abs, u < a_end (never on the
+    // arriving update — the walk's own rule).
+    std::int64_t lo = t_act > from_abs + 1 ? t_act : from_abs + 1;
+    std::int64_t hi = to_abs < a_end - 1 ? to_abs : a_end - 1;
+    if (hi < lo) return 0;
+    const std::int64_t step = cfg_.update_sec;
+    const auto ceil_div = [](std::int64_t a, std::int64_t b) {
+        return a >= 0 ? (a + b - 1) / b : -((-a) / b);
+    };
+    std::int64_t k_lo = ceil_div(lo - epoch_, step);
+    if (k_lo < 1) k_lo = 1;
+    std::int64_t k_hi = (hi - epoch_) / step;
+    if (k_hi < k_lo) return 0;
+    return k_hi - k_lo + 1;
 }
 
 void FlightAggregateEngine::refresh_stats() {
@@ -204,7 +402,9 @@ void FlightAggregateEngine::refresh_stats() {
 }
 
 // ============================================================================
-// advance_flight_ — one flight, one update
+// advance_flight_ — one SPEED row, one update (AGG-4: TIME rows are the
+// schedule — the queue's arrivals and the query faces serve them; the
+// chunk walk below never touches one)
 // ============================================================================
 
 void FlightAggregateEngine::advance_flight_(
@@ -214,62 +414,12 @@ void FlightAggregateEngine::advance_flight_(
     if (!f.has_route || route.empty()) return;   // nothing to fly
 
     // The takeoff gate: a flight holds at its save position until its
-    // first waypoint's depart (both modes — the wire's own schedule).
+    // first waypoint's depart (the wire's own schedule).
     const std::int64_t first_depart = route.front().depart;
     if (first_depart > 0 && now_abs < first_depart) return;
 
     bool moved = false;
-    if (time_mode_[index]) {
-        // TIME mode — interpolate on the wire's own schedule.
-        // Legs: wp[i-1] (depart) → wp[i] (arrive); hold at wp[i]
-        // between its arrive and its depart. Walk the legs in order;
-        // the last leg whose arrival has passed owns the position.
-        for (std::size_t i = 1; i < route.size(); ++i) {
-            const auto& from = route[i - 1];
-            const auto& to = route[i];
-            if (to.arrive <= 0) continue;   // leg without a schedule
-            if (now_abs >= to.arrive) {
-                // Past this leg's arrival: sit at (or beyond) the
-                // waypoint — later legs override in order.
-                f.fx = static_cast<double>(to.x);
-                f.fy = static_cast<double>(to.y);
-                f.altitude_ft = static_cast<float>(to.z);
-                f.wp_index = i;
-                moved = true;
-                if (i + 1 == route.size()) {
-                    f.arrived = true;   // last waypoint reached
-                }
-                continue;
-            }
-            if (now_abs > from.depart) {
-                // Mid-leg: linear interpolation on the wire's times.
-                const double t = frac(now_abs, from.depart, to.arrive);
-                f.fx = static_cast<double>(from.x) +
-                       t * (static_cast<double>(to.x) - from.x);
-                f.fy = static_cast<double>(from.y) +
-                       t * (static_cast<double>(to.y) - from.y);
-                f.altitude_ft = static_cast<float>(
-                    static_cast<double>(from.z) +
-                    t * (static_cast<double>(to.z) - from.z));
-                f.wp_index = i;
-                moved = true;
-                break;
-            }
-            break;   // before this leg's departure: holding at wp[i-1]
-        }
-
-        // The unscheduled tail: legs after the last scheduled waypoint
-        // have no arrival time to fire — the walk above skips them, so
-        // a route whose last legs are unscheduled never marked the
-        // flight arrived and it sat at the last scheduled waypoint
-        // forever (a frozen glyph mid-map). Once the final scheduled
-        // arrival is past, the flight IS at its route's end.
-        const std::size_t end_i = schedule_end_index_[index];
-        if (!f.arrived && end_i != static_cast<std::size_t>(-1) &&
-            now_abs >= route[end_i].arrive) {
-            f.arrived = true;
-        }
-    } else {
+    {
         // SPEED mode — walk the legs at this row's cruise toward the
         // current cursor waypoint (the fold may have booked the lead's
         // real ground speed; 0 rides the config default). Start
@@ -351,7 +501,20 @@ void FlightAggregateEngine::advance_flight_(
 void FlightAggregateEngine::set_suspended(std::uint32_t vu, bool suspended) {
     const std::size_t idx = index_of(vu);
     if (idx == static_cast<std::size_t>(-1)) return;
+    if (suspended) {
+        // AGG-4: the row's modeled burn is closed-form while it flies —
+        // paste it into the stored field BEFORE the sim takes the truth
+        // (the query below must still see a flying row), and freeze the
+        // fuel anchor so the suspended window's grid updates count
+        // nothing.
+        flights_[idx].fuel_burnt = fuel_burnt_now(idx);
+        fuel_anchor_[idx] = epoch_ + clock_;
+    }
     flights_[idx].suspended = suspended;
+    // The row's arrival events retire while it is suspended (a stale
+    // event would materialize a schedule point into a sim-owned row);
+    // the unsuspend re-arms them.
+    reschedule_arrivals_(idx);
     refresh_stats();
 }
 
@@ -366,8 +529,13 @@ void FlightAggregateEngine::reaggregate(std::uint32_t vu, double fx,
     f.fx = std::clamp(fx, -32768.0, 32767.0);
     f.fy = std::clamp(fy, -32768.0, 32767.0);
     f.altitude_ft = altitude_ft;
-    // Monotonic fuel: the sim can only have burned more (the fold-back
-    // never resurrects fuel the aggregate already booked).
+    // AGG-4: materialize the row's own modeled burn before the monotone
+    // max (a direct fold on a flying TIME row keeps the accrual the
+    // closed form booked; a suspended row's stored field already holds
+    // it — the query returns it verbatim). Monotonic fuel: the sim can
+    // only have burned more (the fold-back never resurrects fuel the
+    // aggregate already booked).
+    f.fuel_burnt = fuel_burnt_now(idx);
     f.fuel_burnt = std::max(f.fuel_burnt, fuel_burnt);
     // The fold's pace: the lead's actual ground speed when the caller
     // booked one (0 = back to the config default).
@@ -385,6 +553,11 @@ void FlightAggregateEngine::reaggregate(std::uint32_t vu, double fx,
     f.dirty = true;
     f.last_move = static_cast<std::int32_t>(
         std::min<std::int64_t>(epoch_ + clock_, 2147483647));
+    // AGG-4: the re-anchored schedule is the row's new truth — the fuel
+    // anchor restarts here (the folded burn is the base), and the
+    // arrival events re-arm on the shifted wire.
+    fuel_anchor_[idx] = epoch_ + clock_;
+    reschedule_arrivals_(idx);
     refresh_stats();
 }
 
@@ -407,6 +580,7 @@ void FlightAggregateEngine::mark_destroyed(std::uint32_t vu) {
     flights_[idx].destroyed = true;
     flights_[idx].suspended = false;
     flights_[idx].dirty = true;
+    reschedule_arrivals_(idx);   // AGG-4: the row's events retire
     refresh_stats();
 }
 
@@ -429,6 +603,13 @@ bool FlightAggregateEngine::retask(
     // head from the same display position, so head == position and the
     // flight never snaps back to its last 60-s quanta point.
     catch_up_(f, idx, epoch_ + clock_);
+
+    // AGG-4: paste the closed-form burn into the stored field before
+    // the mode flips (the SPEED walk resumes accruing on the stored
+    // field; the TIME-mode modeled burn must not be lost), and restart
+    // the fuel anchor here.
+    f.fuel_burnt = fuel_burnt_now(idx);
+    fuel_anchor_[idx] = epoch_ + clock_;
 
     routes_[idx] = std::move(route);
     f.mission = mission;
@@ -453,6 +634,7 @@ bool FlightAggregateEngine::retask(
     // aircraft's true position.
     f.last_move = static_cast<std::int32_t>(
         std::min<std::int64_t>(epoch_ + clock_, 2147483647));
+    reschedule_arrivals_(idx);   // AGG-4: a retasked row flies SPEED — no events
     refresh_stats();
     return true;
 }
@@ -465,6 +647,7 @@ bool FlightAggregateEngine::scrub(std::uint32_t vu) {
     f.scrubbed = true;
     f.suspended = false;
     f.dirty = true;
+    reschedule_arrivals_(idx);   // AGG-4: the row's events retire
     refresh_stats();
     return true;
 }
@@ -504,6 +687,10 @@ std::size_t FlightAggregateEngine::register_synthetic(
     // ATM's own takeoff estimate is the TOT anchor, not a wire schedule).
     time_mode_.push_back(false);
     schedule_end_index_.push_back(static_cast<std::size_t>(-1));
+    // AGG-4: the lazy row's books (SPEED — no arrival events will arm;
+    // the fuel anchor seeds at the registration, the stored burn is 0).
+    arrival_gen_.push_back(0);
+    fuel_anchor_.push_back(epoch_ + clock_);
     flights_.push_back(f);
     refresh_stats();
     return flights_.size() - 1;
@@ -732,11 +919,67 @@ std::int32_t FlightAggregateEngine::seconds_to_time_on_target(
                            : static_cast<std::int32_t>(d);
 }
 
+std::size_t FlightAggregateEngine::time_cursor_(std::size_t index,
+                                                std::int64_t now_abs) const {
+    // The advance walk's own cursor rule, read-only: past arrivals
+    // override in order; the first upcoming scheduled leg names its
+    // target when the flight is mid-leg; a hold keeps the previous.
+    const auto& route = routes_[index];
+    std::size_t cursor = 0;
+    for (std::size_t i = 1; i < route.size(); ++i) {
+        const auto& to = route[i];
+        if (to.arrive <= 0) continue;   // leg without a schedule
+        if (now_abs >= to.arrive) {
+            cursor = i;
+            continue;
+        }
+        if (now_abs > route[i - 1].depart) cursor = i;
+        break;
+    }
+    return cursor;
+}
+
+std::size_t FlightAggregateEngine::waypoint_cursor(std::size_t index) const {
+    if (index >= flights_.size()) return 0;
+    const FlightAggregateState& f = flights_[index];
+    if (!time_mode_[index] || !f.has_route || routes_[index].empty()) {
+        return f.wp_index < routes_[index].size() ? f.wp_index : 0;
+    }
+    return time_cursor_(index, epoch_ + clock_);
+}
+
+std::int32_t FlightAggregateEngine::fuel_burnt_now(std::size_t index) const {
+    if (index >= flights_.size()) return 0;
+    const FlightAggregateState& f = flights_[index];
+    // The closed form serves the flying TIME aggregates only; every
+    // other row's stored field IS its truth (the save's seed, the
+    // sim-side tracking, the walk's own accrual, or a materialized
+    // paste from a transition).
+    if (!time_mode_[index] || f.suspended || f.destroyed || f.scrubbed ||
+        !f.has_route || cfg_.fuel_burn_lbs_per_min <= 0) {
+        return f.fuel_burnt;
+    }
+    const std::int64_t per_update = std::llround(
+        static_cast<double>(cfg_.fuel_burn_lbs_per_min) *
+        static_cast<double>(cfg_.update_sec) / 60.0);
+    const std::int64_t burnt =
+        static_cast<std::int64_t>(f.fuel_burnt) +
+        count_burn_updates_(index, fuel_anchor_[index], epoch_ + clock_) *
+            per_update;
+    if (burnt < 0) return 0;   // clamp absurd saves (the walk's own rule)
+    return burnt > 2147483647 ? 2147483647 : static_cast<std::int32_t>(burnt);
+}
+
 double FlightAggregateEngine::current_heading_rad(std::size_t index) const {
     if (index >= flights_.size() || routes_[index].empty()) return 0.0;
     const auto& route = routes_[index];
     const auto& f = flights_[index];
-    std::size_t target = f.wp_index < route.size() ? f.wp_index : 0;
+    // AGG-4: a TIME row's stored cursor materializes at the arrival
+    // events; the leg it is actually FLYING comes from the schedule
+    // (the same walk rule the walking engine's per-update cursor
+    // wrote). SPEED rows keep the stored cursor.
+    const std::size_t cursor = waypoint_cursor(index);
+    std::size_t target = cursor < route.size() ? cursor : 0;
     double dx = static_cast<double>(route[target].x) - f.fx;
     double dy = static_cast<double>(route[target].y) - f.fy;
     // FID-5: a flight sitting ON its cursor waypoint (the pre-departure

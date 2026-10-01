@@ -59,12 +59,20 @@ std::filesystem::path f16_config_path() {
 // zero-length start leg — snap), then a real 3-leg route.
 constexpr std::int64_t kNow = 38574360;
 
-std::string tier_world_json(std::int64_t takeoff_depart = 0) {
+std::string tier_world_json(std::int64_t takeoff_depart = 0,
+                            std::int64_t leg1_arrive = 0) {
     // takeoff_depart > 0 stamps the first waypoint's depart (the
     // ops-window variant); 0 keeps the time-less SPEED-mode world.
+    // leg1_arrive > 0 stamps the second waypoint's arrive — a sane leg
+    // (30.4 grid over ≥ 600 s ≈ 3 grid/min, above the crawl floor)
+    // makes the route TIME-mode (the AGG-4 lazy row).
     std::string depart_block;
     if (takeoff_depart > 0) {
         depart_block = ", \"depart\": " + std::to_string(takeoff_depart);
+    }
+    std::string arrive_block;
+    if (leg1_arrive > 0) {
+        arrive_block = ", \"arrive\": " + std::to_string(leg1_arrive);
     }
     std::string out = R"({
   "version": 71,
@@ -106,7 +114,8 @@ std::string tier_world_json(std::int64_t takeoff_depart = 0) {
        "waypoints": [
          {"x": 390, "y": 455, "z": 0,    "action": 1)" +
         depart_block + R"(},
-         {"x": 420, "y": 460, "z": 2500, "action": 15},
+         {"x": 420, "y": 460, "z": 2500, "action": 15)" +
+        arrive_block + R"(},
          {"x": 460, "y": 500, "z": 2500, "action": 17},
          {"x": 390, "y": 455, "z": 0,    "action": 7}
        ]},
@@ -147,13 +156,14 @@ struct TierRig {
     std::unique_ptr<CampaignSession> session;
 
     static TierRig make(CampaignSessionOptions opts,
-                        std::int64_t takeoff_depart = 0) {
+                        std::int64_t takeoff_depart = 0,
+                        std::int64_t leg1_arrive = 0) {
         TierRig rig;
         rig.dir = make_temp_dir();
         rig.world = rig.dir / "tier.world.json";
         {
             std::ofstream f(rig.world);
-            f << tier_world_json(takeoff_depart);
+            f << tier_world_json(takeoff_depart, leg1_arrive);
         }
         opts.world_json = rig.world;
         opts.class_table = class_table_path();
@@ -627,4 +637,70 @@ TEST(FidelityTiers, InitialWaveLaunchesNear) {
     const std::int32_t b_depart =
         rig.session->flight_engine()->seconds_to_depart(2);
     EXPECT_NEAR(b_depart, 7200 - 152, 2);
+}
+
+// ── AGG-4: the lazy TIME mode — the schedule is the state ──────────────────
+//
+// A sane wire (leg speeds above the crawl floor) constructs TIME-mode:
+// the row's state is f(route, t) computed on read. The entity mirror
+// tracks the schedule per pass, the deagg spawn lands at the schedule
+// face, and the flight's arrival materializes through the engine's own
+// due-queue — no chunk stepping anywhere in between.
+
+TEST(FidelityTiers, LazyTimeMirrorTracksTheSchedulePerPass) {
+    if (!std::filesystem::exists(f16_config_path())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    auto opts = base_opts();
+    opts.fidelity_policy = FidelityPolicy::Tiered;
+    // The takeoff gate at now+600, the leg arriving now+1800: 30.4 grid
+    // over 1200 s ≈ 1.5 grid/min — TIME mode, above the crawl floor.
+    auto rig = TierRig::make(opts, /*takeoff_depart=*/kNow + 600,
+                             /*leg1_arrive=*/kNow + 1800);
+    ASSERT_NE(rig.session, nullptr);
+    ASSERT_TRUE(rig.session->flight_engine()->is_time_mode(0));
+
+    // Fly past the takeoff gate (now+600) and into the leg, one pass
+    // at a time: the entity transform tracks the SCHEDULE (the query
+    // face) with no 60-s update boundary in between — at now+660 the
+    // schedule says t = 60/1200 of the leg (x = 390 + 0.05 × 30 =
+    // 391.5), at now+720 twice that (393.0).
+    rig.session->advance(660.0);
+    const auto it = rig.session->unit_id_map().find(rig.flight_vu());
+    ASSERT_NE(it, rig.session->unit_id_map().end());
+    EntityHandle h(it->second, &rig.session->sim().world());
+    auto* tf = h.get<f4::entities::TransformComponent>();
+    ASSERT_NE(tf, nullptr);
+    EXPECT_NEAR(tf->position.x / 1024.0, 391.5, 1e-6);
+    rig.session->advance(60.0);
+    EXPECT_NEAR(tf->position.x / 1024.0, 393.0, 1e-6);
+
+    // The tier view is the same face it always was (one truth).
+    const auto tiers = rig.session->flight_tiers();
+    ASSERT_EQ(tiers.size(), 1u);
+    EXPECT_NEAR(tiers[0].x_grid, tf->position.x / 1024.0, 1e-6);
+}
+
+TEST(FidelityTiers, LazyDeaggSpawnLandsAtTheScheduleFace) {
+    if (!std::filesystem::exists(f16_config_path())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    auto opts = base_opts();
+    opts.fidelity_policy = FidelityPolicy::Tiered;
+    auto rig = TierRig::make(opts, /*takeoff_depart=*/kNow + 600,
+                             /*leg1_arrive=*/kNow + 1800);
+    ASSERT_NE(rig.session, nullptr);
+
+    // Fly to now+900 (mid-leg, t = 0.25 → x = 397.5), then force the
+    // deagg: the spawn pose is the schedule face (the stored field
+    // still holds the save position — the arrival event has not fired).
+    rig.session->advance(900.0);
+    rig.session->force_deaggregate_flight(rig.flight_vu());
+    ASSERT_EQ(rig.session->stats().agg_live, 1);
+    EntityHandle h(rig.session->sim().aircraft_entities().front(),
+                   &rig.session->sim().world());
+    auto* tf = h.get<f4::entities::TransformComponent>();
+    ASSERT_NE(tf, nullptr);
+    EXPECT_NEAR(tf->position.x / 1024.0, 397.5, 0.01);
+    EXPECT_NEAR(tf->position.y / 1024.0, 456.25, 0.01);
 }

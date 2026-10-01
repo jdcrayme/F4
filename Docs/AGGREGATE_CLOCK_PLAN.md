@@ -20,7 +20,13 @@
 > this tranche closed the section's remaining half, the
 > `DoCompressionLoop` authenticity clamp: the session publishes
 > `bubble_live`, and the viewer's runner holds the feed at 1× while
-> action is live in the observer bubble). AGG-4..5 are the open roadmap. This
+> action is live in the observer bubble). **AGG-4 LANDED** (fully lazy
+> aggregate state: a TIME-mode flight's position is the pure query
+> `f(route, t)` — the save's own schedule IS the state; the waypoint
+> arrivals ride the due-queue, fuel is the closed form of the walk's
+> own accrual, the entity mirror tracks the schedule per pass, and the
+> chunk stepping is SPEED-mode-only). AGG-5 (threading) remains the
+> optional last. This
 > document is
 > the canonical record of the 2026-10 time-compression investigation: why
 > campaigns were CPU-limited below ~20× while the FreeFalcon reference has
@@ -445,15 +451,80 @@ authenticity knob, at the reference's own semantics — the
   WATCHING a deaggregated fight at 60× honest — the fight runs at 1×
   while you look at it, and the war resumes the preset when you don't.
 
-### AGG-4 — fully lazy aggregate state (the endgame)
+### AGG-4 — fully lazy aggregate state — LANDED (the schedule IS the state)
 
-TIME-mode flights already interpolate on the save's own schedule and the
-tier view already extrapolates to now. Push to the conclusion: aggregate
-position becomes a pure query `f(route, t)` computed on read; the due-queue
-schedules only discrete events (waypoint arrivals, TOT windows, fuel gates,
-recovery deadlines). Aggregate propagation cost → zero between events;
-`MoveUnit`-style chunk stepping disappears. SPEED-mode flights keep the
-walk until synthetic intents carry arrival schedules.
+TIME-mode flights already interpolated on the save's own schedule and
+the tier view already extrapolated to now; this tranche pushed to the
+conclusion. As built:
+
+- **The state is a query.** A TIME-mode row's position/altitude is
+  `display_position(index, now)` — the walk's own interpolation
+  (past arrivals override in order, the first upcoming leg
+  interpolates, the takeoff gate and dwells hold) — and it was
+  already byte-equal to the stored face at every quanta (the FID-P1
+  pins). The chunk stepping that sampled it per 60-s update is
+  DELETED: `advance_flight_` is SPEED-only now, and the update loop
+  skips TIME rows. Between events a TIME row's propagation cost is
+  zero — the plan's `MoveUnit` residue, gone.
+- **The due-queue owns the discrete transitions** (the AGG-2a
+  primitive's named consumer — the queue IS the scheduler). Per TIME
+  row, ONE live arrival event at the next scheduled `arrive`; firing
+  materializes the walk's own write (the waypoint snap, the cursor,
+  the terminal flag at the schedule's end) and arms the next
+  (strictly-after — no loop). Events carry the row's schedule
+  GENERATION; every mutation that touches the row (suspend, fold
+  re-anchor, retask, scrub, destroy) bumps it, so a stale event
+  self-invalidates and the row re-arms from its new truth. Wire-order
+  deterministic by the queue's own `(due, priority, seq)` contract.
+- **Fuel is the closed form of the same schedule.**
+  `fuel_burnt_now(index)` counts the walk's own moving updates on the
+  same update grid — past the takeoff gate, past the first activation
+  (the first scheduled arrival or the first leg's departure, the
+  walk's `moved()` predicate as one integer threshold), before the
+  terminal arrival (never on IT; a mid-route arrival's update still
+  burns, exactly as the walk's override did) — as exact int64
+  floor/ceil arithmetic. The stored field materializes at the
+  transitions that would otherwise hide the accrual (suspend, fold,
+  retask) so every monotone surface (the fold's max, the deagg
+  handoff) keeps its exact shape. Byte-equal totals, pinned against
+  the walk's contract.
+- **The cursor is a query too.** `waypoint_cursor(index)` re-derives
+  the walk's own rule (past arrivals override, the mid-leg names its
+  target, a hold keeps the previous); the stored field materializes
+  at the arrival events. `current_heading_rad` aims at the leg the
+  flight is FLYING (the query), not the last arrived waypoint.
+- **The session reads one face.** The entity mirror runs per pass —
+  the SCHEDULE face for TIME rows (the transforms track the wire
+  continuously; a SPEED row's stored face changes only at its
+  updates, so its writes land where they always did), read-first-write.
+  The tier triggers' bubble test, the aggregate combat feed, the
+  convergence trigger, and the deagg spawn pose all read
+  `aggregate_face_` — the schedule, not the last quanta. The fold's
+  CAMP-TOT-PACE pace books against the exact cursor.
+- **The windows stay heartbeat reads.** The takeoff/TOT/recovery
+  windows are pure queries of row times — zero propagation cost, and
+  the heartbeat's per-pass latency rule (AGG-2a) stands; the queue
+  carries only the events whose STATE the engine owns.
+- **SPEED rows keep the walk** until synthetic intents carry arrival
+  schedules (the intent route today stamps only the takeoff gate and
+  the delivery TOT — full per-leg schedules are the follow-up that
+  closes SPEED entirely).
+- **Pins**: `TimeModeStoredFaceMaterializesAtArrivalsOnly`,
+  `LazyFuelMatchesTheWalkContract`, `FoldReArmsTheQueueOnTheShiftedWire`,
+  `SuspensionDropsEventsAndTheFoldRestoresThem`,
+  `RetaskMaterializesTheLazyBurn`,
+  `FidelityTiers.LazyTimeMirrorTracksTheSchedulePerPass`,
+  `FidelityTiers.LazyDeaggSpawnLandsAtTheScheduleFace`. The
+  re-pins the move blessed: the TIME-mode probes that read the
+  stored face mid-leg now read the query faces (the schedule IS the
+  state — `TimeModeFollowsTheWireSchedule`,
+  `ReaggregateReanchorsTheTimeSchedule`,
+  `AirborneFoldReanchorsPastTheClosedGate`,
+  `RetaskFlipsATimeModeFlightOntoSpeedMode` keep their expectations,
+  re-served). Full-suite audit: the fast tier's 12 failures are the
+  documented CAMP-TOT-PACE set (verified on the stashed pristine
+  tree, the AGG-2b doctrine); the new suites are green under
+  ASan+UBSan with zero reports.
 
 ### AGG-5 — threading (optional, last)
 

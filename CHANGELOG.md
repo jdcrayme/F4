@@ -5,6 +5,60 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## AGG-4 — fully lazy aggregate state: the schedule IS the state
+
+The aggregate-clock plan's endgame (Docs/AGGREGATE_CLOCK_PLAN.md §4),
+landed as-built: a TIME-mode flight's aggregate position is a pure
+query `f(route, t)` computed on read — the save's own arrive/depart
+schedule IS the truth, and the 60-s chunk stepping that sampled it is
+gone.
+
+- **The engine** (f4-campaign): `FlightAggregateEngine::tick` pops the
+  TIME rows' discrete transitions from the deterministic due-queue
+  (due_queue.hpp — the AGG-2a primitive's named consumer) — waypoint
+  arrivals at the schedule's own seconds, key-ordered `(due, priority,
+  seq)`, one live event per row (the cursor-chase), self-invalidating
+  on any mutation that touches the row (generation counter). A fired
+  arrival materializes exactly what the walk used to write at its
+  quanta: the waypoint snap, the cursor, the terminal flag. The chunk
+  walk remains for SPEED rows only (routes without usable schedules
+  cannot be closed-form — synthetic intents carry arrival schedules in
+  a later tranche). Between events a TIME row's propagation cost is
+  ZERO.
+- **The query faces**: `display_position` (already the pure TIME
+  interpolation) is now THE face — `fuel_burnt_now` (the walk's own
+  per-update accrual as a closed form on the same update grid:
+  past the takeoff gate, past the first activation, before the
+  terminal arrival; byte-equal totals, pinned) and `waypoint_cursor`
+  (the walk's own cursor rule) complete it. The stored field
+  materializes at the transitions that would otherwise hide the
+  accrual: suspend, fold, retask (the monotone surfaces keep their
+  exact shape).
+- **The session** (f4-simulation): the entity mirror runs per pass and
+  writes the SCHEDULE face for TIME rows (transforms track the wire
+  continuously), the stored face for SPEED rows exactly as before.
+  The tier triggers' bubble test, the combat feed, the convergence
+  trigger, and the deagg spawn pose all read through one
+  `aggregate_face_` definition of "where the flight is" — the
+  schedule, not the last quanta. The fold's CAMP-TOT-PACE pace books
+  against the exact cursor.
+- **Windows stay queries**: the TOT/recovery/takeoff windows remain
+  the heartbeat's per-pass reads of row times (pure queries, zero
+  propagation cost, the AGG-2a latency rule stands) — the queue
+  carries only the events whose STATE the engine owns.
+- **Pins**: `TimeModeStoredFaceMaterializesAtArrivalsOnly`,
+  `LazyFuelMatchesTheWalkContract` (gate holds, mid-leg accrual, the
+  mid-route arrival burns, the terminal one doesn't, the dwell burns),
+  `FoldReArmsTheQueueOnTheShiftedWire`,
+  `SuspensionDropsEventsAndTheFoldRestoresThem`,
+  `RetaskMaterializesTheLazyBurn` (f4-campaign);
+  `FidelityTiers.LazyTimeMirrorTracksTheSchedulePerPass` (the
+  transform glides with the schedule, no update boundary) +
+  `LazyDeaggSpawnLandsAtTheScheduleFace` (f4-simulation). The
+  pre-existing suite's failures are the documented CAMP-TOT-PACE
+  set, unchanged (stash-and-rebuild comparison, the AGG-2b doctrine);
+  the new suites are green under ASan+UBSan with zero reports.
+
 ## AGG-3 — the spawn policy's last half: the DoCompressionLoop clamp
 
 The aggregate-clock plan's AGG-3 (Docs/AGGREGATE_CLOCK_PLAN.md §4),

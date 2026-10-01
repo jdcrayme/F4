@@ -40,6 +40,22 @@
 // while the flight is airborne-progressing (after its first depart,
 // before arrival). The save's decoded fuel_burnt seeds the counter.
 //
+// AGG-4 (Docs/AGGREGATE_CLOCK_PLAN.md §4 — the endgame): a TIME-mode
+// row's state is a PURE QUERY f(route, t) computed on read. The
+// schedule the save carries IS the truth; the engine no longer steps
+// TIME rows through 60-s quanta. What remains discrete — the waypoint
+// arrivals (the cursor transitions and the terminal arrival) — fires
+// from the deterministic due-queue (due_queue.hpp, the AGG-2a
+// primitive's named consumer): one live event per row, armed at the
+// next scheduled arrive, re-armed as it fires, invalidated by any
+// mutation that touches the row (fold re-anchor, retask, scrub,
+// suspend). Fuel is the closed form of the same schedule (the walk's
+// own per-update accrual, counted on the update grid without walking
+// it); SPEED-mode rows keep the chunk walk until synthetic intents
+// carry arrival schedules. Between events the TIME rows' propagation
+// cost is ZERO: the serving faces (display_position, fuel_burnt_now,
+// waypoint_cursor) derive everything from (route, now).
+//
 // TIER COOPERATION. A deaggregated flight is SUSPENDED: the engine
 // stops advancing it and the sim's aircraft own the truth. The session
 // folds state back with reaggregate() (lead-aircraft roll-up,
@@ -73,6 +89,7 @@
 #pragma once
 
 #include <f4/campaign/campaign.hpp>       // CampaignTime
+#include <f4/campaign/due_queue.hpp>      // AGG-4: the arrival events
 #include <f4/entities/types.hpp>           // WaypointState (value vocab)
 #include <f4/world/data_source.hpp>        // ICampaignSource, IUnitCoreSource, IFlightSource
 
@@ -369,6 +386,29 @@ public:
                           double& fx, double& fy,
                           float& altitude_ft) const;
 
+    /// AGG-4 — the row's fuel burnt AT NOW (the closed form of the
+    /// walk's own accrual: the same per-update burn on the same update
+    /// grid, counted from the row's fuel anchor without walking it).
+    /// TIME-mode aggregate rows report base + burn × eligible updates
+    /// since the anchor (the schedule decides which updates move: the
+    /// walk's own predicate — past the takeoff gate, past the first
+    /// activation, before the terminal arrival); every other row
+    /// (SPEED, suspended, terminal) reports the stored field, which is
+    /// materialized at each transition that would otherwise hide the
+    /// accrual (suspend, fold, retask). Byte-equal to the pre-AGG-4
+    /// walk's totals — pinned by test.
+    [[nodiscard]] std::int32_t fuel_burnt_now(std::size_t index) const;
+
+    /// AGG-4 — the row's waypoint cursor AT NOW: the waypoint being
+    /// flown TOWARD (or the last one whose arrival passed). TIME-mode
+    /// rows derive it from the schedule with the walk's own rule (past
+    /// arrivals override in order, the first upcoming leg names its
+    /// target, a hold keeps the previous); SPEED rows report the
+    /// stored cursor the walk maintains. The stored field on a TIME
+    /// row materializes only at the queue's arrival events — the
+    /// mid-leg flying-toward value lives in this query.
+    [[nodiscard]] std::size_t waypoint_cursor(std::size_t index) const;
+
     /// One-frame counters (the session's stats panel + the tests).
     struct Stats {
         int updates = 0;      ///< update ticks fired
@@ -385,11 +425,62 @@ private:
     /// Recompute the one-frame counters from the state vector.
     void refresh_stats();
 
-    /// Advance one flight one update (the move_phase_ analog): time or
-    /// speed mode by route shape, fuel accrual while progressing.
+    /// Advance one flight one update (the move_phase_ analog). AGG-4:
+    /// SPEED-mode rows only — a TIME row's state is the schedule (the
+    /// due-queue's arrival events + the query faces serve it), so the
+    /// chunk walk never touches one.
     void advance_flight_(FlightAggregateState& f, std::size_t index,
                          std::vector<f4::entities::WaypointState>& route,
                          std::int64_t now_abs);
+
+    /// AGG-4 — one TIME-mode arrival event, fired from the due-queue:
+    /// validate the payload against the row's current shape (a
+    /// mutation re-armed the row → a stale event drops), materialize
+    /// exactly what the update walk used to write when its quanta
+    /// crossed the arrival (the waypoint snap + the cursor + the
+    /// terminal flag), and arm the row's NEXT scheduled arrival.
+    struct ArrivalEvent {
+        std::uint32_t vu;    ///< row identity (index + vu agreement)
+        std::uint32_t gen;   ///< the row's schedule generation
+        std::size_t index;   ///< the row (flights_ never erases — stable)
+        std::size_t wp;      ///< the waypoint whose arrive fired
+        std::int64_t due;    ///< the event's own due (the last_move stamp)
+    };
+    void fire_arrival_(const ArrivalEvent& ev, std::int64_t due_abs);
+
+    /// Arm the row's next scheduled arrival strictly after `after_abs`
+    /// (the cursor-chase: one live event per row). No eligibility
+    /// checks — the callers validate; nothing to arm = no event.
+    void arm_next_arrival_(std::size_t index, std::uint32_t gen,
+                           std::int64_t after_abs);
+
+    /// Bump the row's schedule generation (retiring its live events)
+    /// and re-arm it from now when it is an eligible TIME aggregate.
+    /// Every mutation that touches a row's schedule or flight state
+    /// funnels through this.
+    void reschedule_arrivals_(std::size_t index);
+
+    /// Materialize the derived TIME state INTO the row at now_abs (the
+    /// walk's own overrides, cursor and terminal rule) — construction
+    /// pastes a mid-war save's schedule state at the epoch, and the
+    /// fuel transitions paste the closed-form burn before the stored
+    /// field takes over (suspend, fold, retask).
+    void materialize_time_state_(std::size_t index, std::int64_t now_abs);
+
+    /// The closed-form count of the walk's moving updates on the grid
+    /// (epoch_ + k·update_sec, k ≥ 1) inside (from_abs, to_abs] that
+    /// the pre-AGG-4 walk would have burned on: past the takeoff gate,
+    /// past the first activation (the first scheduled arrival or the
+    /// first leg's departure — the walk's own moved() predicate as one
+    /// integer threshold), before the terminal arrival. Exact int64
+    /// floor/ceil arithmetic — no walk, no per-update loop.
+    [[nodiscard]] std::int64_t count_burn_updates_(
+        std::size_t index, std::int64_t from_abs, std::int64_t to_abs) const;
+
+    /// The TIME-mode cursor query's shared body (waypoint_cursor's
+    /// walk replica, also the heading target's source).
+    [[nodiscard]] std::size_t time_cursor_(std::size_t index,
+                                           std::int64_t now_abs) const;
 
     /// Reset the waypoint cursor after a fold-back: the first waypoint
     /// not yet reached (time mode: arrive > now; speed mode: the
@@ -432,6 +523,21 @@ private:
     std::int64_t clock_ = 0;       ///< advanced seconds since construct
     CampaignTime next_update_ = 0; ///< whole-update gate (engine clock)
     Stats stats_{};
+
+    /// AGG-4 — the TIME rows' discrete-transition scheduler (one live
+    /// arrival event per eligible row; keyed (due, priority, seq) by
+    /// the due-queue's own determinism contract).
+    DueQueue<ArrivalEvent> arrivals_;
+    /// Per row: the schedule generation its live events were armed
+    /// under. Any mutation bumps it; a popped event whose generation
+    /// disagrees with the row's is stale and drops.
+    std::vector<std::uint32_t> arrival_gen_;
+    /// Per row: the ABSOLUTE campaign time the stored fuel was last
+    /// materialized at (construction seeds the save's burn; suspend,
+    /// fold and retask re-materialize). The closed-form query counts
+    /// the eligible burn updates since this anchor; the walk-shaped
+    /// monotone surfaces (the fold's max) read the materialized field.
+    std::vector<std::int64_t> fuel_anchor_;
 
     /// True when the route's arrival times are usable (any arrive > 0)
     /// — TIME mode; else SPEED mode. Chosen per flight at construction.

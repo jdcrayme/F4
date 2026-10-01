@@ -747,3 +747,66 @@ Stage Summary:
   state, the host paces — any contract host can now implement the rule
   from the `stats` tail without engine changes.
 - Produced 0004-AGG-3.patch for the user's commit-and-push flow.
+
+---
+Task ID: 6 (AGG-4)
+Agent: Z User (aggregate-clock continuation)
+Task: Land AGG-4 — fully lazy aggregate state (the aggregate-clock plan's endgame) — after the AGG-3 delivery was verified (0004-AGG-3.patch byte-identical to a8572fd, staged on the download page; the user cannot push yet, so all artifacts are staged locally).
+
+Work Log:
+- Read §AGG-4 + mapped the machinery (Explore agent + direct reads): the
+  engine's per-pass chunk stepping (advance_flight_ TIME walk per 60-s
+  update), display_position as the already-pure TIME query, the stored-face
+  readers (entity mirror, heartbeat bubble tests, combat feed, trigger B,
+  deagg spawn pose, the fold's pace booking), the DueQueue primitive (so far
+  consumer-less), and the test pins that key on stored-face semantics.
+- Engine (f4-campaign/flight_aggregate.{hpp,cpp}): TIME rows leave the update
+  walk (advance_flight_ is SPEED-only); tick pops per-row ARRIVAL EVENTS from
+  DueQueue<ArrivalEvent>{vu, gen, index, wp, due} — one live event per row
+  (the cursor-chase: fire → materialize the walk's own write → arm the next
+  strictly-after), generation-counter invalidation on every mutation
+  (suspend/fold/retask/scrub/destroy funnel through reschedule_arrivals_);
+  construction materializes a mid-war save's schedule state at the epoch.
+  New queries: fuel_burnt_now (the walk's per-update accrual as an exact
+  int64 closed form on the same grid — gate + first-activation threshold +
+  never-on-the-terminal-arrival; materialized into the stored field at
+  suspend/fold/retask so every monotone surface keeps its shape) and
+  waypoint_cursor (the walk's own cursor rule; current_heading_rad aims at
+  the leg being flown).
+- Session (f4-simulation/campaign_session.{hpp,cpp}): advance_flights_ mirrors
+  per pass (the updates-gate and flight_synced_updates_ are gone); the mirror
+  and a new aggregate_face_ helper serve the SCHEDULE face for TIME rows
+  (display_position at the engine's clock) and the stored face for SPEED rows;
+  the tier bubble test, the combat feed, trigger B (per-row face arrays), and
+  both deagg spawn poses read through it; the fold's CAMP-TOT-PACE pace books
+  against waypoint_cursor. The windows stay heartbeat reads (pure queries —
+  the AGG-2a latency rule).
+- Tests: test_flight_aggregate re-pins the four TIME-mode probes that read the
+  stored face mid-leg onto the query faces (TimeModeFollowsTheWireSchedule,
+  ReaggregateReanchorsTheTimeSchedule, AirborneFoldReanchorsPastTheClosedGate,
+  RetaskFlipsATimeModeFlightOntoSpeedMode) and adds five new pins
+  (TimeModeStoredFaceMaterializesAtArrivalsOnly, LazyFuelMatchesTheWalkContract,
+  FoldReArmsTheQueueOnTheShiftedWire, SuspensionDropsEventsAndTheFoldRestoresThem,
+  RetaskMaterializesTheLazyBurn). test_fidelity_tiers grows the fixture's
+  arrive-stamp parameter and two session pins (LazyTimeMirrorTracksTheSchedulePerPass,
+  LazyDeaggSpawnLandsAtTheScheduleFace). Two implementation bugs caught by the
+  new pins before they could ship: the armed event never set its row index
+  (every arrival silently dropped) and set_suspended materialized the fuel
+  after flipping the suspended flag (the query saw the row as suspended and
+  returned the stale field).
+- Verification: 30/30 test_flight_aggregate, 13/13 FidelityTiers, 432-test fast
+  f4-simulation tier with EXACTLY the documented 12 CAMP-TOT-PACE failures —
+  the suspicious subset (CmdRetask/CmdAbort/CmdJournal, CombatDeagg,
+  BigCatchUp/Straddled) re-verified failing on the stashed pristine tree; the
+  new suites green under ASan+UBSan with zero reports (avionics gate 42/42).
+  One environment artifact: a full /tmp (test fixture dirs) produced phantom
+  failures until cleaned — not a regression.
+
+Stage Summary:
+- AGG-4 is CLOSED as-built: the aggregate layer's TIME-mode propagation cost
+  is zero between discrete events; the chunk stepping survives only for
+  SPEED rows (routes without usable schedules). The due-queue primitive now
+  has its named production consumer; the aggregate face is the schedule.
+- AGG-5 (threading) is the only open aggregate-clock item — optional, last,
+  explicitly "do not build first".
+- Produced 0005-AGG-4.patch for the user's commit-and-push flow.

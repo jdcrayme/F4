@@ -198,26 +198,207 @@ TEST(FlightAggregate, TimeModeFollowsTheWireSchedule) {
     rig.make();   // TIME mode: the arrive time is usable
 
     // Before the first depart: holds at the save position (6 updates).
+    // AGG-4: the query faces are the row's truth (the schedule IS the
+    // state; the stored face materializes at the queue's arrivals).
     rig.engine->tick(600);
-    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 10.0);
-    EXPECT_EQ(rig.engine->flights()[0].fuel_burnt, 0);
+    double fx = -1, fy = -1;
+    float alt = -1;
+    rig.engine->display_position(0, rig.engine->now(), fx, fy, alt);
+    EXPECT_DOUBLE_EQ(fx, 10.0);
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 0);
     EXPECT_EQ(rig.engine->stats().updates, 10);
 
     // Mid-leg (t = 0.5 through the 600-second leg): the interpolated
-    // midpoint, fuel burning while progressing.
+    // midpoint, fuel burning while progressing — both read from the
+    // closed-form query faces; no update fired between (the schedule
+    // needs none).
     rig.engine->tick(300);
-    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 16.0);
-    EXPECT_FLOAT_EQ(rig.engine->flights()[0].altitude_ft, 500.0f);
-    EXPECT_EQ(rig.engine->flights()[0].fuel_burnt, 70 * 5);   // 5 moving updates
+    rig.engine->display_position(0, rig.engine->now(), fx, fy, alt);
+    EXPECT_DOUBLE_EQ(fx, 16.0);
+    EXPECT_FLOAT_EQ(alt, 500.0f);
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 70 * 5);   // 5 moving updates
 
-    // Past the arrival: the waypoint, arrived. Fuel burned on every
-    // MOVING update (the depart-boundary update holds; the five mid-leg
-    // updates in the 300 tick + the four in this tick before the
-    // arrival snap) — never on the arriving one.
+    // Past the arrival: the waypoint, arrived — the arrival EVENT
+    // materialized the stored face (the snap the walk used to write),
+    // and the closed-form burn matches the walk's totals on the same
+    // grid (the five mid-leg updates in the 300 tick + the four in
+    // this tick before the arrival snap — never the arriving one).
     rig.engine->tick(600);
     EXPECT_TRUE(rig.engine->flights()[0].arrived);
     EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 22.0);
-    EXPECT_EQ(rig.engine->flights()[0].fuel_burnt, 70 * 9);
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 70 * 9);
+}
+
+// ── 3b. AGG-4 — the lazy TIME mode: the schedule IS the state ──────────────
+//
+// The stored face no longer steps through 60-s quanta: it materializes
+// at the arrival events (the discrete transitions the due-queue owns).
+// The mid-leg truth lives in the query faces — display_position,
+// fuel_burnt_now, waypoint_cursor — all pure functions of (route, now).
+
+TEST(FlightAggregate, TimeModeStoredFaceMaterializesAtArrivalsOnly) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    // wp0 (0,0) departs E+600; wp1 (60,0,8000) arrives E+1200; the
+    // unscheduled tail: wp2 (120,0,8000).
+    rig.ws->units = {flight(1, 2, 0, 0, 13,
+                            {wp(0, 0, 0, 0, kEpoch + 600),
+                             wp(60, 0, 8000, kEpoch + 1200),
+                             wp(120, 0, 8000)},
+                            {group(1)})};
+    rig.make();
+
+    // Mid-leg: the stored face still holds the SAVE position (no
+    // arrival has fired); the query face flies the schedule (t = 0.25
+    // → x = 15, altitude = 2000), and the cursor query names the leg
+    // being flown TOWARD.
+    rig.engine->tick(750);   // now = E+750
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 0.0);
+    double fx = -1, fy = -1;
+    float alt = -1;
+    rig.engine->display_position(0, rig.engine->now(), fx, fy, alt);
+    EXPECT_NEAR(fx, 15.0, 1e-9);
+    EXPECT_FLOAT_EQ(alt, 2000.0f);
+    EXPECT_EQ(rig.engine->waypoint_cursor(0), 1u);
+    EXPECT_EQ(rig.engine->flights()[0].wp_index, 0u);   // the stored cursor waits
+
+    // The arrival fires AT its second (E+1200 ≤ now): the stored face
+    // snaps to the waypoint and the stored cursor lands on it — the
+    // write the walk used to make at its next quanta. The tail is
+    // unscheduled, so wp1 IS the schedule's end: the arrival is also
+    // the terminal flag (the unscheduled-tail rule, same tick).
+    rig.engine->tick(460);   // now = E+1210
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 60.0);
+    EXPECT_EQ(rig.engine->flights()[0].wp_index, 1u);
+    EXPECT_TRUE(rig.engine->flights()[0].arrived);
+    EXPECT_EQ(rig.engine->stats().arrived, 1);
+}
+
+TEST(FlightAggregate, LazyFuelMatchesTheWalkContract) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    // Dwell leg: wp0 departs E+600, wp1 (60,0) arrives E+1200 and sits
+    // until E+1800, wp2 (120,0) arrives E+2400.
+    rig.ws->units = {flight(1, 2, 0, 0, 13,
+                            {wp(0, 0, 0, 0, kEpoch + 600),
+                             wp(60, 0, 8000, kEpoch + 1200, kEpoch + 1800),
+                             wp(120, 0, 8000, kEpoch + 2400)},
+                            {group(1)})};
+    rig.make();
+
+    // The gate holds: no burn (10 grid updates inside the hold).
+    rig.engine->tick(600);
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 0);
+    // Mid-leg: 70 lbs per moving update on the grid.
+    rig.engine->tick(540);   // now = E+1140: 9 moving updates
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 70 * 9);
+    // The arriving-update exclusion applies to the TERMINAL arrival
+    // only: the E+1200 waypoint is a mid-route stop — its update burns
+    // (the override moved the row; the walk's own fuel rule). Grid
+    // updates E+660..E+2340 inclusive all burn (mid-leg, the mid-route
+    // arrival, the dwell, the departure, the second leg) — 29 of them;
+    // the E+2400 terminal arrival burns nothing.
+    rig.engine->tick(1260);   // now = E+2400 exactly
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 70 * 29);
+    // Past the terminal arrival the row is frozen at its burn.
+    rig.engine->tick(600);
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 70 * 29);
+    EXPECT_TRUE(rig.engine->flights()[0].arrived);
+}
+
+TEST(FlightAggregate, FoldReArmsTheQueueOnTheShiftedWire) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    // Same shape as ReaggregateReanchorsTheTimeSchedule.
+    rig.ws->units = {flight(1, 2, 0, 0, 13,
+                            {wp(0, 0, 0, 0, kEpoch + 600),
+                             wp(60, 0, 8000, kEpoch + 1200, kEpoch + 1500),
+                             wp(120, 0, 8000, kEpoch + 2700)},
+                            {group(1)})};
+    rig.make();
+
+    // Fold at E+700 with the lead 30 grids ahead: the schedule slides
+    // +300 (wp1 arrives E+900, wp2 E+2400).
+    rig.engine->tick(700);
+    rig.engine->set_suspended(1, true);
+    rig.engine->reaggregate(1, 40.0, 0.0, 8000.0f, 100);
+
+    // The re-armed queue fires the SHIFTED arrival at its shifted
+    // second: E+900 materializes wp1 into the stored face.
+    rig.engine->tick(205);   // now = E+905
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 60.0);
+    EXPECT_EQ(rig.engine->flights()[0].wp_index, 1u);
+    // The dwell holds until the shifted E+2400; the second arrival
+    // lands the terminal flag.
+    rig.engine->tick(1500);   // now = E+2405
+    EXPECT_TRUE(rig.engine->flights()[0].arrived);
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 120.0);
+}
+
+TEST(FlightAggregate, SuspensionDropsEventsAndTheFoldRestoresThem) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    rig.ws->units = {flight(1, 2, 0, 0, 13,
+                            {wp(0, 0, 0, 0, kEpoch + 600),
+                             wp(60, 0, 8000, kEpoch + 1200, kEpoch + 1800),
+                             wp(120, 0, 8000, kEpoch + 2400)},
+                            {group(1)})};
+    rig.make();
+
+    // Suspend mid-leg: the pending arrival must NOT materialize a
+    // schedule point into a sim-owned row.
+    rig.engine->tick(900);   // now = E+900 (mid-leg, 5 moving updates)
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 70 * 5);
+    rig.engine->set_suspended(1, true);
+    // The suspend pasted the closed-form burn into the stored field
+    // (the fold's monotone surface keeps the modeled accrual).
+    EXPECT_EQ(rig.engine->flights()[0].fuel_burnt, 70 * 5);
+    rig.engine->tick(400);   // crosses the E+1200 arrival while suspended
+    EXPECT_DOUBLE_EQ(rig.engine->flights()[0].fx, 0.0);   // frozen
+    EXPECT_EQ(rig.engine->flights()[0].wp_index, 0u);
+    // The fold (the sim burned 30 more lbs) re-arms the shifted queue.
+    rig.engine->reaggregate(1, 20.0, 0.0, 8000.0f, 70 * 5 + 30);
+    EXPECT_EQ(rig.engine->flights()[0].fuel_burnt, 70 * 5 + 30);
+    // The next arrival fires on the re-anchored wire: the schedule
+    // passed through (20,0) at E+1300 — the shift lands +500 (wp1 at
+    // E+1700, wp2 at E+2900), the cursor resets to wp1, and BOTH
+    // arrivals fire inside the tick that crosses them.
+    const auto& r = rig.engine->routes()[0];
+    const auto wp2_arrive = r[2].arrive;
+    rig.engine->tick(static_cast<CampaignTime>(wp2_arrive - (kEpoch + 1300)) +
+                     60);
+    EXPECT_TRUE(rig.engine->flights()[0].arrived);
+    EXPECT_EQ(rig.engine->flights()[0].wp_index, 2u);
+}
+
+TEST(FlightAggregate, RetaskMaterializesTheLazyBurn) {
+    Rig rig;
+    rig.ws = std::make_unique<WorldState>(Rig::base());
+    rig.ws->units.push_back(
+        flight(5002, 2, 100, 100, 13,
+               {wp(100, 100, 0, 0, kEpoch + 100),
+                wp(160, 100, 100, kEpoch + 400, kEpoch + 500),
+                wp(220, 100, 100, kEpoch + 700)}));
+    rig.make();
+
+    // Mid-leg at E+300: the closed form has 4 moving updates booked
+    // (E+120/180/240/300 — the E+60 update sits inside the gate).
+    rig.engine->tick(300);
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 70 * 4);
+    EXPECT_EQ(rig.engine->flights()[0].fuel_burnt, 0);   // the stored field waits
+
+    // The retask flips the row into SPEED mode: the lazy burn pastes
+    // into the stored field first (the walk resumes from it — no loss,
+    // no double-count), then the new route's updates accrue on top.
+    const std::int64_t now_abs = kEpoch + 300;
+    ASSERT_TRUE(rig.engine->retask(
+        5002, 14, {wp(140, 100, 100), wp(140, 190, 100)},
+        static_cast<std::int32_t>(now_abs + 450),
+        static_cast<std::int32_t>(now_abs + 3000)));
+    EXPECT_EQ(rig.engine->flights()[0].fuel_burnt, 70 * 4);
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 70 * 4);   // SPEED: the stored field
+    rig.engine->tick(120);   // two SPEED updates
+    EXPECT_EQ(rig.engine->fuel_burnt_now(0), 70 * 6);
 }
 
 // ── 4. Suspend / fold ───────────────────────────────────────────────────────
@@ -441,8 +622,15 @@ TEST(FlightAggregateCmd, RetaskFlipsATimeModeFlightOntoSpeedMode) {
     rig.make();
 
     rig.engine->tick(300);
+    // AGG-4: the mid-leg position lives in the query face (t = 200/300
+    // of leg 1 → x = 140); the stored face materializes at arrivals.
     const auto* f = rig.engine->find(5002);
-    ASSERT_NEAR(f->fx, 140.0, 1e-9);
+    double qfx = -1, qfy = -1;
+    float qalt = -1;
+    rig.engine->display_position(rig.engine->index_of(5002),
+                                 rig.engine->now(), qfx, qfy, qalt);
+    ASSERT_NEAR(qfx, 140.0, 1e-9);
+    ASSERT_NE(f, nullptr);
 
     // The retask route carries no leg times — the flight flies it at
     // the cruise from the retask point (a TIME-mode flight whose new
@@ -719,17 +907,21 @@ TEST(FlightAggregate, ReaggregateReanchorsTheTimeSchedule) {
     EXPECT_EQ(r[1].arrive, kEpoch + 900);
     EXPECT_EQ(r[2].arrive, kEpoch + 2400);
 
-    // The engine's own updates follow the shifted schedule — the next
-    // quanta point (E+720) continues from the folded position at the
-    // leg's own 0.1 grid/s (40 + 20 s × 0.1 = 42), never a jump back.
-    rig.engine->tick(60);   // clock E+760: the E+720 boundary update fires
-    EXPECT_NEAR(rig.engine->flights()[0].fx, 42.0, 1e-9);
-    // One truth: the display AT the quanta boundary equals the row, and
-    // between quanta it keeps walking the same schedule (E+760 → 46).
-    rig.engine->display_position(0, kEpoch + 720, fx, fy, alt);
-    EXPECT_NEAR(fx, rig.engine->flights()[0].fx, 1e-9);
-    rig.engine->display_position(0, kEpoch + 760, fx, fy, alt);
-    EXPECT_NEAR(fx, 46.0, 1e-9);
+    // The engine's row materializes only at the queue's arrivals now
+    // (AGG-4) — the folded position IS the stored face until the
+    // shifted E+900 arrival; the schedule itself is the query face:
+    // the next instant (E+720) continues from the folded position at
+    // the leg's own 0.1 grid/s (40 + 20 s × 0.1 = 42), never a jump
+    // back. One truth: the display AT a quanta boundary equals the
+    // schedule (E+720 → 42), and between quanta it keeps walking the
+    // same schedule (E+760 → 46).
+    rig.engine->tick(60);   // clock E+760
+    double fx2 = -1, fy2 = -1;
+    float alt2 = -1;
+    rig.engine->display_position(0, kEpoch + 720, fx2, fy2, alt2);
+    EXPECT_NEAR(fx2, 42.0, 1e-9);
+    rig.engine->display_position(0, kEpoch + 760, fx2, fy2, alt2);
+    EXPECT_NEAR(fx2, 46.0, 1e-9);
 }
 
 TEST(FlightAggregate, PreDepartureFoldKeepsTheWireSchedule) {
@@ -910,9 +1102,14 @@ TEST(FlightAggregate, AirborneFoldReanchorsPastTheClosedGate) {
     rig.engine->display_position(0, kEpoch, fx, fy, alt);
     EXPECT_NEAR(fx, 30.0, 1e-9);
     // The leg's own pace survives: 60 grid in 600 s = 0.1 grid/s —
-    // 160 s after the fold the walk is 16 more grid along it.
-    rig.engine->tick(60);   // the E+60 boundary update lands at 36
-    EXPECT_NEAR(rig.engine->flights()[0].fx, 36.0, 1e-9);
-    rig.engine->display_position(0, kEpoch + 160, fx, fy, alt);
-    EXPECT_NEAR(fx, 46.0, 1e-9);
+    // 60 s after the fold the SCHEDULE is 6 more grid along it (the
+    // query face; the stored row materializes at the shifted
+    // arrivals — AGG-4). 160 s after the fold the schedule is at 46.
+    rig.engine->tick(60);   // clock E+60
+    double fx2 = -1, fy2 = -1;
+    float alt2 = -1;
+    rig.engine->display_position(0, kEpoch + 60, fx2, fy2, alt2);
+    EXPECT_NEAR(fx2, 36.0, 1e-9);
+    rig.engine->display_position(0, kEpoch + 160, fx2, fy2, alt2);
+    EXPECT_NEAR(fx2, 46.0, 1e-9);
 }

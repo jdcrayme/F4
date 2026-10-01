@@ -1100,16 +1100,31 @@ private:
 
     /// FID-2: fire the aggregate engine's update ticks for the
     /// campaign pass's whole-second delta (the ground cadence's twin),
-    /// then mirror moved flights into the sim's flight entities
+    /// then mirror the flights into the sim's flight entities
     /// (transforms + FlightPlanComponent fields) and run one tier
     /// evaluation (bubble / ops-window / force triggers, the reagg
-    /// hysteresis + cooldown).
+    /// hysteresis + cooldown). AGG-4: the mirror runs per pass — a
+    /// TIME-mode row's serving face moves with its schedule
+    /// continuously, so the transforms track it at the pass cadence.
     void advance_flights_(f4::campaign::CampaignTime delta_sec);
 
     /// FID-2: the entity-side mirror — engine positions/altitudes/fuel
     /// into the flight entities' TransformComponent +
-    /// FlightPlanComponent (only changed values write).
+    /// FlightPlanComponent (only changed values write). AGG-4: a
+    /// TIME-mode row mirrors its SCHEDULE face (display_position +
+    /// fuel_burnt_now — the stored field materializes only at the
+    /// queue's arrival events); every other row mirrors its stored
+    /// field exactly as before.
     void sync_flight_entities_();
+
+    /// AGG-4: the aggregate row's position/altitude face at now — the
+    /// schedule query (display_position at the engine's clock) for a
+    /// TIME-mode row, the stored field for every other row. The tier
+    /// triggers, the combat feed, the convergence test, and the deagg
+    /// spawn pose all read through this one definition of "where the
+    /// flight is".
+    void aggregate_face_(std::size_t index, double& fx, double& fy,
+                         float& altitude_ft) const;
 
     /// FID-P1 — the live half of the flight mirror (per campaign
     /// second, the tier pass's own cadence): while a flight is
@@ -1341,9 +1356,6 @@ private:
     int combat_deaggs_ = 0;                ///< combat-trigger deaggs so far
     int synthetic_registered_ = 0;         ///< generated aggregates so far
 
-    // FID: the mirror's update cursor (the pass delta rides advance()'s
-    // campaign clock, AGG-1).
-    int flight_synced_updates_ = 0;
     double default_air_radius_ft_ = 2560.0;  ///< the AII SIM_BUBBLE floor
     bool air_bubble_active_ = false;         ///< the camera-driven air bubble
     double air_bubble_radius_ft_ = 2560.0;
