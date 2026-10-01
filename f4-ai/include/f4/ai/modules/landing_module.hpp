@@ -398,6 +398,28 @@ public:
                                         // threshold, as a real ILS flare does.)
     double flare_pitch_deg{8.0};        // flare target pitch attitude
     double flare_pitch_gain{3.0};       // stick per rad of pitch error
+    // REPAIR-T4: below this AGL the flare's energy driver (the
+    // aim-point management) hands the pitch to the sink-rate servo
+    // alone. The energy driver commands EXTRA PULL at fast/slightly-high
+    // states — the measured flare entered at 17 ft sinking -1,386 fpm
+    // and the +0.8 deg of energy pull held the aircraft at ~6 ft AGL
+    // for the full 15 s flare timeout (a hover, not a landing). Inside
+    // the gate the only job is touching down: the symmetric sink floor
+    // arrests hard sinks and pushes to develop the touchdown sink, and
+    // the strut absorbs it.
+    double flare_touchdown_gate_ft{60.0};
+    // REPAIR-T4: the direct VS-servo's stick-per-fpm gain below the
+    // gate. The attitude loop's equilibrium IS the ground-effect-
+    // supported 1G attitude (measured: 15 s at 6 ft AGL, vs -0, pitch
+    // 3.1 deg — no target attitude below trim can hold, the squared
+    // stick shaping suppresses the small pushes). Inside the gate the
+    // pitch command IS the sink error (target -700 fpm): full-push
+    // arrest at the gate, zero stick at the touchdown sink. The ground
+    // bounds the loop — there is no room to hunt below 60 ft.
+    double flare_touchdown_vs_gain{1.0 / 800.0};
+    /// The direct servo's push clamp (the attitude law's -0.25 does not
+    /// bind here; the arrest may need the full -0.3).
+    double flare_touchdown_push_clamp{0.3};
     // Phase C2 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase C2): flap settings
     // commanded on OnFinal entry (and held through touchdown). The FM
     // already actuates tefPos/lefPos from PilotInput.tefCmd/lefCmd

@@ -5,6 +5,42 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## REPAIR-T4 — the approach chain closes: eight fixes, landing_only end to end
+
+CAMPAIGN_REPAIR_PLAN.md's approach/flare tranche, landed as-built with
+the id-tagged F4_LAND_DEBUG telemetry chain driving every fix: (1) the
+flare hover — the energy driver + the ground-effect-supported attitude
+equilibrium held the aircraft at 6 ft AGL / vs -0 for the 15 s timeout;
+below a 60-ft gate the attitude loop is bypassed by a direct VS servo
+(target -700 fpm) and the aircraft touches down in 2 s. (2) The OnFinal
+deadfall — a firm arrival met the deck in OnFinal where the Touchdown
+event was never observed; the wheels now fire it wherever they touch.
+(3) The straight-in catch-down — InterceptFinal's hold tracked the beam
+down once the localizer is captured (the from-above arrivals could
+never establish). (4) The FAF orbit trap — the IAP leg's altitude
+ceiling is the FAF's crossing altitude (the old beam-at-current-position
+target rose with every outbound swing; 90 minutes lost orbiting).
+(5) The wrong-side capture — the IAP leg aims past the fix in the
+landing direction, both capture sites require the landing hemisphere,
+and the intercept gained the missed-approach bound. (6) The
+re-intercept gate aligned with the module's +300 windows (the climb
+cascade stalls below +500). (7) The localizer-proximity capture — the
+fix-capture window also requires the centerline (an aircraft 11 NM off
+course sequenced into the intercept and cycled forever).
+
+Gates: landing_only exit 24 -> exit 0 with the full chain
+InterceptFinal -> OnFinal -> Flare -> Rollout -> TaxiIn; the landing
+module suite 28/28 (two pins re-contracted + the new gate pin);
+digi_full_mission + takeoff_only exit 0; digi suite 14 -> 13
+(pre-existing set). Still open (T4b): the stock-landing campaign gate —
+the observed flight now flies full approach cycles at the correct
+altitudes/fixes but does not complete; the two named blockers are the
+short-touchdown strand (a catch-down deck contact strands in
+ProceedToFix) and the ProceedToFix convergence geometry at pattern
+speed (the turn radius exceeds the capture window; the IAP leg's 185-kt
+command is not being flown). Docs/CAMPAIGN_REPAIR_PLAN.md section T4
+carries the as-built.
+
 ## REPAIR-T2 — CAMP-FAF-GUARD: the one-word fix that let the campaign fly
 
 CAMPAIGN_REPAIR_PLAN.md's route-flight tranche. The investigation

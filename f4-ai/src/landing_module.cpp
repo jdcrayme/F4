@@ -616,7 +616,15 @@ AIControlOutput LandingModule::update(double dt, const flight::IAircraftState* s
                 break;
             case LandingState::GoAround:
                 // Climbed back to pattern altitude: re-enter the intercept.
-                if (current_alt_msl_ft_ > pattern_altitude_ft_ + 500.0) {
+                // REPAIR-T4: the gate sat at pattern+500 while the climb
+                // cascade asymptotes ~350-480 ft above pattern at the
+                // pattern-speed level trim (measured: two aircraft stalled
+                // at pattern+356 and pattern+478, leveled 20-150 ft below
+                // the gate forever). The capture gate and the altitude
+                // gate both use pattern+300 — the re-intercept gate now
+                // matches them (the reference's own shape: climb to
+                // pattern altitude, re-enter).
+                if (current_alt_msl_ft_ > pattern_altitude_ft_ + 300.0) {
                     sm_.process(LandingEvent::Reintercept);
                 }
                 break;
@@ -687,9 +695,28 @@ AIControlOutput LandingModule::update(double dt, const flight::IAircraftState* s
             // overshoot grows 392 -> 417 ft (threshold 400). A level
             // intercept removes the balloon at the source.
             if (!fly_traffic_pattern) {
-                intercept_alt = std::min(intercept_alt,
-                                         std::max(intercept_entry_alt_ft_,
-                                                  floor_alt));
+                // REPAIR-T4: the straight-in catch-down. The old law
+                // pinned the hold at the ARRIVAL altitude for the whole
+                // intercept — the beam-capture above only fires from
+                // BELOW (beam within 200 of the hold), so any from-above
+                // arrival (every real campaign RTB: the route's home leg
+                // comes down from cruise) held ~650+ ft above the beam
+                // while the establish gate's 400-ft beam check closed
+                // out — the aircraft never established, overflew the
+                // field at pattern altitude, and cycled. The ILS
+                // straight-in shape: once the LOCALIZER is captured
+                // (lateral inside the proportional band) the aircraft
+                // tracks the descending beam down. NAV-F stands: the
+                // target only moves DOWN (beam_now < hold), never a
+                // climb above the hold.
+                if (std::abs(course_lateral_ft()) < intercept_offset_ft &&
+                    beam_now < intercept_alt) {
+                    intercept_alt = std::max(beam_now, floor_alt);
+                } else {
+                    intercept_alt = std::min(
+                        intercept_alt,
+                        std::max(intercept_entry_alt_ft_, floor_alt));
+                }
             }
             return track_final(intercept_alt,
                 approach_speed_kts,
@@ -949,7 +976,24 @@ void LandingModule::check_fix_reached() {
         const double rel_lat = dx * std::cos(current_heading_rad_) -
                                dy * std::sin(current_heading_rad_);
         const double lead = std::max(intercept_lead_ft, fix_radius_ft);
-        if (fix_timer_ > 1.0 && rel_along < lead &&
+        // REPAIR-T4: the capture requires the LANDING direction — a
+        // wrong-side arrival (heading against the runway) must not
+        // sequence into the intercept (it would flip outbound; see the
+        // aim-point note in controls_for_proceed_to_fix). Within 100 deg
+        // of the runway heading = the landing hemisphere.
+        const double hdg_to_runway = std::abs(AirSteering::heading_error(
+            runway_heading_rad_, current_heading_rad_));
+        // REPAIR-T4: the capture ALSO requires proximity to the
+        // LOCALIZER (the centerline, not the fix). The nose-relative
+        // window alone let an aircraft 11 NM off the course sequence
+        // into the intercept the moment the fix crossed its nose —
+        // the establish gate then rightly refused a 57,000-ft lateral
+        // forever (measured: 12 approach cycles, zero OnFinal). The
+        // ProceedToFix aim-point steers the aircraft onto the course
+        // first; the intercept sequences only near it.
+        if (fix_timer_ > 1.0 && hdg_to_runway < 1.75 &&
+            std::abs(course_lateral_ft()) < 8000.0 &&
+            rel_along < lead &&
             rel_along > -fix_abeam_ft &&
             std::abs(rel_lat) < lead * 3.0) {
             // The Tranche-38 altitude gate still owns the descent.
@@ -964,8 +1008,13 @@ void LandingModule::check_fix_reached() {
     // Off-nose (abeam) capture with a dwell timer guard (same rationale
     // and same pitfall as NavigationModule — see the long comment there:
     // no timer => possible insta-skip while heading away or an orbit
-    // deadlock; the timer resolves both).
-    if (waypoint_captured(entry_fix_, fix_timer_, fix_radius_ft, fix_abeam_ft)) {
+    // deadlock; the timer resolves both). REPAIR-T4: the same
+    // landing-direction requirement as the lead-window capture above —
+    // a wrong-side arrival never sequences.
+    if (waypoint_captured(entry_fix_, fix_timer_, fix_radius_ft, fix_abeam_ft) &&
+        std::abs(course_lateral_ft()) < 8000.0 &&
+        std::abs(AirSteering::heading_error(runway_heading_rad_,
+                                            current_heading_rad_)) < 1.75) {
         // Tranche 38: altitude gate. Don't transition to InterceptFinal
         // until within 300 ft of pattern altitude. The old 2D-only capture
         // sequenced the aircraft into the intercept while still at 4000 ft
@@ -1064,6 +1113,18 @@ void LandingModule::check_established() {
     // contact near the threshold is the normal flare path, and along >
     // -1500 ft excludes the overrun zone.)
     if (on_ground_ && course_along_ft() < -1500.0) {
+        sm_.process(LandingEvent::GoAround);
+        return;
+    }
+    // REPAIR-T4: the missed-approach bound for the INTERCEPT. The
+    // OnFinal state carries one (along > missed_along -> GA); the
+    // intercept had none — an aircraft that captured the localizer
+    // heading OUTBOUND (a wrong-side arrival that slipped the capture
+    // check) flew the extended centerline away from the field forever,
+    // "stable" (aligned + centered) at pattern altitude, establishing
+    // nothing. Past the missed plane outbound = a busted approach.
+    if (course_along_ft() > missed_along_ft) {
+        ga_reason_ = "intercept_outbound";
         sm_.process(LandingEvent::GoAround);
         return;
     }
@@ -1167,8 +1228,9 @@ void LandingModule::check_established() {
         static int dbg_gate2 = 0;
         if (++dbg_gate2 % 120 == 1) {
             std::fprintf(stderr,
-                         "[land-dbg] gate FAIL: hdg %.2f/%.2f lat %.0f/%.0f"
+                         "[land-dbg] id %llu gate FAIL: hdg %.2f/%.2f lat %.0f/%.0f"
                          " beam %.0f/%.0f settle %.0f/900 along %.0f\n",
+                         (unsigned long long)ownship_id_,
                          hdg_err, establish_hdg_tol_rad,
                          std::abs(course_lateral_ft()),
                          fly_traffic_pattern
@@ -1239,6 +1301,19 @@ void LandingModule::check_flare_or_goaround() {
                 sm_.process(LandingEvent::Flare);
             }
             // else: hold the ride — a firm touchdown follows.
+            // REPAIR-T4: the ride's touchdown was never OBSERVED:
+            // LandingEvent::Touchdown fired only in the Flare state,
+            // so an aircraft that met the deck in OnFinal (the E64
+            // firm arrival, sink beyond the arrestable band) stayed
+            // OnFinal forever — rolling down the runway at approach
+            // power with the SM convinced it was still airborne (the
+            // digi-mission suite's "RunwayVacatedReport must fire"
+            // reds rode exactly this deadfall). The wheels are the
+            // truth: fire the Touchdown event wherever they touch,
+            // inside the flare window.
+            if (on_ground_) {
+                sm_.process(LandingEvent::Touchdown);
+            }
         } else {
             sm_.process(LandingEvent::GoAround);
         }
@@ -1322,7 +1397,34 @@ AIControlOutput LandingModule::controls_for_request_approach() const {
 }
 
 AIControlOutput LandingModule::controls_for_proceed_to_fix() const {
-    const double desired = AirSteering::bearing_to(current_position_, entry_fix_);
+    // REPAIR-T4 telemetry: the IAP leg's geometry, 1 Hz.
+    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        static int dbg_ptf = 0;
+        if (++dbg_ptf % 60 == 1) {
+            std::fprintf(stderr,
+                         "[ptf] id %llu pos %.0f,%.0f fix %.0f,%.0f alt %.0f "
+                         "pattern %.0f beam %.0f\n",
+                         (unsigned long long)ownship_id_,
+                         current_position_.x, current_position_.y,
+                         entry_fix_.x, entry_fix_.y, current_alt_msl_ft_,
+                         pattern_altitude_ft_, glide_slope_alt_ft());
+        }
+    }
+    // REPAIR-T4: aim PAST the fix, in the landing direction. The fix is
+    // a waypoint ON the approach, not the destination: an aircraft that
+    // arrives at the fix from the FIELD side (a wrong-side arrival — the
+    // cleared runway's approach face is the far side of the field from
+    // where the RTB leg came in) flying a bearing to the fix reached it
+    // heading AGAINST the runway, and the intercept then flipped it
+    // outbound down the extended centerline forever. Aiming 3,000 ft
+    // beyond the fix toward the threshold turns the wrong-side arrival
+    // around AT the fix and flies every arrival onto the course in the
+    // landing direction.
+    const double aim_x = entry_fix_.x + std::sin(runway_heading_rad_) * 3000.0;
+    const double aim_y = entry_fix_.y + std::cos(runway_heading_rad_) * 3000.0;
+    const geo::WorldPosition aim_point{aim_x, aim_y, entry_fix_.z};
+    const double desired = AirSteering::bearing_to(current_position_,
+                                                   aim_point);
     // CAMP-FAF rev 2 — the FF IAP ladder (atcbrain.cpp GetAltitude):
     // the entry/holding altitude is the 3-deg profile extended out from
     // the field, not a flat pattern leg. The old flat pattern-altitude
@@ -1336,8 +1438,20 @@ AIControlOutput LandingModule::controls_for_proceed_to_fix() const {
     // go-around's climb-out from diving (the field beam is below).
     // STAB-E19: still flown with the CALM pattern tune (the final's
     // attitude_gain + narrow correction window rings on long legs).
+    // REPAIR-T4: the IAP leg's altitude CEILING is the FAF's own
+    // crossing altitude. The old target rode the beam AT THE CURRENT
+    // POSITION — on any outbound excursion (an orbit around the fix)
+    // the 3-deg beam extrapolates HIGH and the target rises with it:
+    // the aircraft chased the beam around the orbit, 500+ ft above the
+    // capture gate's pattern+300 ceiling, and never captured (the
+    // stock-save observed flight: 90 minutes in ProceedToFix, altitude
+    // 2,186-2,461 against a 1,800 gate). The fix altitude is the
+    // highest the IAP leg may command; the slope ride below it is the
+    // intercept's and OnFinal's job.
+    const double faf_ceiling_ft = entry_fix_.z + 300.0;
     const double profile_alt =
-        std::max(pattern_altitude_ft_, glide_slope_alt_ft());
+        std::max(pattern_altitude_ft_,
+                 std::min(glide_slope_alt_ft(), faf_ceiling_ft));
     // FF's config schedule (landme.cpp): the gear drops at 3 nm at
     // lOnFinal entry and the pattern legs fly MinVcas — our
     // track_final (the intercept + OnFinal) already does exactly that.
@@ -1530,6 +1644,21 @@ AIControlOutput LandingModule::controls_for_flare() const {
     //
     // This makes the flare law actively manage touchdown point instead of
     // passively holding 8 deg.
+    // REPAIR-T4 telemetry: the flare's own state, 1 Hz (the [final] rows
+    // stop at flare entry — this row is what the touchdown-gate work
+    // drives against).
+    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        static int dbg_flare = 0;
+        if (++dbg_flare % 60 == 1) {
+            std::fprintf(stderr,
+                         "[flare] id %llu timer %.1f agl %.0f vs %+.0f vcas %.0f "
+                         "pitch %.1f on_ground %d\n",
+                         (unsigned long long)ownship_id_,
+                         flare_timer_, current_alt_agl_ft_, current_vs_fpm_,
+                         current_vcas_kts_, current_pitch_rad_ * 57.3,
+                         on_ground_ ? 1 : 0);
+        }
+    }
     AIControlOutput out;
     out.gear_handle_down = true;
     out.throttle_cmd = 0.0;  // idle
@@ -1614,7 +1743,18 @@ AIControlOutput LandingModule::controls_for_flare() const {
     // differentiation is observable (the old STAB-E8 trim was ±2 deg; this
     // is the same range but as the driver, not the trim). Negative excess
     // (slow + low) relaxes toward the sink floor.
-    double flare_pitch_adj = std::clamp(energy_excess_ft / 2000.0, -2.0, 3.0);
+    //
+    // REPAIR-T4: inside the touchdown gate the aim-point management is
+    // OVER — its extra pull at 17 ft / -1,386 fpm is a float command,
+    // and the measured flare held ~6 ft AGL for the full 15 s timeout
+    // (a hover). Below the gate the symmetric sink-rate servo alone
+    // owns the pitch: it arrests hard sinks (the entry arrest) and
+    // pushes to develop the touchdown sink; the strut absorbs it.
+    const bool touchdown_gate =
+        current_alt_agl_ft_ < flare_touchdown_gate_ft;
+    double flare_pitch_adj = touchdown_gate
+        ? 0.0  // replaced by the touchdown attitude below
+        : std::clamp(energy_excess_ft / 2000.0, -2.0, 3.0);
     // Sink-rate FLOOR (the STAB-E8 law, kept as the lower bound). If the
     // aircraft is sinking faster than −400 fpm, add pitch regardless of
     // the energy prediction — the energy says "short" but the sink says
@@ -1640,7 +1780,7 @@ AIControlOutput LandingModule::controls_for_flare() const {
     // timeout fired GoAround. Sinking too fast -> the floor pulls (as
     // before); climbing/balloon -> the floor pushes the target down, and
     // the energy trim still owns the slow aim-point management.
-    if (sink_floor_deg >= 0.0) {
+    if (!touchdown_gate && sink_floor_deg >= 0.0) {
         flare_pitch_adj = std::max(flare_pitch_adj, sink_floor_deg);
     } else {
         // The push side is a bounded DAMPER on top of the energy trim, not
@@ -1665,8 +1805,22 @@ AIControlOutput LandingModule::controls_for_flare() const {
     // out of the ground-effect float, and the old -0.1 floor swallowed it
     // until the 15 s flare timeout fired GoAround. -0.25 still cannot dive
     // (the arrest overshoot push is capped by the same floor).
-    out.pitch_cmd = std::clamp(flare_pitch_gain * (target - current_pitch_rad_),
-                               -0.25, 0.5);
+    if (touchdown_gate) {
+        // REPAIR-T4: the direct VS servo. The attitude loop's equilibrium
+        // is the GE-supported 1G attitude — the measured flare hovered at
+        // 6 ft AGL / vs -0 for the full 15 s timeout no matter the target
+        // attitude (the squared stick shaping suppresses the small pushes
+        // the trim-adjacent errors produce). Inside the gate the stick IS
+        // the sink error: full-push arrest at the gate entry, zero stick
+        // at the -700 fpm touchdown sink, the strut absorbs the arrival.
+        // The ground bounds the loop.
+        const double vs_err = target_sink_fpm - current_vs_fpm_;
+        out.pitch_cmd = std::clamp(vs_err * flare_touchdown_vs_gain,
+                                   -flare_touchdown_push_clamp, 0.5);
+    } else {
+        out.pitch_cmd = std::clamp(flare_pitch_gain * (target - current_pitch_rad_),
+                                   -0.25, 0.5);
+    }
     // STAB-E63: the flare keeps flying the LOCALIZER with a bounded-bank
     // heading chase (wings-level let the flare-start residual plus ~8 s of
     // drift ride to the touchdown — 75 ft measured vs the 50 ft gate). The
@@ -1710,6 +1864,19 @@ AIControlOutput LandingModule::controls_for_parked() const {
 }
 
 AIControlOutput LandingModule::controls_for_go_around() const {
+    // REPAIR-T4 telemetry: the climb-out's own state, 1 Hz.
+    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        static int dbg_ga = 0;
+        if (++dbg_ga % 60 == 1) {
+            std::fprintf(stderr,
+                         "[ga] id %llu agl %.0f alt %.0f pattern %.0f pitch %.1f "
+                         "vcas %.0f\n",
+                         (unsigned long long)ownship_id_,
+                         current_alt_agl_ft_, current_alt_msl_ft_,
+                         pattern_altitude_ft_, current_pitch_rad_ * 57.3,
+                         current_vcas_kts_);
+        }
+    }
     // Go-around: climb straight ahead on the RUNWAY heading to just above
     // the pattern altitude; Reintercept then hands the geometry to
     // PatternDownwind (pattern mode, STAB-E24) or ProceedToFix.

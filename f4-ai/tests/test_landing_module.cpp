@@ -266,7 +266,19 @@ TEST_F(LandingTestFixture, FlareBelowFlareHeight) {
     const auto out = mod.update(0.1, s.get());
     EXPECT_EQ(mod.state(), LandingState::Flare);
     EXPECT_NEAR(out.throttle_cmd, 0.0, 1e-9);
-    EXPECT_GT(out.pitch_cmd, 0.0);          // pitch up to the flare attitude
+    // REPAIR-T4: below the touchdown gate (60 ft) the stick IS the sink
+    // error (target -700 fpm). At exactly the touchdown sink the servo
+    // holds zero stick; the arrest case (a hard entry sink) pulls.
+    EXPECT_NEAR(out.pitch_cmd, 0.0, 1e-9);
+
+    // The arrest: at -1,200 fpm the servo pulls (vs_err = +500 -> the
+    // pull clamp) — the firm entry sink is rounded out toward -700.
+    s = on_final(0.0, 200.0, 45.0, 0.0);
+    s->vs_fpm_ = -1200.0;
+    const auto out_arrest = mod.update(0.1, s.get());
+    EXPECT_EQ(mod.state(), LandingState::Flare);
+    EXPECT_GT(out_arrest.pitch_cmd, 0.2)
+        << "the flare must arrest a hard entry sink";
 }
 
 TEST_F(LandingTestFixture, OnFinalExtendsFlaps) {
@@ -302,9 +314,16 @@ TEST_F(LandingTestFixture, EnergyManagedFlareModulatesPitchOnLongPrediction) {
     // MORE pitch (to bleed energy); when slow (will land short), LESS pitch.
     //
     // Test setup: aircraft approaches the threshold, descends through the
-    // flare height (60 ft AGL) at two different approach speeds. The
+    // flare height (130 ft AGL) at two different approach speeds. The
     // high-energy case (250 kts) commands more pitch than the baseline
     // (160 kts) because the predicted touchdown is farther past the aim.
+    //
+    // REPAIR-T4: the differentiation is checked at 80 ft — ABOVE the
+    // touchdown gate (60 ft), where the energy driver still owns the
+    // aim-point management. Inside the gate the driver is inert (the
+    // sink servo alone owns the pitch — see TouchdownGateZeroesTheEnergy
+    // below); the old 50-ft check site sat inside the gate and read the
+    // inert driver as a broken differentiation.
 
     // Step 1: drive to OnFinal. The on_enter(OnFinal) action publishes
     // ApproachClearance; the StubATC responds with ClearedToLand. Match
@@ -315,9 +334,10 @@ TEST_F(LandingTestFixture, EnergyManagedFlareModulatesPitchOnLongPrediction) {
     s_high_cruise->vs_fpm_ = -500.0;
     mod.update(0.1, s_high_cruise.get());
 
-    // Step 2: descend to flare height (50 ft AGL). The flare transition fires.
+    // Step 2: descend through flare height (80 ft AGL — above the
+    // touchdown gate). The flare transition fires.
     // on_final signature: on_final(east, dist_south, alt_agl, hdg, vcas)
-    auto s_high = on_final(0.0, 500.0, 50.0, 0.0, 250.0);
+    auto s_high = on_final(0.0, 500.0, 80.0, 0.0, 250.0);
     s_high->vs_fpm_ = -500.0;
     const auto out_high = mod.update(0.1, s_high.get());
     ASSERT_EQ(mod.state(), LandingState::Flare)
@@ -331,13 +351,47 @@ TEST_F(LandingTestFixture, EnergyManagedFlareModulatesPitchOnLongPrediction) {
     s_base_cruise->vs_fpm_ = -500.0;
     mod.update(0.1, s_base_cruise.get());
 
-    auto s_base = on_final(0.0, 500.0, 50.0, 0.0, 160.0);
+    auto s_base = on_final(0.0, 500.0, 80.0, 0.0, 160.0);
     s_base->vs_fpm_ = -500.0;
     const auto out_base = mod.update(0.1, s_base.get());
     ASSERT_EQ(mod.state(), LandingState::Flare);
 
     EXPECT_GT(out_high.pitch_cmd, out_base.pitch_cmd)
         << "high-energy flare should command MORE pitch to bleed energy "
+        << "(high=" << out_high.pitch_cmd << ", base=" << out_base.pitch_cmd << ")";
+}
+
+TEST_F(LandingTestFixture, TouchdownGateZeroesTheEnergyDriver) {
+    // REPAIR-T4: inside the touchdown gate (60 ft) the flare's
+    // energy driver is INERT — the aim-point management's extra pull
+    // at 17 ft / -1,386 fpm held the aircraft at ~6 ft AGL for the
+    // full 15 s timeout (a hover, not a landing). Below the gate the
+    // symmetric sink-rate servo alone owns the pitch: two states with
+    // the SAME sink but different energies (250 vs 160 kts) command
+    // IDENTICAL pitch — the energy no longer floats the aircraft.
+    drive_to_on_final();
+    auto s_high_cruise = on_final(0.0, 800.0, 500.0, 0.0, 250.0);
+    s_high_cruise->vs_fpm_ = -700.0;
+    mod.update(0.1, s_high_cruise.get());
+
+    auto s_high = on_final(0.0, 500.0, 40.0, 0.0, 250.0);
+    s_high->vs_fpm_ = -700.0;
+    const auto out_high = mod.update(0.1, s_high.get());
+    ASSERT_EQ(mod.state(), LandingState::Flare);
+
+    SetUp();
+    drive_to_on_final();
+    auto s_base_cruise = on_final(0.0, 800.0, 500.0, 0.0, 160.0);
+    s_base_cruise->vs_fpm_ = -700.0;
+    mod.update(0.1, s_base_cruise.get());
+
+    auto s_base = on_final(0.0, 500.0, 40.0, 0.0, 160.0);
+    s_base->vs_fpm_ = -700.0;
+    const auto out_base = mod.update(0.1, s_base.get());
+    ASSERT_EQ(mod.state(), LandingState::Flare);
+
+    EXPECT_NEAR(out_high.pitch_cmd, out_base.pitch_cmd, 1e-6)
+        << "inside the touchdown gate the energy driver must be inert "
         << "(high=" << out_high.pitch_cmd << ", base=" << out_base.pitch_cmd << ")";
 }
 

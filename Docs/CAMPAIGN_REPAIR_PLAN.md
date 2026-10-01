@@ -235,14 +235,81 @@ Remaining in flight-control (the plan's forward queue):
   touchdown): liftoff → route at waypoint altitudes → RTB → approach →
   Rollout.
 
-### T4 — the flare closes
+### T4 — the approach chain closes — **LANDED (2026-10-01), the campaign
+### end-to-end gate partially open (see T4b)**
 
-- A final-20-ft law: below threshold height the flare drives target
-  sink to the gear-tolerable figure and lets the strut absorb it (the
-  reference's own retard shape); the 15 s timeout becomes the
-  arms-length backstop, not the primary exit.
-- **Gate**: `landing_only` exit 0 with touchdown; the campaign approach
-  lands (the CAMP-LAND chain closes end to end).
+Eight fixes landed as-built, each instrumented against the F4_LAND_DEBUG
+telemetry chain ([ptf]/[final]/[flare]/[ga]/[land-dbg], all id-tagged):
+
+1. **The flare hover** — the flare's energy driver commanded extra PULL
+   at 17 ft / −1,386 fpm (an aim-point command that is a float command
+   at deck height), and the attitude loop's equilibrium IS the
+   ground-effect-supported 1-G attitude: the measured flare held 6 ft
+   AGL at vs −0 for the full 15 s timeout, pitch falling 4.5→3.1° with
+   zero sink. The squared stick shaping (pshape = pstick²) suppresses
+   exactly the small pushes a trim-adjacent target produces — no
+   attitude target can commit. FIX: below `flare_touchdown_gate_ft`
+   (60 ft) the attitude loop is BYPASSED — the stick IS the sink error
+   (direct VS servo, target −700 fpm, gain 1/800, push clamp 0.3; the
+   E58-reverted direct law, confined to the last 60 ft where the ground
+   bounds the loop). `landing_only`: Flare at 6 ft → **touchdown in
+   2 s** → Rollout → TaxiIn (exit 24 → **exit 0**).
+2. **The OnFinal deadfall** — the E64 "hold the ride — a firm touchdown
+   follows" branch landed aircraft IN OnFinal, but
+   `LandingEvent::Touchdown` fired only in the Flare state: the SM
+   believed the aircraft airborne forever while it rolled down the
+   runway at approach power. FIX: the wheels are the truth — Touchdown
+   fires wherever they touch inside the flare window.
+3. **The straight-in catch-down** — InterceptFinal's beam capture fired
+   only from BELOW (beam within 200 of the hold); a from-above arrival
+   held its entry altitude forever and the establish gate's 400-ft beam
+   check closed out (the aircraft never established, overflew the field
+   at pattern altitude, cycled). FIX: once the localizer is captured
+   (lateral inside the proportional band) the hold tracks the beam
+   down — NAV-F preserved (never a climb above the hold).
+4. **The FAF orbit trap** — ProceedToFix's target rode the beam AT THE
+   CURRENT POSITION: on any outbound excursion the 3-deg beam
+   extrapolates high and the target rises with it — the aircraft chased
+   the beam around the orbit 500+ ft above the capture gate's ceiling
+   (measured: 90 minutes in ProceedToFix). FIX: the IAP leg's altitude
+   ceiling is the FAF's own crossing altitude.
+5. **The wrong-side capture** — an aircraft arriving at the fix from
+   the FIELD side captured it heading AGAINST the runway; the intercept
+   then flipped it outbound down the extended centerline forever
+   ("stable" = aligned + centered, establishing nothing — the intercept
+   had no outbound bound). FIXES: the IAP leg aims 3,000 ft PAST the
+   fix (in the landing direction — the fix is a waypoint on the
+   approach, not the destination); both capture sites require the
+   landing hemisphere (heading within 100° of the runway heading);
+   check_established gained the missed-approach bound the OnFinal state
+   already had (past the missed plane outbound = GA).
+6. **The re-intercept gate** — pattern+500 while the climb cascade
+   asymptotes ~350-480 ft above pattern at the level trim: two aircraft
+   stalled at pattern+356 and pattern+478 forever. FIX: the gate
+   matches the module's other +300 windows.
+7. **The localizer-proximity capture** — the fix-capture window was
+   nose-relative: an aircraft 11 NM off the course sequenced into the
+   intercept when the fix crossed its nose, then the establish gate
+   rightly refused a 57,000-ft lateral forever (12 approach cycles,
+   zero OnFinal). FIX: the capture also requires the centerline
+   (|lateral| < 8,000 ft) — the ProceedToFix aim-point steers onto the
+   course first.
+
+Gates: landing module suite 28/28 (the two flare pins re-contracted to
+the servo law + the new TouchdownGateZeroesTheEnergyDriver pin);
+landing_only exit 0 with the full chain; digi_full_mission + takeoff_only
+exit 0. **Still open (T4b, the campaign end-to-end gate)**: the
+stock-landing observed flight now flies full approach cycles at the
+correct altitudes/fixes (ProceedToFix → InterceptFinal → GoAround,
+12+ attempts) but does not complete: two blockers named by the
+instrumented runs — (a) the short-touchdown strand (an aircraft that
+meets the deck during the catch-down strands in ProceedToFix; T1
+forgives the Approach phase and the FSM's grounded guard does not fire
+— the sibling of fix 2), and (b) the ProceedToFix convergence geometry
+at 250 kts: the turn radius (~11,900 ft) exceeds the capture window and
+the orbit never tightens; the speed loop also holds pattern speed where
+the IAP leg commands approach speed (185). The digi suite's 13 reds are
+pre-existing (was 14; the deadfall fix cured one).
 
 ### T5 — the A/A seam
 
