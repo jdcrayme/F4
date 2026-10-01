@@ -671,3 +671,79 @@ Stage Summary:
   spawn policy) — the FID_OPT §5 residual list now holds only the FM
   floor (physics) and the brain's diffuse glue.
 - Produced 0003-AGG-2b-*.patch for the user's commit-and-push flow.
+
+---
+Task ID: AGG-3
+Agent: Z User (session agent)
+Task: "Committed and pushed. Proceed as planned." — the roadmap's next
+  item after AGG-2b: AGG-3, the aggregate-first spawn policy
+  (Docs/AGGREGATE_CLOCK_PLAN.md §4).
+
+Work Log:
+- Reconciled /home/z/F4 to origin/main (a9f7af3): the user's push
+  contained the applied AGG-2b patch PLUS a folded CAMP-SAVE-WAVE rev 2
+  (the initial wave's per-base launch queue — one departure per 15 min
+  per base, bases concurrent) + CAMP-GATE-ROLL (the parking hold
+  stretches to the takeoff gate; the flights table's takeoff TIME
+  column). Local redundant commit dropped via reset — origin verified
+  as the superset.
+- Enabling discovery: AGG-3's CORE (synthetic ATM intents spawn as
+  AGGREGATES, not Tier-B) already landed with FID-5 —
+  `synthetic_as_aggregates` defaults true and the generated war rides
+  the tier machinery (FIDELITY_TIERS_PLAN §4.5 as-built). The AGG-3
+  section was stale. The section's remaining half is the optional
+  authenticity knob: the reference's DoCompressionLoop rule
+  (freefalcon-central campaign.cpp:2394-2520) — auto-1x while any
+  deaggregated aircraft is live in the observer bubble.
+- Engine (f4-simulation): `Stats::bubble_live` — deaggregated flights
+  whose live lead sits inside the observer bubble (the DEAGG radius —
+  the bubble trigger's own test — over `live_lead_position_`), computed
+  per `refresh_stats_` via the new `count_bubble_live_()`
+  (O(live flights), usually 0). The session publishes; it never paces
+  (plan §2.2 — pacing is a host concern).
+- Wire (f4-campaign-api): the `stats` query carries `bubble_live` at
+  the StatsView tail (additive, plan §11; kProtocolVersion stays 1).
+  Host adapter fills it; the StatsView golden + the host's
+  StatsQueryCarriesTheCounterVocabulary pin re-pinned with the new
+  last key.
+- Host (f4-world-viewer): `CampaignClientRunner::set_bubble_action()`
+  (atomic, the set_paused_flag shape) — the frame scope mirrors the
+  engine's state from the snapshot refresh (once per advance, the same
+  cadence the engine recomputes at), and the worker holds its feed at
+  1x while the flag is up (`preset = min(speed, 1x)`). The preset radio
+  keeps the user's request; the AIMD governor's scale carries over; no
+  governor reset on clamp lift. The speed row surfaces the hold
+  (TextDisabled `1x — action in bubble`). The camera-bubble checkbox is
+  the knob (bubble off → no bubble deaggs → the clamp never fires).
+  The stats query parser (+ SessionStats) learned the new tail key.
+- Tests: `FidelityTiers.BubbleLiveCountsObserverBubbleAction` (no
+  bubble = 0; force deagg OUTSIDE a far bubble = 0 — deaggregated is
+  not enough; bubble over the live lead = 1; explicit fold = 0),
+  `CampaignClientRunner.BubbleActionHoldsTheFeedAtOneX` (600 ms at 60x
+  with the flag: held rate ~1x; the no-flag control runs at the
+  preset) + `BubbleActionClearResumesThePreset` (the EMA climbs back
+  after the flag drops). The viewer tests ran HEADLESS via a manual
+  g++ link (the runner + queries are std:: + f4-campaign-api only) —
+  raylib's FetchContent clone cannot complete in this container, so
+  the viewer's CMake tier stays OFF here (the campaign_session_view.cpp
+  wiring is symbol-checked against the real types: unique_ptr<
+  CampaignClientRunner>, ImGui::TextDisabled/SameLine in use
+  elsewhere).
+- Full-suite audit: every failure on the work tree is the documented
+  CAMP-TOT-PACE pre-existing set, verified unchanged (the two
+  EventStream pins reproduced on the STASHED pristine tree this
+  session; BigCatchUp/Straddled, ArmOff, RunsCertifies match the AGG-2b
+  baseline). DtoGoldens.IntentView pre-existing. Zero new failures
+  from this tranche.
+
+Stage Summary:
+- AGG-3 is CLOSED as-built: the spawn half rode FID-5; the DoCompressionLoop
+  clamp is wired end to end — engine state, wire tail, host clamp, UI
+  readout. Watching a deaggregated fight at 60x now runs it at 1x (the
+  reference's rule); the war resumes the preset when the bubble clears.
+- The AGG-3 plan section rewritten as-built (the FID-5 discovery
+  recorded); the banner now reads AGG-4..5 as the open roadmap.
+- The rule's placement is the architecture's own: the session publishes
+  state, the host paces — any contract host can now implement the rule
+  from the `stats` tail without engine changes.
+- Produced 0004-AGG-3.patch for the user's commit-and-push flow.

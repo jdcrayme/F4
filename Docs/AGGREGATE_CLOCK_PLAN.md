@@ -14,7 +14,13 @@
 > membership term — the FID_OPT §5 20.8 s residual — plus the per-unit
 > detection cadences: the radar scans and the picture walk share one
 > roster, and the armed war's radars stagger their sweep phases behind
-> the `stagger_sensor_phases` gate). AGG-3..5 are the open roadmap. This
+> the `stagger_sensor_phases` gate). **AGG-3 LANDED** (the spawn policy's
+> core rode FID-5 all along — `synthetic_as_aggregates` registers the
+> tasking ladder's synthetic intents as AGGREGATES, not Tier-B spawns;
+> this tranche closed the section's remaining half, the
+> `DoCompressionLoop` authenticity clamp: the session publishes
+> `bubble_live`, and the viewer's runner holds the feed at 1× while
+> action is live in the observer bubble). AGG-4..5 are the open roadmap. This
 > document is
 > the canonical record of the 2026-10 time-compression investigation: why
 > campaigns were CPU-limited below ~20× while the FreeFalcon reference has
@@ -380,16 +386,64 @@ are wired to one shared membership index:
   armed war's default is a follow-up certificate action, not part of
   this tranche.
 
-### AGG-3 — aggregate-first spawn policy
+### AGG-3 — aggregate-first spawn policy — LANDED (the spawn half rode FID-5; the clamp half landed here)
 
-Close FID-2's documented gap: synthetic ATM intents currently spawn
-straight to Tier-B (per-aircraft). Route them through the aggregate tier —
-spawn as aggregate rows, deagg only on the three existing triggers. Then
-full-fidelity aircraft exist only near the eye and the FM floor stops
-multiplying with compression (the reference's bubble economics).
-Optional authenticity knob: auto-1× while any deaggregated aircraft is
-live in the observer bubble (the `DoCompressionLoop` rule) — a UX rule
-once AGG-1/2 land, not a perf need.
+The spawn half closed earlier than this plan noticed: FID-5's
+`synthetic_as_aggregates` (default ON — `campaign_session.hpp`) registers
+the tasking ladder's SYNTHETIC intents as AGGREGATES instead of spawning
+them straight to Tier-B — the generated war rides the tier machinery
+exactly like the save's own flights (FIDELITY_TIERS_PLAN.md §4.5
+as-built), and full-fidelity aircraft materialize only on the existing
+trigger families (ops/bubble — FID-3; combat — FID-5). The FM floor
+already stops multiplying with compression.
+
+What THIS tranche lands is the section's remaining half, the optional
+authenticity knob, at the reference's own semantics — the
+`DoCompressionLoop` rule (freefalcon-central campaign.cpp:2394-2520):
+
+- **The state** (f4-simulation): `Stats::bubble_live` — deaggregated
+  (Tier-B) flights whose live lead sits inside the observer bubble
+  RIGHT NOW. The predicate is the DEAGG radius (the same test the
+  bubble trigger itself applies — the reagg band is hysteresis, not
+  observation) over the live lead's position (live_lead_position_ —
+  the one definition of "the lead is here" the fold and the tier rules
+  share), recomputed per `refresh_stats_` over the deaggregated set
+  (O(live flights), usually 0). Deaggregated alone is NOT the rule: a
+  force-deagged test flight, an ops takeoff at a far airbase, a combat
+  window over the horizon — none hold the player's clock; the fight
+  being WATCHED does. The session PUBLISHES the state; it never
+  touches pacing (plan §2.2 — pacing is a host concern).
+- **The wire** (f4-campaign-api): the `stats` query carries
+  `bubble_live` at the DTO tail (additive, plan §11 —
+  `kProtocolVersion` stays 1); the StatsView golden re-pinned with the
+  new last key.
+- **The clamp** (f4-world-viewer): `CampaignClientRunner::
+  set_bubble_action()` — the frame scope mirrors the engine's state
+  from the snapshot refresh (once per advance, under the lock — the
+  same cadence the engine recomputes at), and the worker holds its
+  feed at 1× while the flag is up (`preset = min(speed, 1×)`). The
+  preset radio keeps the user's request, the AIMD delivery governor's
+  scale carries over untouched (the CPU's answer stays the CPU's
+  answer), and the clamp lifts the moment the bubble clears — no
+  governor reset, no fake full-feed spike. The speed row surfaces the
+  hold (`1x — action in bubble`, disabled text). The existing
+  camera-bubble checkbox IS the knob: bubble off → no bubble deaggs →
+  the clamp never fires.
+- **Pins**: the engine state machine
+  (`FidelityTiers.BubbleLiveCountsObserverBubbleAction` — no bubble
+  reads 0; a force deagg OUTSIDE a far bubble stays 0 — deaggregated
+  is not enough; the bubble over the live lead lights 1; the fold
+  drops it back to 0) + the runner clamp
+  (`CampaignClientRunner.BubbleActionHoldsTheFeedAtOneX` with the
+  no-flag control at the same preset,
+  `BubbleActionClearResumesThePreset`) + the wire tail
+  (`StatsQueryCarriesTheCounterVocabulary` re-pin). The pre-existing
+  suite's failures are the CAMP-TOT-PACE re-pins, unchanged (the
+  stash-and-rebuild comparison, the AGG-2b doctrine).
+- **What this is NOT**: not a perf need (AGG-1/2 made the feed cheap;
+  the FM floor already rides the tiers). It is the UX rule that makes
+  WATCHING a deaggregated fight at 60× honest — the fight runs at 1×
+  while you look at it, and the war resumes the preset when you don't.
 
 ### AGG-4 — fully lazy aggregate state (the endgame)
 

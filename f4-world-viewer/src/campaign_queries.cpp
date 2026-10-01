@@ -159,6 +159,7 @@ SessionStats fetch_stats(f4::campaign::api::ICampaignSession& s) {
         else if (key == "agg_contacts") v.agg_contacts = read_i(r);
         else if (key == "deferred_releases")
             v.deferred_releases = read_i(r);
+        else if (key == "bubble_live") v.bubble_live = read_i(r);
         else return false;
         return true;
         });

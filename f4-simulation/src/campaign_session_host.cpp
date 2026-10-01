@@ -276,6 +276,9 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
         s.synthetic_aggregates = stats.synthetic_aggregates;
         s.agg_contacts = stats.agg_contacts;
         s.deferred_releases = stats.deferred_releases;
+        // AGG-3: the DoCompressionLoop state (the pacing host's auto-1×
+        // rule reads it — additive tail, plan §11).
+        s.bubble_live = stats.bubble_live;
         f4::json::Writer w;
         api::encode(w, s);
         res.ok = true;

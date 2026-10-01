@@ -554,6 +554,19 @@ private:
     // the descending beam arrives from above).
     double intercept_entry_alt_ft_{0.0};
     bool cleared_to_land_{false};
+    /// CAMP-FAF telemetry: the check that FIRED the go-around declares
+    /// its reason here; the GoAroundMessage's on-enter reads (and
+    /// clears) it. The old reason derived from cleared_to_land_, which
+    /// lied for every path that never reached OnFinal.
+    std::string ga_reason_;
+    /// CAMP-TOT-PACE: the previous establish-gate lateral error — the
+    /// floor spare needs the lateral TREND (a converging intercept is
+    /// working, even while still outside the lateral gate).
+    double prev_establish_lateral_ft_ = 1.0e9;
+    /// The establish-gate heading-error trend (the same tick-over-tick
+    /// convergence read, for the turn-back phase where the lateral is
+    /// still wide but the nose is sweeping onto the course).
+    double prev_establish_hdg_err_rad_ = 1.0e9;
     double fix_timer_{0.0};     ///< seconds in ProceedToFix (abeam guard)
     double pattern_timer_{0.0}; ///< seconds in the current pattern state
     double flare_timer_{0.0};   ///< seconds in Flare (timeout safety valve, STAB-E3)

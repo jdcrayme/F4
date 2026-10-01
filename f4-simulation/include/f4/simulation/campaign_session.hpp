@@ -525,6 +525,16 @@ public:
         int synthetic_aggregates = 0; ///< generated missions registered as aggregates
         int agg_contacts = 0;         ///< aggregate contacts in the air picture now
         int deferred_releases = 0;    ///< the commit-window veto's skipped releases
+        // --- AGG-3 (the DoCompressionLoop state) ---------------------------
+        /// Deaggregated (Tier-B) flights whose live lead sits inside
+        /// the observer bubble RIGHT NOW — the reference's compression
+        /// rule (freefalcon-central campaign.cpp:2394-2520): while
+        /// action is in the bubble, the host's feed holds at 1× so
+        /// full-fidelity aircraft the player watches never
+        /// fast-forward. The session PUBLISHES the state; the host
+        /// owns the pacing decision (plan §2.2 — pacing is a host
+        /// concern).
+        int bubble_live = 0;
     };
 
     /// Build the whole graph. Returns nullptr and fills `error` on any
@@ -1142,6 +1152,11 @@ private:
 
     /// Recompute stats_ from the live objects.
     void refresh_stats_();
+
+    /// AGG-3: count the deaggregated flights whose live lead is inside
+    /// the observer bubble (the DEAGG radius — the same test the bubble
+    /// trigger itself applies). refresh_stats_'s bubble_live term.
+    [[nodiscard]] int count_bubble_live_() const;
 
     // --- Order matters (reverse destruction) ----------------------------
     // Everything BELOW borrows references from things constructed

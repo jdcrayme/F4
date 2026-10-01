@@ -70,6 +70,7 @@ TEST(DtoGoldens, StatsViewGolden) {
     s.ground_captures = 2;
     s.agg_live = 5;
     s.deferred_releases = 1;
+    s.bubble_live = 3;
     const auto json = encode_json(s);
     // spot-pin the GROUP ORDER: tasking → ledger → ground → tiers
     EXPECT_NE(json.find("\"cycles\":3,\"next_tasking_sec\":1500,\"intents\":12"),
@@ -78,9 +79,13 @@ TEST(DtoGoldens, StatsViewGolden) {
     EXPECT_NE(json.find("\"aa_kills\":7"), std::string::npos);
     EXPECT_NE(json.find("\"ground_captures\":2"), std::string::npos);
     EXPECT_NE(json.find("\"agg_live\":5"), std::string::npos);
+    // AGG-3: the DoCompressionLoop state rides the additive tail
+    // (plan §11 — new fields land at the END; the golden re-pins).
     // last key, no trailing comma
-    EXPECT_EQ(json.substr(json.size() - std::strlen("\"deferred_releases\":1}")),
-              "\"deferred_releases\":1}");
+    EXPECT_EQ(json.substr(json.size() -
+                          std::strlen("\"deferred_releases\":1,"
+                                     "\"bubble_live\":3}")),
+              "\"deferred_releases\":1,\"bubble_live\":3}");
     EXPECT_EQ(json.find(",}"), std::string::npos);
 }
 

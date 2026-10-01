@@ -126,8 +126,21 @@ void CampaignClientRunner::worker_loop_() {
         // ticks just inside what a batch can fully drain (no dropped
         // time in steady state; the war slows, it does not lose
         // seconds).
+        //
+        // AGG-3 — the DoCompressionLoop clamp under the preset: while
+        // action is live in the observer bubble, the feed holds at 1×
+        // (the reference's campaign.cpp:2394-2520 rule — the FM the
+        // player is watching never meets compression). The preset is
+        // untouched (the radio keeps the user's request), the
+        // delivery governor's scale carries over (the CPU's answer
+        // stays the CPU's answer), and the clamp lifts the moment the
+        // bubble clears — no governor reset, no fake full-feed spike.
+        const double preset =
+            bubble_action_.load(std::memory_order_relaxed)
+                ? std::min(speed_.load(), 1.0)
+                : speed_.load();
         const double sim_seconds =
-            wall_sec * speed_.load() * delivery_scale_.load();
+            wall_sec * preset * delivery_scale_.load();
         int clean_batches = clean_batches_.load(std::memory_order_relaxed);
 
         {

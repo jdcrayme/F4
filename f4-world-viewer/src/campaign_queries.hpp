@@ -91,6 +91,10 @@ struct SessionStats {
     int synthetic_aggregates{0};
     int agg_contacts{0};
     int deferred_releases{0};
+    // AGG-3: the DoCompressionLoop state — deaggregated flights live
+    // inside the observer bubble right now (the stats query's additive
+    // tail; a pacing host holds its feed at 1× while this reads > 0).
+    int bubble_live{0};
     bool ok{false};
 };
 

@@ -149,6 +149,24 @@ public:
         return time_dilated_.load();
     }
 
+    /// AGG-3 — the DoCompressionLoop state (the authenticity rule):
+    /// TRUE while any deaggregated aircraft is live in the observer
+    /// bubble. While set, the worker's feed holds at 1× — full-fidelity
+    /// aircraft the player is watching never fast-forward (the
+    /// reference's freefalcon-central campaign.cpp:2394-2520 rule).
+    /// The preset radio keeps the user's request; this is the clamp
+    /// under it, and it lifts the moment the bubble clears. ATOMIC-ONLY
+    /// form: the frame scope reads the engine's state under the session
+    /// lock (once per advance — the same cadence the engine recomputes
+    /// it at) and mirrors it here without re-locking (the
+    /// set_paused_flag shape).
+    void set_bubble_action(bool a) noexcept {
+        bubble_action_.store(a, std::memory_order_relaxed);
+    }
+    [[nodiscard]] bool bubble_action() const noexcept {
+        return bubble_action_.load(std::memory_order_relaxed);
+    }
+
     /// Rolling MEASURED rate — sim seconds advanced per wall second
     /// (EMA over the worker's batches; 0 while paused). The UI compares
     /// this with speed(): a preset the CPU can't sustain delivers less
@@ -203,6 +221,7 @@ private:
 
     std::atomic<bool> stop_{false};
     std::atomic<bool> paused_;
+    std::atomic<bool> bubble_action_{false};   // AGG-3: the 1× hold
     std::atomic<double> speed_{1.0};
     std::atomic<double> delivery_scale_{1.0};   // AIMD governor, (0, 1]
     std::atomic<int> clean_batches_{0};         // governor's recover streak

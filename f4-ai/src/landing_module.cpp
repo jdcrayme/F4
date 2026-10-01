@@ -7,6 +7,8 @@
 #include <f4/math/constants.hpp>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 
 namespace f4::ai::modules {
@@ -388,6 +390,8 @@ LandingModule::build_sm()
             // for the straight-in do-not-climb hold (see the altitude
             // target selection in controls_for_state).
             intercept_entry_alt_ft_ = current_alt_msl_ft_;
+            // The floor's convergence spare measures from THIS entry.
+            prev_establish_lateral_ft_ = 1.0e9;
         })
         .on_enter(LandingState::OnFinal, [this](const LandingEvent&) {
             // Established inbound: request clearance to land.
@@ -439,7 +443,11 @@ LandingModule::build_sm()
                 atc::GoAroundMessage msg;
                 msg.aircraft_id = ownship_id_;
                 msg.runway_id = runway_id_;
-                msg.reason = cleared_to_land_ ? "threshold_overflown" : "not_cleared";
+                msg.reason = !ga_reason_.empty()
+                                 ? ga_reason_.c_str()
+                                 : (cleared_to_land_ ? "threshold_overflown"
+                                                     : "not_cleared");
+                ga_reason_.clear();
                 msg.airbase_id = airbase_id;
                 bus_->publish(msg);
             }
@@ -501,6 +509,33 @@ void LandingModule::initialize(std::uint64_t ownship_id,
                 // Keep the ratio form for larger offsets; the floor
                 // ensures small offsets use at least R.
                 intercept_lead_ft = std::max(intercept_lead_ft, R_ft);
+            }
+        }
+        // CAMP-FAF — anchor a REAL final approach fix when the
+        // configured entry fix is not one. The campaign's approach
+        // hands off at the route's last waypoint — the landing
+        // waypoint at the AIRBASE CENTER: along ≈ 0..+3500 ft, i.e.,
+        // ON the runway. ProceedToFix from there captures the fix
+        // over the field, fails the establish floor immediately (the
+        // aircraft is past it), and go-arounds — forever (the user's
+        // "overflying the runway, always going around"). The scenario
+        // path's authors place the entry fix out on the approach; the
+        // campaign path gets a FAF synthesized from the clearance:
+        // 5 nm out on the extended centerline, where the 3-deg beam
+        // sits at ~1,570 ft — the intercept's tuned pattern-altitude
+        // catch-down envelope. The along guard keeps hand-authored
+        // scenario fixes (30k ft out) untouched.
+        {
+            const double cx = std::sin(runway_heading_rad_);
+            const double cy = std::cos(runway_heading_rad_);
+            const double along_fix =
+                (entry_fix_.x - threshold_position_.x) * cx +
+                (entry_fix_.y - threshold_position_.y) * cy;
+            constexpr double kFafOutFt = 30000.0;   // 5 nm
+            if (along_fix > -kFafOutFt * 0.5) {
+                entry_fix_.x = threshold_position_.x - cx * kFafOutFt;
+                entry_fix_.y = threshold_position_.y - cy * kFafOutFt;
+                entry_fix_.z = threshold_alt_ft_ + 1500.0;
             }
         }
         // STAB-E9: latch instead of inline sm_.process() — the StubATC
@@ -1008,7 +1043,40 @@ void LandingModule::check_established() {
     // crosser through the missed-approach plane (observed: OnFinal entry
     // at 82 deg heading 15.8k out, threshold overflown at 1,905 ft AGL,
     // 1,285 ft off centerline).
-    if (course_along_ft() > -establish_floor_ft) {
+    // The gate geometry first: the floor is a NOT-CONVERGING guard,
+    // not a distance deadline. The CAMP-FAF QC measured a stable
+    // approach (on course, on speed, descending) at the floor still
+    // ~300-500 ft above the beam — the old floor fired on DISTANCE a
+    // few seconds before the beam gate could pass, and the aircraft
+    // go-arounded at 7,000 ft, forever.
+    const double hdg_err_floor = std::abs(AirSteering::heading_error(
+        runway_heading_rad_, current_heading_rad_));
+    const double lat_now = std::abs(course_lateral_ft());
+    const double hdg_now = hdg_err_floor;
+    // Converging on ANY axis: the lateral closing, or the nose still
+    // sweeping onto the course (a turn-back at the floor is a working
+    // intercept, not a missed approach). Per-tick thresholds: the
+    // lateral needs ~0.5 ft of closure, the heading ~0.3 deg of
+    // sweep.
+    const bool converging =
+        lat_now < prev_establish_lateral_ft_ - 0.5 ||
+        hdg_now < prev_establish_hdg_err_rad_ - 0.005;
+    prev_establish_lateral_ft_ = lat_now;
+    prev_establish_hdg_err_rad_ = hdg_now;
+    const bool stable_shape =
+        hdg_now < establish_hdg_tol_rad &&
+        (lat_now < establish_lateral_ft || converging);
+    if (course_along_ft() > -establish_floor_ft &&
+        !stable_shape && !converging) {
+        ga_reason_ = "intercept_not_established";
+        if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+            std::fprintf(stderr,
+                         "[land-dbg] floor: along %.0f vcas %.0f alt %.0f agl %.0f vs %.0f on_ground %d\n",
+                         " hdg %.2f lat %.0f beam %.0f settled %.0f\n",
+                         course_along_ft(), current_vcas_kts_, current_alt_msl_ft_,
+                         current_alt_agl_ft_, current_vs_fpm_,
+                         on_ground_ ? 1 : 0);
+        }
         sm_.process(LandingEvent::GoAround);
         return;
     }
@@ -1074,6 +1142,14 @@ void LandingModule::check_flare_or_goaround() {
         return;
     }
     if (current_alt_agl_ft_ < dh_goaround_agl_ft && !cleared_to_land_) {
+        if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+            std::fprintf(stderr,
+                         "[land-dbg] DH go-around: agl %.0f dh %.0f "
+                         "cleared %d along %.0f ownship %llu\n",
+                         current_alt_agl_ft_, dh_goaround_agl_ft,
+                         cleared_to_land_ ? 1 : 0, course_along_ft(),
+                         static_cast<unsigned long long>(ownship_id_));
+        }
         sm_.process(LandingEvent::GoAround);
         return;
     }

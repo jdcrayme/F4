@@ -5,6 +5,44 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## AGG-3 — the spawn policy's last half: the DoCompressionLoop clamp
+
+The aggregate-clock plan's AGG-3 (Docs/AGGREGATE_CLOCK_PLAN.md §4),
+closed as-built: the spawn half (synthetic ATM intents as AGGREGATES)
+rode FID-5's `synthetic_as_aggregates` all along — the section was
+stale; what landed here is the rule's remaining half, the reference's
+`DoCompressionLoop` authenticity rule:
+
+- **`Stats::bubble_live`** (f4-simulation) — deaggregated (Tier-B)
+  flights whose live lead sits inside the observer bubble right now;
+  the DEAGG radius over `live_lead_position_`, recomputed per
+  `refresh_stats_` (O(live flights), usually 0). Deaggregated alone is
+  not the rule — a force-deagged test flight, an ops takeoff at a far
+  airbase, a combat window over the horizon never hold the player's
+  clock; the fight being WATCHED does. The session publishes; it never
+  paces (plan §2.2).
+- **The wire** (f4-campaign-api): the `stats` query carries
+  `bubble_live` at the DTO tail (additive, plan §11; protocol version
+  unchanged); the StatsView golden and the host's vocabulary pin
+  re-pinned with the new last key.
+- **The clamp** (f4-world-viewer): `CampaignClientRunner::
+  set_bubble_action()` — the frame scope mirrors the engine's state
+  once per advance, and the worker holds its feed at 1× while the flag
+  is up. The preset radio keeps the user's request, the AIMD
+  delivery-governor scale carries over, and the clamp lifts the moment
+  the bubble clears (no governor reset, no fake full-feed spike). The
+  speed row shows `1x — action in bubble` while held; the
+  camera-bubble checkbox is the knob (bubble off → the clamp never
+  fires).
+- **Pins**: `FidelityTiers.BubbleLiveCountsObserverBubbleAction`
+  (no bubble = 0; force deagg OUTSIDE a far bubble = 0 — deaggregated
+  is not enough; the bubble over the lead = 1; the fold = 0),
+  `CampaignClientRunner.BubbleActionHoldsTheFeedAtOneX` (with the
+  no-flag control at the same preset) +
+  `BubbleActionClearResumesThePreset`, and the wire tail re-pins. The
+  pre-existing suite's failures are the CAMP-TOT-PACE re-pins,
+  unchanged (stash-and-rebuild comparison).
+
 ## AGG-2b — the air-picture roster: the SpatialIndex wired + the per-unit detection cadences
 
 The aggregate-clock plan's third tranche (Docs/AGGREGATE_CLOCK_PLAN.md

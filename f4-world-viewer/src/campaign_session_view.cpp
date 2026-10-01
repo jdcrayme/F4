@@ -440,6 +440,14 @@ void ViewerApp::Impl::refresh_session_snapshot() {
     session_snap = fetch_snapshot(*session, show_threat_overlay);
     session_snap_serial = serial;
     session_snap_valid = true;
+    // AGG-3 — mirror the engine's DoCompressionLoop state into the
+    // runner (atomic-only, lock-free). The snapshot refresh runs under
+    // the frame lock once per advance — exactly the cadence the engine
+    // recomputes bubble_live at; the worker clamps its feed to 1× while
+    // the flag holds (the reference's authenticity rule).
+    if (session_runner) {
+        session_runner->set_bubble_action(session_snap.stats.bubble_live > 0);
+    }
 }
 
 std::string ViewerApp::session_exit_summary() const {
@@ -704,6 +712,16 @@ void ViewerApp::draw_campaign_session_view() {
                 impl_->session_runner->set_speed(kSessionSpeedTable[i]);
             }
         }
+    }
+
+    // AGG-3 — surface the authenticity clamp: the radio still reads the
+    // user's preset, but the feed is held at 1× while deaggregated
+    // action is live in the observer bubble (the DoCompressionLoop
+    // rule). Disabled text — a state readout, not a control.
+    if (impl_->session_runner && impl_->session_runner->bubble_action() &&
+        impl_->session_runner->speed() > 1.0) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("1x — action in bubble");
     }
 
     // V-3DLIVE: the camera bubble — when on (default), zooming in past

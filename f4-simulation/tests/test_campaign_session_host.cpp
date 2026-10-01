@@ -364,7 +364,10 @@ TEST(CampaignSessionHost, StatsQueryCarriesTheCounterVocabulary) {
     EXPECT_NE(out.find("\"cycles\":0"), std::string::npos);
     EXPECT_NE(out.find("\"live_aircraft\":"), std::string::npos);
     EXPECT_NE(out.find("\"agg_contacts\":"), std::string::npos);
-    EXPECT_NE(out.find("\"deferred_releases\":0}"), std::string::npos);
+    // AGG-3: the DoCompressionLoop state rides the additive tail
+    // (plan §11) — the wire re-pins with the new last key.
+    EXPECT_NE(out.find("\"deferred_releases\":0,\"bubble_live\":0}"),
+              std::string::npos);
 }
 
 TEST(CampaignSessionHost, FlightsQueryCarriesTheCraftedFlight) {

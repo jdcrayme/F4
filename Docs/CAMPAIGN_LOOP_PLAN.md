@@ -739,6 +739,32 @@ follow-up refinement, documented here.
   viewer arms it) launches the initial cycle's wave inside the first
   ops window — `live 49 (48 airborne)` at +2 min after — while the
   deliveries keep the planner's schedule.
+- **CAMP-LAND — the landing chain (QC 2026-09-30, mostly closed, the
+  final tune open)** — "nothing is landing; they overfly the runway
+  and always go around." Three landed fixes: (1) the campaign path
+  never registered its per-airbase fields with the ATC — every
+  approach answered with the stub's default field (the flyaway);
+  (2) the approach's entry fix was the landing waypoint at the
+  AIRBASE CENTER — the aircraft captured the fix over the field,
+  failed the establish floor instantly, and go-arounded forever; the
+  clearance now synthesizes a real FAF (5 nm out on the extended
+  centerline, where the 3-deg beam meets pattern altitude); (3) the
+  establish-floor semantics — the floor fired on DISTANCE alone, and
+  a stable approach (on course, on speed, ~300-500 ft high) was
+  floor-fired seconds before the beam gate could pass; the floor now
+  spares a converging/aligned approach (per-tick lateral and heading
+  trends), and the go-around REASON is truthful
+  (intercept_not_established / not_cleared / threshold_overflown).
+  MEASURED after: OnFinal engages, the aircraft requests and receives
+  cleared-to-land — then overflies the threshold ~500 ft high
+  (threshold_overflown) and the re-attack holds in InterceptFinal.
+  OPEN: the OnFinal/flare tune for the campaign FAF geometry (the
+  module's 30-fix STAB history is tuned on scenario approaches that
+  enter low and close-in; the campaign entry is a 5-nm, 1,500-ft
+  pattern-altitude intercept) — a flight-controls tranche, not a
+  plumbing one. The gated repro (test_campaign_stock_landing,
+  F4_STOCK_WORLD) carries the full assertion chain.
+
 - **AIRWAR-QC — TOT adherence (QC 2026-09-30, open)** — the
   F4_STOCK_WORLD-gated harness (test_campaign_airwar_qc) ran a
   524-flight, 6-h measured war over the canonical save1 export with

@@ -53,6 +53,10 @@ std::filesystem::path stock_class_table(
 
 } // namespace
 
+namespace {
+std::int64_t g_epoch = 0;
+} // namespace
+
 TEST(CampaignStockLanding, AbortedWaveFlightConvergesAndLands) {
     auto world = stock_world();
     if (world.empty()) {
@@ -81,10 +85,27 @@ TEST(CampaignStockLanding, AbortedWaveFlightConvergesAndLands) {
     std::string err;
     auto session = CampaignSession::create(opts, &err);
     ASSERT_NE(session, nullptr) << err;
+    g_epoch = session->campaign_time();
 
     // The wave launches inside the first ops window: ~10 min of
     // campaign time puts live aircraft over the map.
-    session->advance(600.0);
+    for (int probe = 0; probe < 20; ++probe) {
+        session->advance(30.0);
+        const auto& st = session->stats();
+        const auto& rr = session->flight_engine()->flights();
+        int susp = 0, scrubbed = 0, agg = 0;
+        for (const auto& f : rr) {
+            if (f.suspended) ++susp;
+            else if (f.scrubbed) ++scrubbed;
+            else ++agg;
+        }
+        std::fprintf(stderr,
+                     "[probe %3d s] rows %d susp %d agg %d scrub %d "
+                     "aircraft %d deaggs %d reaggs %d\n",
+                     (probe + 1) * 30, static_cast<int>(rr.size()), susp,
+                     agg, scrubbed, st.live_aircraft, st.tier_deaggs,
+                     st.tier_reaggs);
+    }
     {
         const auto& st = session->stats();
         std::fprintf(stderr, "[stock] cycles %d intents %d routes %d/%d "
@@ -112,6 +133,36 @@ TEST(CampaignStockLanding, AbortedWaveFlightConvergesAndLands) {
     // aircraft means the FIRST clearance is usually someone else's.
     std::unordered_map<std::uint64_t, f4::ai::atc::LandingClearance>
         clearances;
+    // The go-around reasons: WHERE the procedure breaks. MASKED by the
+    // tracked aircraft (an unmasked capture mixes the whole wave's
+    // approaches into one misleading pile).
+    std::vector<std::pair<int, std::string>> go_arounds;
+    std::uint64_t tracked_eid = 0;   // resolved in Phase A
+    auto ga_sub = session->sim().bus().subscribe<
+        f4::ai::atc::GoAroundMessage>(
+        [&](const f4::ai::atc::GoAroundMessage& m) {
+            if (tracked_eid != 0 && m.aircraft_id != tracked_eid) return;
+            go_arounds.emplace_back(
+                static_cast<int>(session->campaign_time() - g_epoch),
+                m.reason);
+        });
+    // Did the ATC ever grant cleared-to-land for the tracked aircraft?
+    int cleared_count = 0;
+    auto ctl_sub = session->sim().bus().subscribe<
+        f4::ai::atc::ClearedToLand>(
+        [&](const f4::ai::atc::ClearedToLand& m) {
+            if (tracked_eid != 0 && m.aircraft_id == tracked_eid) {
+                ++cleared_count;
+            }
+        });
+    int approach_reqs = 0;
+    auto ar_sub = session->sim().bus().subscribe<
+        f4::ai::atc::ApproachClearance>(
+        [&](const f4::ai::atc::ApproachClearance& m) {
+            if (tracked_eid != 0 && m.aircraft_id == tracked_eid) {
+                ++approach_reqs;
+            }
+        });
     auto clear_sub = session->sim().bus().subscribe<
         f4::ai::atc::LandingClearance>(
         [&clearances](const f4::ai::atc::LandingClearance& c) {
@@ -174,12 +225,15 @@ TEST(CampaignStockLanding, AbortedWaveFlightConvergesAndLands) {
     // Phase A — fly home: follow with the bubble until the tracked
     // aircraft resolves, never DIVERGING from the landing waypoint.
     std::uint64_t aircraft_id = 0;
-    double prev = dist_to_land();
-    ASSERT_GE(prev, 0.0);
     int diverged = 0;
+    double prev = -1.0;
     for (int i = 0; i < 240 && aircraft_id == 0; ++i) {
         follow_bubble();
         session->advance(10.0);
+        if (prev < 0.0) {
+            prev = dist_to_land();
+            continue;   // wait for a live sample before pacing counts
+        }
         const double d = dist_to_land();
         if (d < 0.0) break;   // folded (bubble dropped) — aggregate path
         if (d > prev + 5.0) ++diverged;
@@ -189,6 +243,7 @@ TEST(CampaignStockLanding, AbortedWaveFlightConvergesAndLands) {
             const auto* org = h.get<CampaignOriginComponent>();
             if (org != nullptr && org->flight_vu == (vu & 0xFFFFu)) {
                 aircraft_id = eid.value;
+                tracked_eid = eid.value;
                 break;
             }
         }
@@ -202,9 +257,27 @@ TEST(CampaignStockLanding, AbortedWaveFlightConvergesAndLands) {
     // field — a theater point near the landing waypoint, not the
     // origin default (the pre-fix flyaway).
     for (int i = 0;
-         i < 120 && clearances.find(aircraft_id) == clearances.end(); ++i) {
+         i < 300 && clearances.find(aircraft_id) == clearances.end(); ++i) {
         follow_bubble();
         session->advance(10.0);
+        if (i % 30 == 29) {
+            for (const auto eid : session->sim().aircraft_entities()) {
+                f4::entities::EntityHandle h(eid, &session->sim().world());
+                const auto* org = h.get<CampaignOriginComponent>();
+                if (org == nullptr ||
+                    org->flight_vu != (vu & 0xFFFFu))
+                    continue;
+                const auto* brain = h.get<f4::ai::BrainComponent>();
+                if (brain != nullptr) {
+                    std::fprintf(stderr, "[rtb +%4d s] phase %s landing "
+                                         "%s\n",
+                                 (i + 1) * 10,
+                                 brain->phase_name(),
+                                 brain->landing().state_name().c_str());
+                }
+                break;
+            }
+        }
     }
     ASSERT_TRUE(clearances.count(aircraft_id))
         << "no landing clearance for the tracked aircraft within its "
@@ -221,13 +294,14 @@ TEST(CampaignStockLanding, AbortedWaveFlightConvergesAndLands) {
                "answered with the wrong field (the flyaway)";
     }
 
-    // Phase B — the approach ENGAGES: with the clearance in hand the
-    // landing FSM leaves RequestApproach (ProceedToFix or later) and
-    // the state keeps PROGRESSING (the old flyaway sat in one state
-    // while the aircraft streamed away).
+    // Phase B — the approach FLYS TO TOUCHDOWN: the landing FSM leaves
+    // RequestApproach, positions behind the FAF (CAMP-FAF), and the
+    // run must reach the runway (Rollout/TaxiIn/Parked). The old shape
+    // overflew the field and go-arounded forever.
     std::string last_state;
     int stuck = 0;
-    for (int i = 0; i < 120; ++i) {   // 20 min of campaign time
+    bool touched_down = false;
+    for (int i = 0; i < 360; ++i) {   // 60 min of campaign time
         follow_bubble();
         session->advance(10.0);
         for (const auto eid : session->sim().aircraft_entities()) {
@@ -239,6 +313,9 @@ TEST(CampaignStockLanding, AbortedWaveFlightConvergesAndLands) {
             if (brain == nullptr) break;
             const std::string st = brain->landing().state_name();
             if (st == "RequestApproach") ++stuck;
+            if (st == "Rollout" || st == "TaxiIn" || st == "Parked") {
+                touched_down = true;
+            }
             if (st != last_state) {
                 std::fprintf(stderr, "[approach +%4d s] %s\n",
                              (i + 1) * 10, st.c_str());
@@ -246,11 +323,19 @@ TEST(CampaignStockLanding, AbortedWaveFlightConvergesAndLands) {
             }
             break;
         }
+        if (touched_down) break;
     }
     EXPECT_NE(last_state, "")
         << "the landing FSM never engaged (no Approach phase transition)";
-    EXPECT_LT(stuck, 60)
-        << "the landing FSM sat in RequestApproach for " << stuck
-        << " of 120 samples";
+    for (const auto& [t, reason] : go_arounds) {
+        std::fprintf(stderr, "[go-around t+%d s] reason: %s\n", t,
+                     reason.c_str());
+    }
+    EXPECT_TRUE(touched_down)
+        << "the aircraft never reached the runway (last landing state: "
+        << last_state << ")";
+    std::fprintf(stderr, "[ATC] approach requests %d cleared-to-land %d "
+                         "go-arounds %zu\n",
+                 approach_reqs, cleared_count, go_arounds.size());
 }
 

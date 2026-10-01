@@ -103,6 +103,10 @@ struct StatsView {
     int synthetic_aggregates{0};
     int agg_contacts{0};
     int deferred_releases{0};
+    // AGG-3 — the DoCompressionLoop state (additive tail, plan §11):
+    // deaggregated flights live inside the observer bubble right now;
+    // a pacing host holds its feed at 1× while this reads non-zero.
+    int bubble_live{0};
 };
 
 namespace detail {
@@ -162,9 +166,10 @@ inline void encode(f4::json::Writer& w, const StatsView& s) {
     detail::int_key(w, "combat_deaggs", s.combat_deaggs);
     detail::int_key(w, "synthetic_aggregates", s.synthetic_aggregates);
     detail::int_key(w, "agg_contacts", s.agg_contacts);
-    // last key — no trailing comma
-    w.raw("\"deferred_releases\":");
-    w.number(s.deferred_releases);
+    detail::int_key(w, "deferred_releases", s.deferred_releases);
+    // AGG-3 — last key, no trailing comma
+    w.raw("\"bubble_live\":");
+    w.number(s.bubble_live);
     w.put('}');
 }
 

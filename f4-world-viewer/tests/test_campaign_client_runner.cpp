@@ -243,6 +243,54 @@ TEST(CampaignClientRunner, EffectiveSpeedTracksRunningRate) {
 }
 
 // ---------------------------------------------------------------------------
+// AGG-3 — the DoCompressionLoop clamp (the authenticity rule)
+// ---------------------------------------------------------------------------
+
+// While action is live in the observer bubble, the feed holds at 1× —
+// full-fidelity aircraft the player is watching never fast-forward. The
+// preset is untouched; the control (same preset, no flag) shows what the
+// unclamped feed delivers.
+TEST(CampaignClientRunner, BubbleActionHoldsTheFeedAtOneX) {
+    MockSession session;
+    CampaignClientRunner runner(session, kTickSec, 60.0, /*paused=*/false);
+    runner.set_bubble_action(true);   // set BEFORE start: no unclamped burst
+    runner.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    runner.stop();
+    const double held_rate = session.ticks() * kTickSec / 0.6;
+    EXPECT_GT(held_rate, 0.25);   // it feeds real time
+    EXPECT_LT(held_rate, 4.0);    // ...and NOWHERE near the 60× preset
+
+    // The control: the same preset, no action flag — the feed is the
+    // preset's (the instant mock never caps; AIMD stays at 1.0).
+    MockSession plain;
+    CampaignClientRunner plain_runner(plain, kTickSec, 60.0,
+                                      /*paused=*/false);
+    plain_runner.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    plain_runner.stop();
+    const double free_rate = plain.ticks() * kTickSec / 0.6;
+    EXPECT_GT(free_rate, 10.0);   // the unclamped feed runs at the preset
+    EXPECT_FALSE(plain_runner.bubble_action());
+}
+
+// The clamp lifts the moment the bubble clears: the held window parks
+// the measured rate near 1×, and after the flag drops the EMA climbs
+// back to the preset's league.
+TEST(CampaignClientRunner, BubbleActionClearResumesThePreset) {
+    MockSession session;
+    CampaignClientRunner runner(session, kTickSec, 60.0, /*paused=*/false);
+    runner.set_bubble_action(true);
+    runner.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    runner.set_bubble_action(false);
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    runner.stop();
+    EXPECT_FALSE(runner.bubble_action());
+    EXPECT_GT(runner.effective_speed(), 10.0);   // the preset resumed
+}
+
+// ---------------------------------------------------------------------------
 // the FIFO lock discipline (the starvation regression)
 // ---------------------------------------------------------------------------
 

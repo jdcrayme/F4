@@ -390,6 +390,65 @@ TEST(FidelityTiers, CameraBubbleDeaggsAndDroppedBubbleReaggs) {
     EXPECT_EQ(rig.session->sim().aircraft_entities().size(), 0u);
 }
 
+// ── 6b. AGG-3 — the bubble-action state (the DoCompressionLoop feed) ────────
+//
+// The stats query's bubble_live term: deaggregated AND live inside the
+// observer bubble. Deaggregation alone is not the rule — a force-deagged
+// flight outside the view, an ops takeoff at a far airbase, a combat
+// window over the horizon never hold the player's clock; the fight being
+// WATCHED does.
+
+TEST(FidelityTiers, BubbleLiveCountsObserverBubbleAction) {
+    if (!std::filesystem::exists(f16_config_path())) {
+        GTEST_SKIP() << "f16.json fixture not generated";
+    }
+    auto opts = base_opts();
+    opts.fidelity_policy = FidelityPolicy::Tiered;
+    opts.deagg_cooldown_sec = 5.0;
+    auto rig = TierRig::make(opts);
+    ASSERT_NE(rig.session, nullptr);
+
+    rig.session->advance(600.0);   // the flight moved off-base
+    const auto tiers = rig.session->flight_tiers();
+    ASSERT_EQ(tiers.size(), 1u);
+    // No bubble: nothing is observable, the action state reads zero.
+    EXPECT_EQ(rig.session->stats().bubble_live, 0);
+
+    // A bubble parked FAR from the flight (the flight is at its
+    // aggregate; the bubble 100 kft east): the force deagg materializes
+    // live aircraft, but they are NOT in the bubble — deaggregated is
+    // not enough. (The force pin also keeps the fold out of the way:
+    // force holds until force_reaggregate, so the only thing that can
+    // move the count is the predicate itself.)
+    const f4::geo::WorldPosition far_center(
+        tiers[0].x_grid * 1024.0 + 100000.0, tiers[0].y_grid * 1024.0, 0.0);
+    rig.session->set_view_bubble(5120.0, far_center);
+    rig.session->force_deaggregate_flight(rig.flight_vu());
+    ASSERT_EQ(rig.session->stats().agg_live, 1);
+    EXPECT_EQ(rig.session->stats().bubble_live, 0);
+
+    // The bubble over the live lead: the state lights up (the frame
+    // scope's mirror would now hold the feed at 1×).
+    ASSERT_EQ(rig.session->sim().aircraft_entities().size(), 1u);
+    EntityHandle h(rig.session->sim().aircraft_entities().front(),
+                   &rig.session->sim().world());
+    const auto* tf = h.get<f4::entities::TransformComponent>();
+    ASSERT_NE(tf, nullptr);
+    rig.session->set_view_bubble(5120.0, tf->position);
+    rig.session->advance(2.0);   // a whole-second pass refreshes stats
+    EXPECT_EQ(rig.session->stats().agg_live, 1);
+    EXPECT_EQ(rig.session->stats().bubble_live, 1);
+
+    // The fold drops the state with the aircraft: the feed the rule
+    // holds is the fight IN the bubble, and the fold removes both.
+    // (The force pin holds through the bubble moves above — the fold
+    // is explicit, exactly like the viewer's R button.)
+    rig.session->force_reaggregate_flight(rig.flight_vu());
+    EXPECT_EQ(rig.session->stats().agg_live, 0);
+    EXPECT_EQ(rig.session->stats().bubble_live, 0);
+    EXPECT_EQ(rig.session->sim().aircraft_entities().size(), 0u);
+}
+
 // ── 7. The ops window: a pre-takeoff GROUND spawn ──────────────────────────
 
 TEST(FidelityTiers, OpsWindowDeaggsGroundSpawnForTakeoff) {

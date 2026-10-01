@@ -3398,6 +3398,9 @@ void CampaignSession::refresh_stats_() {
         stats_.synthetic_aggregates = synthetic_registered_;
         stats_.agg_contacts = static_cast<int>(aggregate_contacts_.size());
         stats_.deferred_releases = sim_->deferred_releases();
+        // AGG-3: the DoCompressionLoop state (the host's auto-1× rule
+        // reads it — the session publishes, it never paces).
+        stats_.bubble_live = count_bubble_live_();
     }
     stats_.live_aircraft = static_cast<int>(sim_->aircraft_entities().size());
     stats_.retired = sim_->retired_aircraft();
@@ -3407,6 +3410,31 @@ void CampaignSession::refresh_stats_() {
         if (fm && fm->model().state().gear.inAir) ++stats_.airborne;
     }
     stats_.sim_time_s = sim_->sim_time_s();
+}
+
+int CampaignSession::count_bubble_live_() const {
+    // AGG-3 — the DoCompressionLoop state. Deaggregated is not enough:
+    // a flight the rule holds the clock for must be LIVE inside the
+    // observer bubble. The radius is the DEAGG radius (the same test
+    // the bubble trigger itself applies — the reagg band is the
+    // hysteresis, not the observation), and the position is the live
+    // lead's (live_lead_position_ — the one definition of "the lead is
+    // here" the fold and the tier rules share). A flight deaggregated
+    // for ops far away, a force-deagged test flight, a combat window
+    // outside the view — none of them hold the player's clock; the
+    // fight you are WATCHING does.
+    if (!air_bubble_active_ || deaggregated_.empty()) return 0;
+    const double r2 = air_bubble_radius_ft_ * air_bubble_radius_ft_;
+    int live_in_bubble = 0;
+    for (const auto& [vu, rec] : deaggregated_) {
+        (void)vu;
+        f4::geo::WorldPosition pos{};
+        if (!live_lead_position_(rec, pos)) continue;
+        const double dx = pos.x - air_bubble_center_.x;
+        const double dy = pos.y - air_bubble_center_.y;
+        if (dx * dx + dy * dy <= r2) ++live_in_bubble;
+    }
+    return live_in_bubble;
 }
 
 } // namespace f4::simulation
