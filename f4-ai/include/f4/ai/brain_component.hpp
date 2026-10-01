@@ -538,6 +538,16 @@ public:
         // the FAF and turning 180° back onto it. The early handoff
         // lets the procedure position the aircraft on the approach
         // course inbound, and the FAF capture turns it onto final.
+        //
+        // CAMP-FAF-GUARD (REPAIR): the out-of-range/OUTBOUND case must
+        // SKIP THE HANDOFF, not the update. The old guard ended in a
+        // bare `return` — every aircraft further than 5.4 nm from its
+        // route's end (i.e., the ENTIRE enroute phase of any real
+        // campaign route) stopped running the module switch, the nav
+        // never flew, and the FM consumed cleared-to-idle defaults
+        // (throttle 0, gear down — the input slot clears every tick)
+        // until the aircraft coasted into the terrain. The whole
+        // campaign's deck-level glides traced to this one word.
         if (phase_ == Phase::Enroute && !plan_.route.empty() &&
             !nav_.is_complete()) {
             // (The inbound-direction guard below replaces the old
@@ -563,24 +573,26 @@ public:
                 const double hx = std::sin(own_state->heading_rad());
                 const double hy = std::cos(own_state->heading_rad());
                 const bool inbound = dx * hx + dy * hy > 0.0;
-                if (!inbound ||
-                    dx * dx + dy * dy >=
-                        kApproachHandoffFt * kApproachHandoffFt) {
-                    return;
+                const bool in_range = dx * dx + dy * dy <
+                                      kApproachHandoffFt * kApproachHandoffFt;
+                if (inbound && in_range) {
+                    auto* world = owner_.world();
+                    if (!world) {
+                        phase_ = Phase::Complete;
+                        return;
+                    }
+                    const auto& entry_fix = plan_.route.back().position;
+                    landing_.configure(entry_fix, plan_.taxi_in_route);
+                    landing_.fly_traffic_pattern = plan_.fly_traffic_pattern;
+                    landing_.airbase_id = takeoff_.airbase_id;
+                    landing_.air_steering.reset_integrators();
+                    landing_.pattern_steering.reset_integrators();
+                    landing_.initialize(owner_.id().value, *world, bus);
+                    phase_ = Phase::Approach;
                 }
-                auto* world = owner_.world();
-                if (!world) {
-                    phase_ = Phase::Complete;
-                    return;
-                }
-                const auto& entry_fix = plan_.route.back().position;
-                landing_.configure(entry_fix, plan_.taxi_in_route);
-                landing_.fly_traffic_pattern = plan_.fly_traffic_pattern;
-                landing_.airbase_id = takeoff_.airbase_id;
-                landing_.air_steering.reset_integrators();
-                landing_.pattern_steering.reset_integrators();
-                landing_.initialize(owner_.id().value, *world, bus);
-                phase_ = Phase::Approach;
+                // else: stay Enroute — the navigation module owns the
+                // jet this tick (the fall-through the old `return`
+                // prevented).
             }
         }
         if (phase_ == Phase::Enroute && nav_.is_complete()) {

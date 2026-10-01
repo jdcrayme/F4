@@ -152,19 +152,76 @@ CommittedFighter 1, ResultSink.DirtySync 1).
   and the zombie detector. The stock-landing test stays RED until T3+T4
   (its flight now dies honestly instead of zombie-cruising — expected).
 
-### T2 — waypoint altitude hygiene
+### T2 — the route-flight fix (CAMP-FAF-GUARD) — **LANDED (2026-10-01)**
 
-- Audit every route producer: the C3 `RouteBuilder`, the ATM pipeline's
-  route planning, the saved-route decode, the splice/append paths.
-  Every waypoint carries MSL altitude = the planned AGL over the
-  terrain it sits on; departure legs carry climb-to-cruise, delivery
-  legs the profile altitude, home legs the descent — never deck.
-- Nav-side floor: the altitude command clamps to ≥ terrain MSL + a
-  safety AGL along the leg (3-sample check — the threat sampler's own
-  shape).
-- **Gate**: no generated route leg descends below terrain+AGL (pinned
-  by test over the fixture save); the BARCAP flight holds cruise to its
-  station; exit 3's zombie window is gone.
+As-built, and a lesson in instrumented triage: the tranche's named
+scope (waypoint altitude floors) turned out to be ALREADY SATISFIED —
+the bridge floors every waypoint (500 ft, 1,500 ft for delivery), the
+nav floors en-route targets at 3,000 ft MSL, and the decoded BARCAP
+routes carry sane 2,500-ft station altitudes. The decks the aircraft
+descended to were never waypoint altitudes at all. The trace's command
+columns (idle throttle + gear down + zero pitch from the exact tick the
+brain handed off to Enroute) led past three red herrings (the flare
+timeout, the splice, the nav cursor) to the true root cause, one word
+wide:
+
+**The CAMP-FAF approach-handoff guard ended in a bare `return`**
+(`brain_component.hpp`, introduced with STEP-14): when the aircraft was
+NOT within the 33,000-ft initial-approach range of its route's end —
+i.e., for the ENTIRE enroute phase of any real campaign route — the
+brain update returned before the module switch. The navigation module
+never flew a single tick; the flight model consumed cleared-to-idle
+defaults (throttle 0, gear down — the input slot clears every tick, and
+`PilotInput{}` is documented "catastrophic in flight") until the
+aircraft coasted into the terrain. Every deck-level glide, every
+never-advancing nav cursor, every "random direction" (a straight
+ballistic coast), and 94 of the T1 war's 94 terrain deaths traced to
+this one word. Short scenario routes (the digi fixtures, ends within
+5.4 nm) passed the guard — which is exactly why the scenario path
+always flew while the campaign path never did.
+
+The fix: the guard now SKIPs ONLY THE HANDOFF — the in-range-and-
+inbound check arms the approach when it passes and falls through to the
+module switch when it doesn't (the nav owns the jet every other tick).
+
+Measured (Release, this machine):
+- BARCAP 40-min filtered run: the flight climbs, cruises its station
+  legs, RTBs, and the APPROACH ENGAGES (ProceedToFix → InterceptFinal,
+  descending through pattern altitude) — **airborne 2/2 at end, zero
+  losses**, where the same run had booked 2 terrain kills.
+- The armed 0.3-h war: **94-96/96 airborne through the horizon** with
+  17 honest losses (the real A/A merges) and the reaper retiring 16 —
+  versus the pre-fix 96→4 collapse with 94 terrain deaths. All four C5
+  verdicts green, ledger deterministic (MD5 re-pinned).
+- `test_combat_integration`: **15 reds → 2** — the BVR/WVR fight suites
+  were the same coasting-aircraft defect (the fighters never maneuvered
+  onto the merge); 13 suites of A/A combat came alive with the fix.
+  The 2 remaining reds are the GUNS-merge entry pair
+  (AiVersusAiGunsMergeFight + GunsMergeScenarioFilePlaysOut: EAGLE1
+  never enters the WVR rung — the now-real merge geometry vs the 3-NM
+  entry band; T5's first named item).
+- Everything else unchanged: FidelityTiers 13/13, FidelityCombat 6/7
+  (the pre-existing CommittedFighter red), digi-mission 14 (the
+  pre-existing Windows set), EventStream 2 + CampaignSession
+  BigCatchUp/Straddled 2 (the documented CAMP-TOT-PACE set),
+  campaign-aar + formation green.
+- `GroundContact.EnrouteZombieCrashesAfterTheGrace` re-pinned: the fix
+  makes a live grounded brain SELF-HEAL (the nav lifts it, or the
+  splice's home-leg cursor completes the route and the phase leaves
+  Enroute) — the detector's contract is now pinned mid-route with a
+  wedged FM (dormant, teleport far from every waypoint), the state it
+  actually exists to catch. The healthy-liftoff escape is the test's
+  documented control.
+
+Remaining in flight-control (the plan's forward queue):
+- **T4** owns the approach chain's last defects: the InterceptFinal
+  hold flying AWAY from the field at pattern altitude after the FAF
+  (the establish-floor/intercept geometry — the CAMP-LAND chain's
+  known tune) and the flare. The stock-landing observed flight now
+  descends a real approach (5,580 → 5,050 ft inbound) when its window
+  closes — the chain is alive end to end; the tune is what remains.
+- **T5** owns the WVR entry band vs the now-real merge geometry (the
+  guns-merge pair above) and the combat dive margin.
 
 ### T3 — the ground-spawned Enroute contract
 

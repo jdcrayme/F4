@@ -290,15 +290,26 @@ TEST(GroundContact, EnrouteZombieCrashesAfterTheGrace) {
     KillWatch watch;
     watch.attach(*rig.session, id.value);
 
-    // Force the zombie shape directly: grounded, no transition latch
-    // (inAir flips false WITHOUT an FM update — the ground-spawned
-    // Enroute flight's exact state).
+    // Force the zombie shape MID-ROUTE: grounded, no transition latch,
+    // and an FM that can never rescue itself. With the CAMP-FAF-GUARD
+    // fix the nav module FLIES, and a live brain grounded at its base
+    // self-rescues (the splice lands the cursor on the home leg, the
+    // nav completes, the phase leaves Enroute — healthy behavior the
+    // detector must not fire on). A WEDGED FM mid-route (this freeze —
+    // the state a hung physics step presents, far from every waypoint
+    // so the nav can neither complete nor capture) stays an Enroute
+    // corpse: the state the detector exists to catch.
     {
         EntityHandle h(id, &rig.session->sim().world());
         auto* fm = h.get<f4::flight::FlightModelComponent>();
         ASSERT_NE(fm, nullptr);
-        fm->model().state().gear.inAir = false;
-        fm->model().state().kin.z = -6.0;  // sitting on its gear
+        auto& st = fm->model().state();
+        st.kin.x = 524.0 * 1024.0;  // NED north = grid y * 1024
+        st.kin.y = 545.0 * 1024.0;  // NED east  = grid x * 1024
+        st.kin.z = -6.0;            // sitting on its gear
+        st.kin.vt = 0.0;
+        st.gear.inAir = false;
+        fm->set_dormant(true);  // never updates again: inAir stays false
     }
     for (int s = 0; s < 12 && watch.total == 0; ++s) {
         rig.session->advance(1.0);

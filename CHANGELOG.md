@@ -5,6 +5,27 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## REPAIR-T2 — CAMP-FAF-GUARD: the one-word fix that let the campaign fly
+
+CAMPAIGN_REPAIR_PLAN.md's route-flight tranche. The investigation
+exonerated its named scope (the waypoint altitude floors already
+existed and were sane) and found the real root cause one word wide: the
+CAMP-FAF approach-handoff guard's skip-path was a bare `return` from
+the ENTIRE brain update (a STEP-14 regression) — every aircraft more
+than 5.4 nm from its route's end stopped running the module switch, the
+nav never flew a tick, and the FM consumed cleared-to-idle defaults
+(throttle 0, gear down) until the aircraft coasted into the terrain.
+The fix: the guard skips only the handoff and falls through to the
+module switch. Measured: the BARCAP 40-min run flies its route, RTBs,
+and engages the approach (airborne 2/2, zero losses — was 2 terrain
+kills); the armed 0.3-h war holds 94-96/96 airborne with 17 honest
+combat losses (was the 96-to-4 collapse with 94 terrain deaths);
+`test_combat_integration` went 15 reds to 2 (the A/A fight suites were
+the same coasting defect) with the 2 remaining the guns-merge WVR entry
+band — T5's first named item. The zombie-detector test re-pinned for
+the self-healing nav (wedged-FM mid-route is the contract's shape).
+Docs/CAMPAIGN_REPAIR_PLAN.md §T2 carries the as-built.
+
 ## REPAIR-T1 — ground-contact truth (the terrain-zombie killer)
 
 CAMPAIGN_REPAIR_PLAN.md's keystone tranche, landed as-built: the FM's
