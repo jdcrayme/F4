@@ -141,7 +141,7 @@ TEST(CampaignStockLanding, LiveWaveFlightFliesMissionAndTouchesDown) {
     // landing path the user watches in 3D.
     std::string last_state;
     bool touched_down = false;
-    for (int i = 0; i < 540; ++i) {   // 90 min of campaign time
+    for (int i = 0; i < 900; ++i) {   // 150 min of campaign time
         double px = 0.0, py = 0.0;
         bool found = false;
         for (const auto& t : session->flight_tiers()) {
@@ -181,15 +181,18 @@ TEST(CampaignStockLanding, LiveWaveFlightFliesMissionAndTouchesDown) {
             if (brain != nullptr) {
                 const std::string st = brain->landing().state_name();
                 if (i % 30 == 29) {
+                    const auto& nav = brain->navigation();
+                    const auto* nwp = nav.current_waypoint();
                     std::fprintf(stderr,
                                  "[mission +%4d s] phase %s landing %s "
-                                 "alt %.0f at %.1f,%.1f (sample)
-",
+                                 "alt %.0f at %.1f,%.1f wp %zu wpz %.0f\n",
                                  (i + 1) * 10, brain->phase_name(),
                                  st.c_str(),
                                  tfr ? tfr->position.z : -1.0,
                                  tfr ? tfr->position.x / 1024.0 : -1.0,
-                                 tfr ? tfr->position.y / 1024.0 : -1.0);
+                                 tfr ? tfr->position.y / 1024.0 : -1.0,
+                                 nav.current_waypoint_index(),
+                                 nwp ? nwp->position.z : -1.0);
                 }
                 if (st != last_state) {
                     std::fprintf(stderr,

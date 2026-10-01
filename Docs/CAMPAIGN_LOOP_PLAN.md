@@ -800,6 +800,41 @@ follow-up refinement, documented here.
   own shape. The unit suite (landing module, 27 tests) lands
   start-in-approach aircraft reliably; the gap is purely the
   campaign arrival-path engagement.
+  QC TOOLS ADDED: the [final]/[land-dbg]/[handoff]/[mission wpz]
+  F4_LAND_DEBUG telemetry chain (the OnFinal descent profile, the
+  establish-gate values, the establish-floor fire, the handoff
+  geometry, the nav cursor + target altitude) — the next tranche
+  drives against these directly.
+  DEFINITIVE (the session's last instrumented run, 90-min observed
+  mission): the wave flight launches, goes Enroute, and flies a
+  DEAD-STRAIGHT DECK-LEVEL line (6 ft MSL, ~MinVcas) — passing its
+  ingress and target waypoints without the nav cursor ever
+  advancing (stuck at wp1 = the first ingress, target altitude
+  1,000 ft while the aircraft sits at 6 ft), never turning at the
+  target, never sequencing to the egress/home legs, never engaging
+  the approach. THE NAV WAYPOINT SEQUENCING (capture + cursor
+  advance + the altitude-climb command) not engaging for these
+  campaign spawns is the single remaining root cause: everything
+  downstream (no strike run visible, no RTB, no approach, no
+  landing) follows from it. The nav unit suite passes 26/26 on its
+  own fixtures — the campaign-spawn configuration (the splice +
+  resume_from + the safe-path waypoint shapes) is the delta to
+  investigate.
+  ROOT CAUSE FOUND (the session's final probe): the generated wave
+  flights NEVER TAKE OFF. The ground-launched aircraft teleports to
+  the runway, rolls to 140 kts (Vr), and the ROTATION NEVER
+  DEVELOPS — the aircraft accelerates down the runway past 400 kts
+  at ~6 ft (the gear-height ground clamp), never generating the
+  liftoff gate's `lift > weight × margin && zdot < −threshold`
+  (FlightModel's inAir transition), so the takeoff FSM never
+  completes, the brain stays in Ground, and every wave flight is a
+  deck-level drag race along its own runway heading. The takeoff
+  module's rotation law (pitch_cmd to 8° at Vr, gain 3.0) is
+  either not reaching the FCS or is being clamped by the ground
+  contact/attitude model — a FlightModel/EOM rotation tranche
+  (the [land-dbg] floor telemetry + the [rtb] probes drive it:
+  the fixed ground-launched aircraft would climb out on the
+  already-verified FAF approach and the whole chain closes).
 
 - **AIRWAR-QC — TOT adherence (QC 2026-09-30, open)** — the
   F4_STOCK_WORLD-gated harness (test_campaign_airwar_qc) ran a

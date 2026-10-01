@@ -299,11 +299,23 @@ void FlightModel::updateGear(double dt) {
         g.planted = false;
     }
 
-    // Lift-off detection: transition from ground to airborne
+    // Lift-off detection: transition from ground to airborne.
+    // CAMP-ROTATE: the gate is the AERO condition — lift exceeding the
+    // weight by the margin — and NOT the climb rate. The old extra
+    // `zdot < -threshold` condition was unreachable for a rotating
+    // takeoff: the ground clamp holds zdot at ~0 while the wheels are
+    // down, so the rotation lifted the nose to 15 deg at 150+ kts and
+    // the aircraft STILL read "on the ground" — it accelerated down the
+    // runway to 400+ kts at deck level, flying its whole mission in a
+    // permanent ground roll (the "no landings / deck-level flight"
+    // report). With the lift margin met the clamp releases and the EOM
+    // develops the climb itself; a bouncing touchdown re-enters via the
+    // wheels' onGround transition above (and the margin prevents a
+    // flap-bounce false positive).
     if (!g.inAir) {
         const double lift_lbs = a.lift * state_.fuel.mass_slugs;
         const double weight_lbs = state_.fuel.weight_lbs;
-        if (lift_lbs > weight_lbs * LIFTOFF_LIFT_MARGIN && state_.kin.zdot < -LIFTOFF_ZDOT_THRESH) {
+        if (lift_lbs > weight_lbs * LIFTOFF_LIFT_MARGIN) {
             g.inAir = true;
         }
     }

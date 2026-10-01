@@ -606,6 +606,19 @@ AIControlOutput TakeoffModule::controls_for_takeoff() const {
                                       -0.25, 0.5);
     }
 
+    // CAMP-ROTATE telemetry: the roll state, 1 Hz.
+    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        static int dbg_roll = 0;
+        if (++dbg_roll % 60 == 1) {
+            std::fprintf(stderr,
+                         "[roll] vcas %.0f pitch %.1f inAir %d "
+                         "complete %d\n",
+                         current_vcas_kts_, current_pitch_rad_ * 57.3,
+                         on_ground_ ? 0 : 1,
+                         is_complete() ? 1 : 0);
+        }
+    }
+
     return output;
 }
 

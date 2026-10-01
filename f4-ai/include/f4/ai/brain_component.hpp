@@ -488,6 +488,13 @@ public:
         if (phase_ == Phase::Ground && takeoff_.is_complete()) {
             if (!plan_.route.empty()) {
                 nav_.set_route(plan_.route);
+                // CAMP-GATE-ROLL: the aircraft just took off AT its base
+                // — route[0] is the departure field behind it. Resume at
+                // route[1]: the old cursor raced the first-update abeam
+                // check at parking, and a lost race left the cursor on
+                // route[0] with a ZERO altitude target — the aircraft
+                // flew its whole mission at deck level.
+                nav_.resume_from(1);
                 // FID-4 splice: a deaggregate spawns MID-ROUTE (at the
                 // aggregate's position) — flying the route from route[0]
                 // turns it backward and dives it to the first waypoint's
