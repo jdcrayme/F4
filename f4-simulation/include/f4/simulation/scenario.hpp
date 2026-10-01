@@ -602,6 +602,26 @@ struct Scenario {
     /// Fuel policy (the arbiter's fuel check). Default: disabled.
     FuelConfig fuel;
 
+    /// AI Part-III session options (AI_IMPLEMENTATION_PLAN §16). Default:
+    /// everything off — every armed tranche is a fidelity switch the
+    /// scenario turns on, and an all-off block is byte-identical with
+    /// the pre-tranche world.
+    struct AiConfig {
+        /// Step 14 — the flight-lead command module (flitlead.cpp's
+        /// CommandFlight()): leads with resolved wingmen watch their
+        /// flight (per-tick status echoes) and issue edge-triggered
+        /// orders on the closed WingRadio vocabulary (Rejoin /
+        /// EngageMyTarget / RTB, acked by the wingman); v1's RTB rule
+        /// takes the LEAD home with a bingoing wingman too. Default
+        /// FALSE — leads never register a roster, never publish a row,
+        /// wingmen never ack (the byte-identical gate). Scenario key:
+        /// the top-level "ai" block's "flight_lead". Rides the
+        /// scenario-list spawn path only (the same restriction the
+        /// lead_callsign resolution it builds on documents).
+        bool flight_lead{false};
+    };
+    AiConfig ai;
+
     /// SimData AI data paths (engine-agnostic Data/ side of the
     /// f4-convert pipeline; scenario-relative when relative). Both
     /// optional: empty falls back to the build tree's generated

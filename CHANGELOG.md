@@ -5,6 +5,65 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## Step 14 — FlightLeadModule: the lead half of flight command
+
+AI_IMPLEMENTATION_PLAN.md §16's flight-lead chapter, landed as-built:
+the Step-11 wingman gets its other half — a lead that WATCHES its
+flight (per-tick status echoes the host pushes) and commands it
+(flitlead.cpp's CommandFlight() tranche, smallest-first), with the
+radio vocabulary the combat transcript was missing (wingradio v1).
+
+- **The vocabulary** (`f4-ai/wingradio.hpp`): a CLOSED enum —
+  `OrderRejoin` / `OrderEngageMyTarget` / `OrderRTB` / `Ack` — plus
+  the bus message and the host-carried order envelope. AI code
+  publishes enum rows only; the text rendering lives in the host
+  (the plan's risk-table rule: no free-form strings from AI code).
+  The kill/loss half of the wing vocabulary rides the EXISTING M4
+  narration (splash carries the shooter; track drops speak for
+  themselves) — wingradio v1 adds only the order/ack cycle.
+- **The module** (`f4-ai/modules/flight_lead_module.hpp`): pure, beside
+  `WingmanModule` in the same brain, active only when the host
+  registers a roster on it. Three edge-triggered rules: REJOIN on the
+  wingman's own Rejoining echo (latched until it reports Following —
+  one order per blowout), ENGAGE when the lead fights a bandit the
+  wingman holds and is not on (the order follows the lead's target;
+  the wingman's targeting ranks it as a preference — sensor truth
+  still wins), RTB once per flight at the wingman's bingo with v1's
+  both-RTB (`lead_rtb()` latches the LEAD's own stand-down).
+- **The brain** (`brain_component.hpp`): the flight-command step runs
+  after the fuel check, before the ladder — the lead publishes the
+  module's radio rows on the bus (host-stamped clock, the sensor
+  components' rule) and drains its inbox; the wingman acks once per
+  order and applies (rejoin drives the formation SM from the other
+  side, engage ranks the ordered bandit above the sort via
+  `SensorFusion::preferred_threat_target`, RTB takes the ladder's
+  bingo path — `fuel_bingo_ || rtb_ordered_`, the "RTB" mode line
+  included). The engagement the step reads is LAST tick's (captured
+  before the ladder reset) — the same freshness every host push
+  carries.
+- **The host** (f4-simulation): the scenario's top-level `"ai"` block
+  arms the tranche (`"flight_lead"`, default FALSE — the
+  byte-identical gate); `resolve_wingman_refs` arms both brains of
+  each pair and registers the roster; the tick pushes the wingman
+  echoes next to the lead pictures (`push_flight_lead_echoes`) and
+  applies the lead's orders after `update_all` — acked + applied on
+  the wingman's next update, the one-tick latency every host push
+  carries. A dead lead commands nothing (the corpse rule).
+- **The transcript**: one new subscription renders the vocabulary
+  ("EAGLE2, rejoin." / "EAGLE2, engage my target." / "EAGLE2, RTB." /
+  "Copy.") — no row exists unless the scenario armed the gate.
+- **Pins**: `test_flight_lead_module.cpp` (11 cases: the three rules'
+  edges, latches, and re-arms; the corpse rule; duplicate
+  registration; the inert shape), `test_flight_lead_e2e.cpp` (5
+  tiers: the gate-off twin — no rows, member-for-member identical
+  runs; rejoin order → ack → converged; engage-my-target outranking
+  the sort with a free bandit available; the RTB order with the lead
+  standing down on a HEALTHY tank; the done-when arc — formation →
+  engaged as a flight → RTB on bingo, the RTB order + ack in the
+  log). The fast f4-simulation label's 12 failures are the
+  documented CAMP-TOT-PACE set, unchanged; the new suites are green
+  under ASan+UBSan with zero reports (f4-ai 84 tests + the E2E 5).
+
 ## AGG-4 — fully lazy aggregate state: the schedule IS the state
 
 The aggregate-clock plan's endgame (Docs/AGGREGATE_CLOCK_PLAN.md §4),

@@ -1045,6 +1045,23 @@ void Simulation::resolve_wingman_refs() {
         wingman_pairs_.push_back(
             WingmanPair{aircraft_entities_[i],
                         aircraft_entities_[it->second]});
+
+        // Step 14 (flight lead): arm the tranche on BOTH brains of the
+        // pair — the lead gets the roster (its FlightLeadModule watches
+        // this wingman), the wingman gets the order inbox (acks + applies
+        // what the lead orders). Gate: the scenario's ai block; unarmed
+        // = the pre-tranche world, byte-identical.
+        if (scenario_.ai.flight_lead) {
+            brain->arm_flight_command(true);
+            entities::EntityHandle lead(aircraft_entities_[it->second],
+                                        &world_);
+            auto* lead_brain = lead.get<f4::ai::BrainComponent>();
+            if (lead_brain != nullptr) {
+                lead_brain->arm_flight_command(true);
+                lead_brain->register_flight_wingman(
+                    aircraft_entities_[i].value);
+            }
+        }
     }
 }
 
@@ -1216,6 +1233,80 @@ void Simulation::push_wingman_lead_pictures() {
         brain->set_lead_engagement(
             lead_brain != nullptr ? lead_brain->combat_engagement_id()
                                   : 0u);
+    }
+}
+
+void Simulation::push_flight_lead_echoes() {
+    // Step 14 (flight lead): the mirror image of the pictures walk
+    // above — instead of feeding the WINGMAN the lead's kinematics,
+    // feed the LEAD the wingman's status. Everything the lead module
+    // may command about is reported by the wingman's OWN brain (its
+    // formation state, its fuel gauge, its engagement) or asked of the
+    // wingman's OWN fusion (does it hold the lead's bandit at all —
+    // the engage rule's "sees it too" guard). The lead module is
+    // engine-agnostic; the host is its eyes on its own flight.
+    for (const auto& pair : wingman_pairs_) {
+        entities::EntityHandle lead(pair.lead, &world_);
+        auto* lead_brain = lead.get<f4::ai::BrainComponent>();
+        if (lead_brain == nullptr ||
+            !lead_brain->flight_command_armed()) {
+            continue;
+        }
+
+        entities::EntityHandle wing(pair.wingman, &world_);
+        auto* wing_brain = wing.get<f4::ai::BrainComponent>();
+        if (wing_brain == nullptr) continue;
+
+        const auto* dmg = wing.get<entities::DamageStateComponent>();
+
+        f4::ai::modules::FlightLeadModule::WingmanEcho e{};
+        e.entity_id = pair.wingman.value;
+        e.alive = (dmg == nullptr) || !dmg->killed;
+        // The Step-11 module's own formation state (the WingState
+        // vocabulary, echoed from the other side — the rejoin rule's
+        // input).
+        e.wing_state = wing_brain->wingman().state();
+        // The wingman's fuel gauge (the RTB rule's reserve is the
+        // brain's own bingo threshold — FrameExec step 2).
+        e.bingo = wing_brain->fuel_state() ==
+                  f4::ai::BrainComponent::FuelState::Bingo;
+        // The wingman's current engagement + whether it holds the
+        // lead's bandit (the engage rule's inputs).
+        e.engaged_id = wing_brain->combat_engagement_id();
+        const std::uint64_t lead_target =
+            lead_brain->combat_engagement_id();
+        e.sees_lead_target =
+            lead_target != 0 &&
+            wing_brain->sensors().holds_hostile(lead_target);
+
+        lead_brain->report_wingman_echo(e);
+    }
+}
+
+void Simulation::apply_flight_lead_orders() {
+    // Step 14: each lead's FlightLeadModule produced its orders during
+    // update_all; drain them (one delivery each) and queue on the
+    // wingman brains — the wingman acks + applies on its next update.
+    // A dead lead commands nothing (the corpse rule).
+    for (const auto& pair : wingman_pairs_) {
+        entities::EntityHandle lead(pair.lead, &world_);
+        auto* lead_brain = lead.get<f4::ai::BrainComponent>();
+        if (lead_brain == nullptr ||
+            !lead_brain->flight_command_armed()) {
+            continue;
+        }
+        const auto* dmg = lead.get<entities::DamageStateComponent>();
+        if (dmg != nullptr && dmg->killed) continue;
+
+        const auto order = lead_brain->flight_lead().order_for(
+            pair.wingman.value);
+        if (!order) continue;
+
+        entities::EntityHandle wing(pair.wingman, &world_);
+        auto* wing_brain = wing.get<f4::ai::BrainComponent>();
+        if (wing_brain == nullptr) continue;
+        wing_brain->queue_flight_order(f4::ai::FlightOrder{
+            pair.lead.value, order->target_id, order->event});
     }
 }
 
@@ -2783,6 +2874,14 @@ void Simulation::tick(double dt) {
     // a combat behavior); no-op when no aircraft declared a lead_callsign.
     if (!wingman_pairs_.empty()) {
         push_wingman_lead_pictures();
+        // Step 14 (flight lead): the lead modules' per-tick wingman
+        // echoes + the radio rows' host clock (the host owns time —
+        // the sensor clocks' rule; stamped only when the tranche is
+        // armed, so an unarmed world never touches the clock).
+        if (scenario_.ai.flight_lead) {
+            f4::ai::BrainComponent::set_host_time(t_now);
+            push_flight_lead_echoes();
+        }
     }
 
     // Tranche D (AAR): advance the scripted tanker + push its picture to
@@ -2836,6 +2935,14 @@ void Simulation::tick(double dt) {
     bus_.flush_pending();  // drain deferred ATC messages (TaxiClearance, etc.)
     const auto prof_t3 = g_prof.on ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
+
+    // Step 14 (flight lead): the leads' orders (produced during
+    // update_all) queue onto the wingman brains — acked + applied on
+    // their next update (the same one-tick latency every host push
+    // carries). Gate: the tranche armed.
+    if (!wingman_pairs_.empty() && scenario_.ai.flight_lead) {
+        apply_flight_lead_orders();
+    }
 
     // Throttle-driven IR band (the ir_power tranche): the FM's
     // last-flown throttle selects each active aircraft's IR signature

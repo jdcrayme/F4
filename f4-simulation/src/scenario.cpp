@@ -520,6 +520,22 @@ Scenario parse_scenario(f4::json::Reader& r) {
                 else if (k == "bingo_lbs") s.fuel.bingo_lbs = r.read_number();
                 else                       skip_unknown(r);
             }
+        } else if (key == "ai") {
+            // AI Part-III session options (AI_IMPLEMENTATION_PLAN §16).
+            // Unset keys keep the defaults (the golden identity — every
+            // tranche off is the pre-tranche world).
+            r.expect('{');
+            bool aifirst = true;
+            while (!r.consume('}')) {
+                if (!aifirst) r.expect(',');
+                aifirst = false;
+                const auto k = r.read_string();
+                r.expect(':');
+                // Step 14: the flight-lead command module (flitlead.cpp's
+                // CommandFlight()). Default false — leads never publish.
+                if (k == "flight_lead")     s.ai.flight_lead = r.read_bool();
+                else                        skip_unknown(r);
+            }
         } else if (key == "airfield_features") {
             r.expect('[');
             bool arr_first = true;

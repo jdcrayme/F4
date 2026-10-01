@@ -520,6 +520,21 @@ private:
     /// (one tick old at push time — exactly what every other brain sees)
     /// and the lead brain's combat_engagement_id() for the sort.
     void push_wingman_lead_pictures();
+    /// Step 14 (flight lead): push each wingman's status echo to its
+    /// LEAD's FlightLeadModule, every tick alongside the pictures above
+    /// (the lead module is engine-agnostic — the host is its eyes on
+    /// the OTHER side of the flight now). Reads the wingman brain's
+    /// formation state, fuel state, and engagement, plus whether the
+    /// wingman's fusion holds the lead's current target (the engage
+    /// rule's "sees it too" guard). No-op unless the scenario armed
+    /// ai.flight_lead.
+    void push_flight_lead_echoes();
+    /// Step 14: drain each lead's pending orders (produced during
+    /// update_all) and queue them on the wingman brains — acked +
+    /// applied on their next update. The same one-tick latency every
+    /// host push carries. No-op unless the scenario armed
+    /// ai.flight_lead.
+    void apply_flight_lead_orders();
     /// Tranche D (AAR): construct the ScriptedTanker from the scenario's
     /// tanker block (initialize(), if present), advance it kinematically
     /// each tick (tick(), BEFORE the brains run), and push its picture to

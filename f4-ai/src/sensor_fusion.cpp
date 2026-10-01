@@ -217,6 +217,32 @@ const TargetInfo* SensorFusion::sorted_threat_target(
     return lead_target;  // nullptr when the lead isn't fighting either
 }
 
+const TargetInfo* SensorFusion::preferred_threat_target(
+    std::uint64_t ordered_id, std::uint64_t lead_engaged_id) const noexcept {
+    // The ordered bandit first — but ONLY while this fusion actually
+    // holds it as a fightable hostile (the same can_see / fighter /
+    // hostile filters every combat query applies). Sensor truth still
+    // wins: an unheld or dropped track falls through to the plain
+    // sort, and the wingman keeps fighting its own best picture.
+    for (const auto& t : targets_) {
+        if (t.entity_id != ordered_id) continue;
+        if (can_see(t) && t.combat_class >= 2 && t.is_hostile) return &t;
+        break;  // held but not fightable right now — fall through
+    }
+    return sorted_threat_target(lead_engaged_id);
+}
+
+bool SensorFusion::holds_hostile(std::uint64_t entity_id) const noexcept {
+    for (const auto& t : targets_) {
+        if (t.entity_id != entity_id) continue;
+        // "The wingman sees it too" = the wingman's picture holds the
+        // bandit as a fightable hostile RIGHT NOW — the threat_target
+        // filters, not merely a stale row in the book.
+        return can_see(t) && t.combat_class >= 2 && t.is_hostile;
+    }
+    return false;
+}
+
 const TargetInfo* SensorFusion::missile_threat() const noexcept {
     const TargetInfo* best = nullptr;
     for (const auto& t : targets_) {

@@ -35,6 +35,7 @@ add_library(f4-ai STATIC
     src/bvr_module.cpp
     src/wvr_module.cpp
     src/wingman_module.cpp
+    src/flight_lead_module.cpp
     src/gun_module.cpp
     src/ground_avoid_module.cpp
     src/collision_avoid_module.cpp

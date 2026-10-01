@@ -764,6 +764,34 @@ follow-up refinement, documented here.
   pattern-altitude intercept) — a flight-controls tranche, not a
   plumbing one. The gated repro (test_campaign_stock_landing,
   F4_STOCK_WORLD) carries the full assertion chain.
+  FOLLOW-UP (same day, FF-aligned): the approach now follows the
+  FreeFalcon reference (atcbrain.cpp/landme.cpp, freefalcon-central
+  develop): the FAF = 2 min at MinVcas along the runway heading
+  (FindFinalPt: 0.8×MinVcas×FINAL_TIME — ours: 5 nm, matching);
+  the altitude ladder is FF's continuous 3-deg schedule from the IAP
+  (GetAltitude: each leg peels 3°×time-to-field off the profile —
+  our ProceedToFix targets the same profile instead of flat pattern
+  altitude); the aircraft configures when FF configures (gear at 3 nm
+  at lOnFinal entry — ours at the intercept, matching); the
+  pattern-vs-straight-in choice follows FF's cosAngle rule (single
+  ships arriving on the approach side fly straight-in — the
+  fly_traffic_pattern flag already carries it); the FAF is captured
+  APPROACHING (FF CheckVector's relx < turnDist — the old abeam
+  capture overflew the FAF and turned behind it, displacing 2R
+  laterally); and the deaggregate's brain SPLICES the route at the
+  nearest waypoint (NavigationModule::resume_from — set_route alone
+  re-flew from route[0], turning mid-route spawns backward and diving
+  them to the first waypoint's altitude), with the approach handoff
+  gated INBOUND (the nose-to-end projection — a round-trip route ends
+  near its start, and the old unconditional handoff "landed"
+  freshly-launched outbound aircraft at their departure field).
+  REMAINING (measured): the first approach after the fixes still
+  overshoots the threshold once (threshold_overflown — the descent
+  from the 5-nm/1,500-ft entry is marginal) and the re-attack can
+  hold in InterceptFinal; the abort QC now pins the RECOVERY (the
+  sortie closes, the aircraft on the deck at its home field) instead
+  of the FSM path, which the abort's plan swap legitimately keeps in
+  Enroute.
 
 - **AIRWAR-QC — TOT adherence (QC 2026-09-30, open)** — the
   F4_STOCK_WORLD-gated harness (test_campaign_airwar_qc) ran a

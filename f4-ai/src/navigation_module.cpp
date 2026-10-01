@@ -103,6 +103,20 @@ void NavigationModule::set_route(std::vector<Waypoint> route) {
         sm_.process(NavigationEvent::WaypointCaptured);
     }
 }
+void NavigationModule::resume_from(std::size_t index) {
+    if (route_.empty() || index == 0 || index >= route_.size()) return;
+    wp_index_ = index;
+    wp_timer_ = 0.0;
+    holding_ = false;
+    station_done_ = false;
+    station_elapsed_ = 0.0;
+    loop_start_ = loop_end_ = 0;
+    attack_engaged_ = false;
+    leg_from_ = geo::WorldPosition{route_[index - 1].position.x,
+                                   route_[index - 1].position.y,
+                                   route_[index - 1].position.z};
+}
+
 
 // ============================================================================
 // Per-tick update

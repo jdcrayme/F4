@@ -64,7 +64,9 @@
 #include "f4/ai/modules/missile_module.hpp"
 #include "f4/ai/modules/wvr_module.hpp"
 #include "f4/ai/modules/wingman_module.hpp"
+#include "f4/ai/modules/flight_lead_module.hpp"   // Step 14 (the lead half)
 #include "f4/ai/modules/strike_module.hpp"
+#include "f4/ai/wingradio.hpp"                     // Step 14 (the vocabulary)
 #include "f4/ai/modules/ground_avoid_module.hpp"
 #include "f4/ai/modules/collision_avoid_module.hpp"
 #include "f4/ai/modules/refuel_module.hpp"   // Tranche D (AAR)
@@ -376,6 +378,32 @@ public:
             plan_.start_phase == MissionPlan::StartPhase::Enroute &&
             !plan_.route.empty()) {
             nav_.set_route(plan_.route);
+            // FID-4 splice (the deaggregate's mid-route spawn): resume
+            // at the nearest waypoint instead of re-flying from
+            // route[0] (backward + a dive to its altitude).
+            {
+                const auto* st =
+                    owner_.get_interface<flight::IAircraftState>();
+                if (st != nullptr) {
+                    const double px = st->position_east_ft();
+                    const double py = st->position_north_ft();
+                    std::size_t best = 1;
+                    double best_d = 1.0e18;
+                    for (std::size_t k = 1; k < plan_.route.size(); ++k) {
+                        const double ddx = plan_.route[k].position.x - px;
+                        const double ddy = plan_.route[k].position.y - py;
+                        const double d = ddx * ddx + ddy * ddy;
+                        if (d < best_d) {
+                            best_d = d;
+                            best = k;
+                        }
+                    }
+                    nav_.resume_from(best);
+                    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+                        std::fprintf(stderr, "[splice] resume wp %zu\n", best);
+                    }
+                }
+            }
             nav_.air_steering.reset_integrators();
             phase_ = Phase::Enroute;
         }
@@ -384,10 +412,92 @@ public:
         if (phase_ == Phase::Ground && takeoff_.is_complete()) {
             if (!plan_.route.empty()) {
                 nav_.set_route(plan_.route);
+                // FID-4 splice: a deaggregate spawns MID-ROUTE (at the
+                // aggregate's position) — flying the route from route[0]
+                // turns it backward and dives it to the first waypoint's
+                // altitude. Resume at the nearest waypoint instead.
+                if (plan_.start_phase == MissionPlan::StartPhase::Enroute) {
+                    const auto* st =
+                        owner_.get_interface<flight::IAircraftState>();
+                    if (st != nullptr) {
+                        const double px = st->position_east_ft();
+                        const double py = st->position_north_ft();
+                        std::size_t best = 1;
+                        double best_d = 1.0e18;
+                        for (std::size_t k = 1; k < plan_.route.size(); ++k) {
+                            const double ddx =
+                                plan_.route[k].position.x - px;
+                            const double ddy =
+                                plan_.route[k].position.y - py;
+                            const double d = ddx * ddx + ddy * ddy;
+                            if (d < best_d) {
+                                best_d = d;
+                                best = k;
+                            }
+                        }
+                        nav_.resume_from(best);
+                    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+                        std::fprintf(stderr, "[splice] resume wp %zu\n", best);
+                    }
+                    }
+                }
                 nav_.air_steering.reset_integrators();
                 phase_ = Phase::Enroute;
             } else {
                 phase_ = Phase::Complete;
+            }
+        }
+        // CAMP-FAF: hand off to the approach at the INITIAL-APPROACH
+        // range (~6 nm from the route's end) instead of AT the route
+        // end. The route's last waypoint is the field; the approach
+        // procedure synthesizes the FAF 5 nm out on the extended
+        // centerline — handing off over the field meant flying OUT to
+        // the FAF and turning 180° back onto it. The early handoff
+        // lets the procedure position the aircraft on the approach
+        // course inbound, and the FAF capture turns it onto final.
+        if (phase_ == Phase::Enroute && !plan_.route.empty() &&
+            !nav_.is_complete()) {
+            // (The inbound-direction guard below replaces the old
+            // route-progress guard: an RTB route STARTS at the
+            // aircraft's position — wp_index_ never advances — and a
+            // round-trip route ENDS near its start. The nose-to-end
+            // projection distinguishes them: outbound = behind, RTB =
+            // ahead.)
+            const auto& last = plan_.route.back().position;
+            const auto* own_state =
+                owner_.get_interface<flight::IAircraftState>();
+            if (own_state != nullptr) {
+                const double own_x = own_state->position_east_ft();
+                const double own_y = own_state->position_north_ft();
+                const double dx = last.x - own_x;
+                const double dy = last.y - own_y;
+                constexpr double kApproachHandoffFt = 33000.0;  // ~5.4 nm
+                // The INBOUND guard: the handoff fires only when the
+                // route's end is roughly AHEAD of the nose. A round-trip
+                // route ends near its start — without this the freshly
+                // launched outbound aircraft was "landed" at the field
+                // it had just departed.
+                const double hx = std::sin(own_state->heading_rad());
+                const double hy = std::cos(own_state->heading_rad());
+                const bool inbound = dx * hx + dy * hy > 0.0;
+                if (!inbound ||
+                    dx * dx + dy * dy >=
+                        kApproachHandoffFt * kApproachHandoffFt) {
+                    return;
+                }
+                auto* world = owner_.world();
+                if (!world) {
+                    phase_ = Phase::Complete;
+                    return;
+                }
+                const auto& entry_fix = plan_.route.back().position;
+                landing_.configure(entry_fix, plan_.taxi_in_route);
+                landing_.fly_traffic_pattern = plan_.fly_traffic_pattern;
+                landing_.airbase_id = takeoff_.airbase_id;
+                landing_.air_steering.reset_integrators();
+                landing_.pattern_steering.reset_integrators();
+                landing_.initialize(owner_.id().value, *world, bus);
+                phase_ = Phase::Approach;
             }
         }
         if (phase_ == Phase::Enroute && nav_.is_complete()) {
@@ -430,6 +540,10 @@ public:
         // (engine-agnostic: the modules cannot scan terrain or traffic).
         // =====================================================================
         AIControlOutput ai_out{};
+        // The flight-command step (below) reads LAST tick's engagement —
+        // the ladder resets the combat mode before it runs, so the
+        // accessor would answer 0 if asked about the current tick.
+        last_engagement_id_ = combat_engagement_id();
         combat_intent_ = CombatIntent{};
         combat_mode_ = CombatMode::None;
         safety_mode_ = SafetyMode::None;
@@ -439,6 +553,75 @@ public:
         // aircraft already on approach is committed, and the parked/
         // ground phases have no decisions left to gate.
         update_fuel_state();
+
+        // =================================================================
+        // Flight command (Step 14, flitlead.cpp + wingradio v1): the LEAD
+        // half and the wingman half's radio responses, both gated on the
+        // tranche arm (the scenario ai block's "flight_lead") AND the
+        // owner being alive (a corpse commands nothing, acks nothing).
+        // Enroute only — ground/approach flights are not commanded.
+        //
+        // LEAD: the host pushes per-wingman status echoes each tick (the
+        // roster registered at spawn); the armed module turns them into
+        // edge-triggered orders — Rejoin / EngageMyTarget / RTB — returned
+        // as radio rows this brain publishes on the bus (the transcript
+        // renders them; the AI never formats text). The host drains the
+        // module's order_for() after update_all and queues each order on
+        // the wingman brain.
+        //
+        // WINGMAN: the host-queued order publishes exactly one Ack and
+        // applies — the engage order ranks the ordered bandit in the
+        // ladder's SORT below (sensor truth still wins), the rejoin
+        // order drives the formation SM from the other side, the RTB
+        // order latches the engagement stand-down (rtb_ordered_, the
+        // ladder's bingo path).
+        //
+        // An unarmed brain does none of this — the byte-identical gate.
+        // =================================================================
+        if (flight_command_armed_ && phase_ == Phase::Enroute &&
+            owner_alive()) {
+            if (is_flight_lead_) {
+                // One tick stale by construction (captured before this
+                // tick's ladder reset) — the same freshness every host
+                // push and every brain-to-brain hint carries.
+                flight_lead_.set_lead_engagement(last_engagement_id_);
+                const auto rows = flight_lead_.update();
+                if (!rows.empty()) {
+                    const double now = host_time();
+                    for (const auto& row : rows) {
+                        bus.publish(WingRadioMessage{
+                            owner_.id().value, row.peer_id, row.target_id,
+                            row.event, now});
+                    }
+                }
+                // v1's both-RTB: a wingman's bingo takes the LEAD home
+                // too — the same stand-down path the ladder's bingo
+                // branch takes below.
+                if (flight_lead_.lead_rtb()) rtb_ordered_ = true;
+            }
+            if (pending_order_) {
+                const FlightOrder order = *pending_order_;
+                pending_order_.reset();
+                // The acknowledgment is a STATUS ECHO, never a new
+                // command (the plan's one-directional flow rule).
+                bus.publish(WingRadioMessage{
+                    owner_.id().value, order.lead_id, order.target_id,
+                    WingRadio::Ack, host_time()});
+                switch (order.event) {
+                    case WingRadio::OrderRejoin:
+                        wingman_.command_rejoin();
+                        break;
+                    case WingRadio::OrderEngageMyTarget:
+                        engage_order_id_ = order.target_id;
+                        break;
+                    case WingRadio::OrderRTB:
+                        rtb_ordered_ = true;
+                        break;
+                    case WingRadio::Ack:
+                        break;  // not a lead-issued order
+                }
+            }
+        }
 
         if (phase_ == Phase::Enroute) {
             const auto ga_out = ground_avoid_.update(dt, state,
@@ -555,14 +738,16 @@ public:
                         combat_mode_ = CombatMode::Defensive;
                         ai_out = missile_defense_.update(dt, state, incoming);
                     }
-                } else if (fuel_bingo_) {
-                    // BINGO (FrameExec step 2's fight-gating half): the
-                    // engagement rungs stand down — no new target
-                    // selection, no employment. A running fight ends
-                    // cleanly: reset the engagement state so the bvr/wvr
-                    // modules do not resume stale geometry if fuel
-                    // (impossibly) recovers; the nav-resume bookkeeping
-                    // below handles the steering transient.
+                } else if (fuel_bingo_ || rtb_ordered_) {
+                    // BINGO (FrameExec step 2's fight-gating half) / the
+                    // ORDERED RTB (Step 14: the lead's order, or v1's
+                    // both-RTB on a wingman's bingo): the engagement
+                    // rungs stand down — no new target selection, no
+                    // employment. A running fight ends cleanly: reset
+                    // the engagement state so the bvr/wvr modules do
+                    // not resume stale geometry if fuel (impossibly)
+                    // recovers; the nav-resume bookkeeping below
+                    // handles the steering transient.
                     if (in_wvr_) {
                         in_wvr_ = false;
                         wvr_.reset();
@@ -593,7 +778,17 @@ public:
                     // lead's engagement arrives via set_lead_engagement()
                     // (the host reads the lead brain each tick).
                     const auto* tgt = is_wingman_
-                        ? sensors_.sorted_threat_target(lead_engaged_id_)
+                        ? (engage_order_id_ != 0
+                               // Step 14: an engage-my-target order ranks
+                               // the ordered bandit ABOVE the sort's free
+                               // bandit — while this fusion holds it
+                               // (sensor truth still wins: the ordered
+                               // query falls through to the sort when
+                               // the track is gone).
+                               ? sensors_.preferred_threat_target(
+                                     engage_order_id_, lead_engaged_id_)
+                               : sensors_.sorted_threat_target(
+                                     lead_engaged_id_))
                         : sensors_.threat_target();
                     // --- BVR <-> WVR band handoff (plan Step 9) ----------
                     // Entry is the ACTIVE band source: the archetype's
@@ -989,7 +1184,8 @@ public:
     /// While a safety rung is active its name is reported first (the
     /// mission module is dormant); then the COMBAT mode ("BVREngage" /
     /// "WVREngage" / "MissileDefeat" / "WingmanFormation"); a bingoing
-    /// enroute jet with nothing else active reports "RTB".
+    /// enroute jet — or one the flight lead ordered home (Step 14) —
+    /// with nothing else active reports "RTB".
     [[nodiscard]] std::string mode_name() const {
         if (safety_mode_ == SafetyMode::GroundAvoid)
             return "GroundAvoid";
@@ -1000,7 +1196,8 @@ public:
         if (combat_mode_ == CombatMode::Defensive)   return "MissileDefeat";
         if (combat_mode_ == CombatMode::Formation)   return "WingmanFormation";
         if (combat_mode_ == CombatMode::Refuel)      return "RefuelMode";
-        if (fuel_bingo_ && phase_ == Phase::Enroute) return "RTB";
+        if ((fuel_bingo_ || rtb_ordered_) && phase_ == Phase::Enroute)
+            return "RTB";
         switch (phase_) {
             case Phase::Ground:   return takeoff_.mode_name();
             case Phase::Enroute:  return nav_.mode_name();
@@ -1023,7 +1220,8 @@ public:
         if (combat_mode_ == CombatMode::Defensive)   return "Defending";
         if (combat_mode_ == CombatMode::Formation)   return wingman_.state_name();
         if (combat_mode_ == CombatMode::Refuel)      return refuel_.state_name();
-        if (fuel_bingo_ && phase_ == Phase::Enroute) return fuel_state_name();
+        if ((fuel_bingo_ || rtb_ordered_) && phase_ == Phase::Enroute)
+            return fuel_state_name();
         switch (phase_) {
             case Phase::Ground:   return takeoff_.state_name();
             case Phase::Enroute:  return nav_.state_name();
@@ -1261,6 +1459,57 @@ public:
     [[nodiscard]] modules::WingmanModule&       wingman()       noexcept { return wingman_; }
     [[nodiscard]] const modules::WingmanModule& wingman() const noexcept { return wingman_; }
 
+    // --- Flight command (Step 14; the host arms at spawn, feeds per tick) ---
+    /// Arm this tranche on the brain (the scenario ai block's
+    /// "flight_lead"). Unarmed brains never run the lead step, never
+    /// queue an order, never publish a radio row — the byte-identical
+    /// gate. Arming is the SESSION option; the lead/wingman ROLES below
+    /// are per-aircraft facts the host resolves from the roster.
+    void arm_flight_command(bool on) noexcept { flight_command_armed_ = on; }
+    [[nodiscard]] bool flight_command_armed() const noexcept {
+        return flight_command_armed_;
+    }
+    /// Mark this brain a flight LEAD and add the wingman to its roster
+    /// (the host resolves the scenario's lead_callsign refs; duplicate
+    /// ids collapse in the module). A lead with an empty roster is
+    /// inert — update() returns nothing.
+    void register_flight_wingman(std::uint64_t wingman_id) {
+        is_flight_lead_ = true;
+        flight_lead_.register_wingman(wingman_id);
+    }
+    /// Push the wingman's status echo for this tick (the host reads the
+    /// wingman's brain: its WingmanModule state, its FuelState, its
+    /// engagement, and whether its fusion holds this lead's target).
+    void report_wingman_echo(
+        const modules::FlightLeadModule::WingmanEcho& echo) {
+        flight_lead_.report_wingman(echo);
+    }
+    /// Queue the lead's order on this (wingman) brain. One slot — a
+    /// newer order replaces an undelivered one. The brain publishes
+    /// the Ack and applies the order on its next update.
+    void queue_flight_order(const FlightOrder& order) {
+        pending_order_ = order;
+    }
+    /// The lead module (the host drains order_for() after update_all).
+    [[nodiscard]] const modules::FlightLeadModule& flight_lead() const noexcept {
+        return flight_lead_;
+    }
+    [[nodiscard]] modules::FlightLeadModule& flight_lead() noexcept {
+        return flight_lead_;
+    }
+    /// The latched RTB stand-down (an ordered RTB or v1's both-RTB on
+    /// a wingman's bingo) — the ladder's bingo path reads it.
+    [[nodiscard]] bool rtb_ordered() const noexcept { return rtb_ordered_; }
+
+    // --- Host-stamped clock (the sensor components' rule) ------------------
+    /// The host owns time: the Simulation stamps one absolute time per
+    /// tick (only when the tranche is armed — an unarmed world never
+    /// touches the clock), the brain reads it when publishing radio
+    /// rows (the transcript's line stamps). Mirrors
+    /// RadarSimComponent::set_sim_time / MissileSimComponent.
+    static void set_host_time(double t) noexcept { host_time_s() = t; }
+    static double host_time() noexcept { return host_time_s(); }
+
     // --- AAR role (Tranche D; the host drives this at spawn + per tick) ---
     /// Arm/disarm the RefuelModule rung. The host (Simulation) sets this
     /// when the scenario declares a tanker AND the receiver's route
@@ -1365,6 +1614,24 @@ private:
                 : FuelState::Normal;
     }
 
+    /// The owner's aliveness (the flight-command gate): combat worlds
+    /// carry a DamageStateComponent on every aircraft; non-combat
+    /// worlds have none (nullptr = alive by construction — the same
+    /// rule the host's own aliveness reads use). A dead lead commands
+    /// nothing; a dead wingman acks nothing.
+    [[nodiscard]] bool owner_alive() const {
+        const auto* dmg = owner_.get<entities::DamageStateComponent>();
+        return dmg == nullptr || !dmg->killed;
+    }
+
+    // The host-stamped clock's storage (function-local static, the
+    // sensor components' shape). See set_host_time/host_time.
+    static double& host_time_s() {
+        static double t = 0.0;
+        return t;
+    }
+
+
     // Map AIControlOutput to PilotInput. The brain is self-contained —
     // no external runner is needed to translate AI output to pilot input.
     static flight::PilotInput map_to_pilot_input(const AIControlOutput& ai_out) {
@@ -1468,6 +1735,22 @@ private:
     std::uint64_t lead_id_{0};
     std::uint64_t lead_engaged_id_{0};
     modules::WingmanModule wingman_{};
+
+    // Flight command (Step 14): the lead module + the tranche arm (the
+    // scenario ai block's "flight_lead" — an unarmed brain never runs
+    // the step) + the wingman-side order inbox and its latched effects.
+    // engage_order_id_ ranks the ordered bandit in the ladder's SORT;
+    // rtb_ordered_ takes the bingo path (engagement stand-down, the
+    // "RTB" mode line). pending_order_ is the host-queued order the
+    // next update acks + applies (one slot — the newest wins).
+    bool flight_command_armed_{false};
+    bool is_flight_lead_{false};
+    bool rtb_ordered_{false};
+    std::uint64_t engage_order_id_{0};
+    std::uint64_t last_engagement_id_{0};   // the ladder's previous tick
+    std::optional<FlightOrder> pending_order_{};
+    modules::FlightLeadModule flight_lead_{};
+
 
     // Tanker role (AAR redesign): this brain IS a tanker. Tankers fly
     // their own route + do NOT arm the refuel rung (they're the tanker,

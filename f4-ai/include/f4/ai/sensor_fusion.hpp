@@ -249,6 +249,24 @@ public:
     [[nodiscard]] const TargetInfo* sorted_threat_target(
         std::uint64_t lead_engaged_id) const noexcept;
 
+    /// The ORDERED target (Step 14): the visible hostile fighter with
+    /// `ordered_id` — the engage-my-target order's preference, ranked
+    /// ABOVE the sort. Sensor truth still wins: when the fusion does
+    /// not hold the id as a fightable hostile RIGHT NOW the answer
+    /// falls through to sorted_threat_target() (an order can never
+    /// conjure a track, and a dropped track hands the fight back to
+    /// the wingman's own picture). Engine-agnostic like its siblings.
+    [[nodiscard]] const TargetInfo* preferred_threat_target(
+        std::uint64_t ordered_id, std::uint64_t lead_engaged_id) const noexcept;
+
+    /// Does the fusion hold `entity_id` as a visible hostile fighter
+    /// RIGHT NOW? The flight-lead's engage rule asks this of the
+    /// WINGMAN's fusion (through the host) — "a threat the wingman
+    /// sees too" is a fact about the wingman's picture, not the
+    /// lead's. Same filters as threat_target(): seen, fighter-class,
+    /// hostile.
+    [[nodiscard]] bool holds_hostile(std::uint64_t entity_id) const noexcept;
+
     /// Nearest visible HOSTILE incoming missile. Returns nullptr if none
     /// (or if the only missiles in flight are same-team — your own shot
     /// must never read as a threat to defend against; launch_missile

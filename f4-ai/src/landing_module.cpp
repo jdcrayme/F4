@@ -932,6 +932,35 @@ void LandingModule::check_fix_reached() {
             return;
         }
     }
+    // CAMP-FAF: capture the fix APPROACHING — within the turn distance
+    // ahead of the nose (FF CheckVector's `relx < turnDist &&
+    // |rely| < turnDist*3`). The turn must START before the fix so the
+    // roll-out is on the final course right AT it: the old abeam
+    // capture fired when the fix passed BEHIND the nose, so the
+    // aircraft overflew the FAF, turned 180° in place (displacing 2R
+    // laterally), and spent minutes re-converging onto the lateral
+    // gate — or never passed it.
+    {
+        const double dx = entry_fix_.x - current_position_.x;
+        const double dy = entry_fix_.y - current_position_.y;
+        const double nx = std::sin(current_heading_rad_);
+        const double ny = std::cos(current_heading_rad_);
+        const double rel_along = dx * nx + dy * ny;   // + = the fix ahead
+        const double rel_lat = dx * std::cos(current_heading_rad_) -
+                               dy * std::sin(current_heading_rad_);
+        const double lead = std::max(intercept_lead_ft, fix_radius_ft);
+        if (fix_timer_ > 1.0 && rel_along < lead &&
+            rel_along > -fix_abeam_ft &&
+            std::abs(rel_lat) < lead * 3.0) {
+            // The Tranche-38 altitude gate still owns the descent.
+            if (current_alt_msl_ft_ > pattern_altitude_ft_ + 300.0) {
+                return;
+            }
+            sm_.process(fly_traffic_pattern ? LandingEvent::PatternEntry
+                                            : LandingEvent::FixReached);
+            return;
+        }
+    }
     // Off-nose (abeam) capture with a dwell timer guard (same rationale
     // and same pitfall as NavigationModule — see the long comment there:
     // no timer => possible insta-skip while heading away or an orbit
@@ -1122,7 +1151,32 @@ void LandingModule::check_established() {
         // the documented one.
         beam_err < establish_beam_tol_ft &&
         settle_err < 900.0) {
+        if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+            static int dbg_gate = 0;
+            if (++dbg_gate % 120 == 1) {
+                std::fprintf(stderr,
+                             "[land-dbg] gates: hdg %.2f lat %.0f beam %.0f"
+                             " settle %.0f along %.0f vs %.0f\n",
+                             hdg_err, course_lateral_ft(), beam_err,
+                             settle_err, course_along_ft(),
+                             current_vs_fpm_);
+            }
+        }
         sm_.process(LandingEvent::Established);
+    } else if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        static int dbg_gate2 = 0;
+        if (++dbg_gate2 % 120 == 1) {
+            std::fprintf(stderr,
+                         "[land-dbg] gate FAIL: hdg %.2f/%.2f lat %.0f/%.0f"
+                         " beam %.0f/%.0f settle %.0f/900 along %.0f\n",
+                         hdg_err, establish_hdg_tol_rad,
+                         std::abs(course_lateral_ft()),
+                         fly_traffic_pattern
+                             ? std::max(establish_lateral_ft, 1000.0)
+                             : establish_lateral_ft,
+                         beam_err, establish_beam_tol_ft, settle_err,
+                         course_along_ft());
+        }
     }
 }
 
@@ -1256,16 +1310,26 @@ AIControlOutput LandingModule::controls_for_request_approach() const {
 
 AIControlOutput LandingModule::controls_for_proceed_to_fix() const {
     const double desired = AirSteering::bearing_to(current_position_, entry_fix_);
-    // Return to the entry fix at PATTERN altitude (both after handoff and
-    // after a go-around — the VS cascade descends from above or climbs
-    // back up from below; do not pin the target to the current altitude,
-    // a low aircraft could never climb away).
-    // STAB-E19: flown with the CALM pattern tune, not the final tune —
-    // the final's attitude_gain 1.3 + the ±300 beam-ride correction
-    // window is tuned for riding a 3-deg beam, not for a 10,000+ ft
-    // re-positioning leg; with it this state still rang ±3,000 fpm
-    // (t=1860-1990 of the baseline trace).
-    return pattern_steering.steer(desired, pattern_altitude_ft_,
+    // CAMP-FAF rev 2 — the FF IAP ladder (atcbrain.cpp GetAltitude):
+    // the entry/holding altitude is the 3-deg profile extended out from
+    // the field, not a flat pattern leg. The old flat pattern-altitude
+    // target handed the intercept an aircraft 1,000+ ft ABOVE the beam
+    // inside the FAF (the descent then happened inside 2 nm, arriving
+    // at the threshold high — the user's "overflying the runway").
+    // Targeting max(pattern, the beam at this position) flies the
+    // aircraft DOWN the extended profile to the FAF: at the FAF it is
+    // on-slope, at approach speed, configured — exactly what the
+    // intercept and OnFinal assume. The pattern floor keeps a
+    // go-around's climb-out from diving (the field beam is below).
+    // STAB-E19: still flown with the CALM pattern tune (the final's
+    // attitude_gain + narrow correction window rings on long legs).
+    const double profile_alt =
+        std::max(pattern_altitude_ft_, glide_slope_alt_ft());
+    // FF's config schedule (landme.cpp): the gear drops at 3 nm at
+    // lOnFinal entry and the pattern legs fly MinVcas — our
+    // track_final (the intercept + OnFinal) already does exactly that.
+    // The ProceedToFix/IAP leg stays clean.
+    return pattern_steering.steer(desired, profile_alt,
                                   approach_speed_kts, air_input());
 }
 

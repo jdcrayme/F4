@@ -143,6 +143,15 @@ target_compile_definitions(test_countermeasure_e2e PRIVATE
     F4_SOURCE_DATA_DIR="${CMAKE_SOURCE_DIR}/Data"
 )
 f4_simulation_add_test(test_combat_transcript      test_combat_transcript.cpp)
+# Step 14 (flight lead): the wing-radio E2E — the lead's orders (Rejoin /
+# EngageMyTarget / RTB) + the wingman's acks over the closed vocabulary,
+# the radio transcript lines, the engage-order preference in the SORT,
+# v1's both-RTB, and the gate-off twin (no rows, member-for-member
+# identical runs).
+f4_simulation_add_test(test_flight_lead_e2e        test_flight_lead_e2e.cpp)
+target_compile_definitions(test_flight_lead_e2e PRIVATE
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+)
 f4_simulation_add_test(test_register_aircraft      test_register_aircraft.cpp)
 f4_simulation_add_test(test_spinner_roster         test_spinner_roster.cpp)
 f4_simulation_add_test(test_campaign_session       test_campaign_session.cpp)

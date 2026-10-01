@@ -810,3 +810,89 @@ Stage Summary:
 - AGG-5 (threading) is the only open aggregate-clock item — optional, last,
   explicitly "do not build first".
 - Produced 0005-AGG-4.patch for the user's commit-and-push flow.
+
+---
+
+## 2026-10-01 — STEP-14: FlightLeadModule (the lead half of flight command)
+
+Task: AI_IMPLEMENTATION_PLAN.md §16 Step 14 — flitlead.cpp's
+CommandFlight() as an engine-agnostic module beside the Step-11
+WingmanModule, with wingradio v1 (the closed order/ack vocabulary the
+combat transcript was missing).
+
+Work Log:
+- Read the §16 Step 14 spec + surveyed the landed surfaces it consumes:
+  WingmanModule's WingState vocabulary and rejoin ring (Step 11), the
+  brain's fuel policy (FrameExec step 2's bingo), combat_engagement_id()
+  (BVR/WVR lock ids), the host's wingman_pairs_/push_wingman_lead_pictures
+  plumbing, and the CombatTranscript's renderer contract.
+- f4-ai: new wingradio.hpp — the CLOSED WingRadio enum (OrderRejoin /
+  OrderEngageMyTarget / OrderRTB / Ack) + WingRadioMessage + the
+  FlightOrder envelope; AI code publishes enum rows only, the text
+  rendering lives in the host (the plan's risk-table rule).
+- f4-ai: new modules/flight_lead_module.{hpp,cpp} — the pure
+  CommandFlight() tranche: roster + per-tick WingmanEchoes in
+  (formation state, fuel, engagement, sees-lead-target), edge-triggered
+  orders out. REJOIN latched until the wingman reports Following (one
+  order per blowout); ENGAGE follows the lead's target and re-arms when
+  the wingman joins; RTB once per flight, v1's both-RTB latching the
+  LEAD's own stand-down (lead_rtb()).
+- f4-ai: SensorFusion grows preferred_threat_target (the ordered bandit
+  ranked above the sort, falling through when unheld — sensor truth
+  still wins) and holds_hostile (the host's "sees it too" echo query);
+  WingmanModule grows command_rejoin() (the lead's order driving the
+  formation SM from the other side, mirroring the blowout transition).
+- f4-ai: BrainComponent's flight-command step sits after the fuel
+  check, before the ladder — lead side publishes the radio rows (bus,
+  host-stamped clock mirroring the sensor components' rule) and latches
+  rtb_ordered_ on lead_rtb(); wingman side acks once per order and
+  applies (rejoin / engage hint / RTB). The ladder's bingo branch is now
+  fuel_bingo_ || rtb_ordered_ (the "RTB" mode line included). The
+  engagement the step reads is LAST tick's — captured before the ladder
+  resets combat_mode_ (the step ran before the ladder; reading
+  combat_engagement_id() in place always answered 0 — caught by the E2E).
+- f4-simulation: the scenario's top-level "ai" block (flight_lead,
+  default FALSE — the byte-identical gate); resolve_wingman_refs arms
+  both brains of each pair + registers the roster; the tick stamps the
+  host clock + pushes the echoes (push_flight_lead_echoes) next to the
+  lead pictures, and applies the lead's orders after update_all
+  (apply_flight_lead_orders — one-tick latency, the established push
+  discipline; a dead lead commands nothing). CombatTranscript renders
+  the vocabulary (four lines, Info severity).
+- Tests: f4-ai/tests/test_flight_lead_module.cpp (11 cases — the three
+  rules' edges, latches, and re-arms; the corpse rule; duplicate
+  registration; the inert shape; unregistered echoes) and
+  f4-simulation/tests/test_flight_lead_e2e.cpp (5 tiers — the gate-off
+  twin with member-for-member identical kinematics; rejoin order → ack
+  → converged, order-before-ack; engage-my-target outranking the sort
+  with a free bandit available; the RTB order with the lead standing
+  down on a HEALTHY tank (mode_name "RTB", fuel_state Normal); the
+  done-when arc formation → engaged as a flight → RTB on bingo with the
+  RTB order + ack in the log).
+- Verification: f4-ai label 347/347; the affected sim suites green
+  (datalink tiers 8, formation acceptance, simdata wiring 13, combat
+  integration 31, AAR E2E, digi mission 3, FidelityTiers 13 — the AGG-4
+  pins hold); the fast f4-simulation label's 12 failures are EXACTLY
+  the documented CAMP-TOT-PACE set; the new suites green under
+  ASan+UBSan with zero reports (84 f4-ai tests + the E2E 5 + the
+  transcript 3). E2E debugging notes: the engage order exposed the
+  ladder-reset staleness (fixed in the brain); the arc's doubled
+  engagement is timing-shaped (the one-tick-stale hint can pre-double
+  the flight through the sort's support-the-kill — both paths converge;
+  the arc pins the deterministic RTB line, the engage tier pins the
+  order in isolation). One environment artifact: the disk filled during
+  the sanitizer build (a second build tree does not fit alongside the
+  main one) — resolved by pruning stale caches and the slow-gate
+  campaign binaries (cmake relinks them on demand).
+
+Stage Summary:
+- Step 14 is CLOSED as-built: a two-ship with the gate on holds
+  formation, engages a bandit as a flight, and RTBs on bingo — with the
+  radio log showing the closed vocabulary. The plan's Part-III landing
+  order now reads: Step 13 (datalink) DONE → Step 14 (flight lead)
+  DONE → Step 15 (support brains) NEXT.
+- As-built deviations documented in the plan: the echoes ride the
+  host-is-the-eyes discipline (the spec's "wingman status message"
+  never existed), and the kill/loss half of the wing vocabulary rides
+  the existing M4 narration (no duplicate radio lines).
+- Produced 0006-STEP-14.patch for the user's commit-and-push flow.

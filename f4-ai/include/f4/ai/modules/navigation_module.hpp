@@ -131,6 +131,14 @@ public:
     // (the module starts and stays Done — a takeoff-only mission).
     void set_route(std::vector<Waypoint> route);
 
+    /// FID-4 splice: fly the route FROM index (the aircraft joins
+    /// mid-route at a deaggregate — set_route() alone restarts at
+    /// route[0], turning the aircraft backward and diving it to the
+    /// first waypoint's altitude). Resets the same state set_route
+    /// resets; leg_from_ seeds from route[index-1] so the abeam
+    /// capture on the first leg stays coherent.
+    void resume_from(std::size_t index);
+
     // --- Per-tick update ---
     // Same contract as TakeoffModule::update: caches state, fires
     // transitions, returns control outputs for the current state.

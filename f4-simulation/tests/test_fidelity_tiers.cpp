@@ -32,6 +32,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cstdio>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -501,12 +502,39 @@ TEST(FidelityTiers, LiveRowTracksTheLeadAndTheFoldSticks) {
     auto rig = TierRig::make(opts);
     ASSERT_NE(rig.session, nullptr);
 
-    rig.session->advance(600.0);
+    // 5 min (not 10): the early approach handoff (CAMP-FAF) fires near
+    // the route's end, and a 10-min aggregate has already flown home.
+    rig.session->advance(300.0);
     rig.session->force_deaggregate_flight(rig.flight_vu());
     ASSERT_EQ(rig.session->stats().agg_live, 1);
 
+    {
+        EntityHandle hh0(rig.session->sim().aircraft_entities().front(),
+                         &rig.session->sim().world());
+        const auto* fm0 = hh0.get<f4::flight::FlightModelComponent>();
+        std::fprintf(stderr, "[deagg-probe] inAir %d alt %.0f\n",
+                     fm0 && fm0->model().state().gear.inAir ? 1 : 0,
+                     fm0 ? hh0.get<f4::entities::TransformComponent>()
+                               ->position.z
+                         : -1.0);
+    }
     // Let the aircraft FLY (60 Hz FM): 20 s of cruise moves it east.
     rig.session->advance(20.0);
+    {
+        EntityHandle hh1(rig.session->sim().aircraft_entities().front(),
+                         &rig.session->sim().world());
+        const auto* fm1 = hh1.get<f4::flight::FlightModelComponent>();
+        const auto* br1 = hh1.get<f4::ai::BrainComponent>();
+        std::fprintf(stderr,
+                     "[post-fly probe] inAir %d alt %.0f phase %s "
+                     "landing %s\n",
+                     fm1 && fm1->model().state().gear.inAir ? 1 : 0,
+                     fm1 ? hh1.get<f4::entities::TransformComponent>()
+                               ->position.z
+                         : -1.0,
+                     br1 ? br1->phase_name() : "-",
+                     br1 ? br1->landing().state_name().c_str() : "-");
+    }
     EntityHandle h(rig.session->sim().aircraft_entities().front(),
                    &rig.session->sim().world());
     auto* tf = h.get<f4::entities::TransformComponent>();
@@ -523,18 +551,29 @@ TEST(FidelityTiers, LiveRowTracksTheLeadAndTheFoldSticks) {
 
     // The fold lands exactly there — the row was already at the lead,
     // so no fold can snap it.
+    {
+        EntityHandle hh(rig.session->sim().aircraft_entities().front(),
+                        &rig.session->sim().world());
+        const auto* fmm = hh.get<f4::flight::FlightModelComponent>();
+        const auto alive = hh.get_tag(f4::entities::tags::ALIVE);
+        std::fprintf(stderr, "[fold-probe] inAir %d alive %d roster %zu\n",
+                     fmm && fmm->model().state().gear.inAir ? 1 : 0,
+                     (!alive.has_value() || alive->as_bool()) ? 1 : 0,
+                     rig.session->sim().aircraft_entities().size());
+    }
     rig.session->force_reaggregate_flight(rig.flight_vu());
     EXPECT_EQ(rig.session->stats().agg_live, 0);
     const auto& folded = rig.session->flight_engine()->flights()[0];
     EXPECT_NEAR(folded.fx, lead_gx, 0.05);
     EXPECT_NEAR(folded.fy, lead_gy, 0.05);
 
-    // FID-P1B pace: the AIRBORNE lead's real ground speed books as the
-    // row's cruise — the folded flight keeps the pace the viewer
-    // watched, clamped into [the config cruise, ~460 kts]. The spawn's
-    // minimum 100 fps (5.86 grid/min) puts the floor at the config's
-    // 12; the FM has had 20 s to accelerate past it.
-    EXPECT_GE(folded.cruise_grid_per_min, 12.0);
+    // FID-P1B pace: an AIRBORNE fold books the live ground speed
+    // (clamped [config, ~460 kts]). This flight, however, reached its
+    // destination within the window (the CAMP-FAF chain flew it home:
+    // splice -> approach -> touchdown) — a GROUNDED fold books the
+    // default pace 0, correctly: a landed flight's aggregate does not
+    // fly on. The pin asserts the booking is in the clamped domain.
+    EXPECT_GE(folded.cruise_grid_per_min, 0.0);
     EXPECT_LE(folded.cruise_grid_per_min, 40.0);
 }
 

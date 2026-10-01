@@ -1740,6 +1740,57 @@ nodes) pass inside the existing single walk.
 
 ### Step 14: FlightLeadModule — the lead half of flight command
 
+**LANDED (STEP-14)** — the chapter closed as-built. The f4-ai half:
+`wingradio.hpp` (the CLOSED `WingRadio` enum — `OrderRejoin` /
+`OrderEngageMyTarget` / `OrderRTB` / `Ack` — plus the bus message and
+the host-carried order envelope; AI code publishes enum rows only, the
+plan's risk-table rule) + `flight_lead_module.hpp` (the pure CommandFlight()
+tranche beside `WingmanModule`: roster + per-tick `WingmanEcho`es in,
+edge-triggered orders out — REJOIN on the wingman's own Rejoining echo,
+latched until it reports Following; ENGAGE when the lead fights a bandit
+the wingman holds and is not on, the order following the lead's target
+and the wingman's targeting ranking it via
+`SensorFusion::preferred_threat_target` (sensor truth still wins: an
+unheld track falls through to the plain sort); RTB once per flight at
+the wingman's bingo with v1's both-RTB — `lead_rtb()` latches the LEAD's
+own stand-down) + the brain's flight-command step (after the fuel check,
+before the ladder: the lead publishes the radio rows on the bus with the
+host-stamped clock and drains its inbox; the wingman acks once per order
+and applies — rejoin drives the formation SM from the other side via
+`WingmanModule::command_rejoin()`, engage sets the ladder's ordered
+preference, RTB takes the bingo path `fuel_bingo_ || rtb_ordered_`, the
+"RTB" mode line included). The f4-simulation half: the scenario's
+top-level `"ai"` block arms the tranche (`"flight_lead"`, default FALSE
+— the byte-identical gate); `resolve_wingman_refs` arms both brains of
+each pair + registers the roster; the tick pushes the echoes next to the
+lead pictures (`push_flight_lead_echoes` — formation state, fuel state,
+engagement, and `SensorFusion::holds_hostile(lead_target)` as the "sees
+it too" guard) and applies the orders after `update_all` (one-tick
+latency, the established push discipline; a dead lead commands nothing —
+the corpse rule). The transcript renders the vocabulary ("EAGLE2,
+rejoin." / "EAGLE2, engage my target." / "EAGLE2, RTB." / "Copy.").
+
+As-built shape notes: (1) the spec's "existing wingman status message
+the Step-11 wingman already publishes" does not exist — the landed
+Step-11 pattern is the host reading brains and pushing pictures, so the
+echoes ride the same host-is-the-eyes discipline (no new bus telemetry);
+(2) the kill/loss half of the spec's wingradio vocabulary rides the
+EXISTING M4 narration (`EntityKilledMessage` → "Splash ... shot down by
+...", `RadarTrackDroppedMessage` → "Lost the picture on ...") — v1 adds
+only the order/ack cycle the transcript was missing, so the log never
+carries a duplicate line; (3) the engagement the lead's step reads is
+LAST tick's (captured before the ladder resets the combat mode) — the
+same freshness every host push and brain-to-brain hint carries, which
+makes the wingman's FIRST lock able to double the lead's bandit through
+the sort's support-the-kill before any order is needed (both paths
+converge on the same flight behavior; the order's own semantics are
+pinned in isolation). Pins: `test_flight_lead_module.cpp` (11 cases) +
+`test_flight_lead_e2e.cpp` (5 tiers — the gate-off twin with
+member-for-member identical runs, rejoin order → ack → converged,
+engage-my-target outranking the sort, the RTB order with the lead
+standing down on a healthy tank, and the done-when arc formation →
+engaged as a flight → RTB on bingo).
+
 **FreeFalcon reference**: `flitlead.cpp` — `CommandFlight()` (the lead's
 per-frame flight-level decision routine), `CheckLead()`; the response half
 `wingradio.cpp` — `AiMakeRadioResponse()` (~867 lines; v1 lands the message

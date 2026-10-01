@@ -13,6 +13,7 @@
 #include <f4/sensors/rwr.hpp>
 #include <f4/weapons/messages.hpp>
 #include <f4/weapons/weapon_types.hpp>
+#include <f4/ai/wingradio.hpp>   // Step 14: the wing-radio vocabulary
 
 #include <algorithm>
 #include <cmath>
@@ -208,6 +209,41 @@ void CombatTranscript::attach(Simulation& sim) {
             push(m.sim_time_s, callsign_of(m.shooter_id),
                  "Guns, guns, guns on " + callsign_of(m.target_id) + ".",
                  Severity::Warning);
+        });
+
+    // ── AI: the wing radio (Step 14) ─────────────────────────────────
+    // The flight-lead tranche's closed vocabulary (wingradio v1): the
+    // lead's orders + the wingman's acknowledgment. The AI published
+    // ENUM ROWS only — the text rendering lives HERE (the plan's
+    // risk-table rule: no free-form strings from AI code). The
+    // kill/loss half of the wing vocabulary rides the existing M4
+    // narration above (splash carries the shooter's name; track drops
+    // speak for themselves). Gate: no WingRadioMessage is ever
+    // published unless the scenario armed ai.flight_lead — an unarmed
+    // world never sees one of these lines.
+    bus.subscribe<f4::ai::WingRadioMessage>(
+        [this](const f4::ai::WingRadioMessage& m) {
+            const std::string speaker = callsign_of(m.sender_id);
+            switch (m.event) {
+                case f4::ai::WingRadio::OrderRejoin:
+                    push(m.time_s, speaker,
+                         callsign_of(m.peer_id) + ", rejoin.",
+                         Severity::Info);
+                    break;
+                case f4::ai::WingRadio::OrderEngageMyTarget:
+                    push(m.time_s, speaker,
+                         callsign_of(m.peer_id) + ", engage my target.",
+                         Severity::Info);
+                    break;
+                case f4::ai::WingRadio::OrderRTB:
+                    push(m.time_s, speaker,
+                         callsign_of(m.peer_id) + ", RTB.",
+                         Severity::Info);
+                    break;
+                case f4::ai::WingRadio::Ack:
+                    push(m.time_s, speaker, "Copy.", Severity::Info);
+                    break;
+            }
         });
 }
 

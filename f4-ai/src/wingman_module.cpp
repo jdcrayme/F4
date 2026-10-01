@@ -124,6 +124,20 @@ void WingmanModule::command_formation_slot(
     formation_slot_name_ = formation.name;
 }
 
+void WingmanModule::command_rejoin() {
+    // The LEAD's rejoin order (Step 14) — the same transition the
+    // module's own blowout rule fires, applied because the lead
+    // commanded it. Guards mirror the FSM's shape: no picture = nothing
+    // to form on; already Rejoining = the order echoed a blowout the
+    // module found first (the lead's latch holds the radio line, the
+    // SM does not double-fire); already None = the LeadAcquired path
+    // reclassifies on the next picture anyway.
+    if (!picture_.valid) return;
+    if (sm_.current() == WingState::Following) {
+        sm_.process(WingEvent::StationLost);
+    }
+}
+
 void WingmanModule::reset() {
     sm_ = build_sm();
     picture_ = LeadPicture{};

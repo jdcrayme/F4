@@ -210,6 +210,14 @@ public:
     /// over so the wingman crosses to the new slot (Rejoining if far).
     void command_formation(FormationType form);
 
+    /// Step 14: the LEAD's rejoin order, driven from the other side —
+    /// the same SM transition the module's own blowout rule fires
+    /// (StationLost), applied because the lead commanded it. No-op when
+    /// the module is already Rejoining (the order echoed a blowout the
+    /// module found first), has no live picture (nothing to form on),
+    /// or is not following anything yet.
+    void command_rejoin();
+
     // --- Data-driven formations (FORMDAT.FIL via f4-data) ---------------
     /// Fly the 2-ship station from a REAL FORMDAT.FIL formation
     /// (formation.two_ship: relAz deg / relEl deg / range NM in the
