@@ -372,6 +372,15 @@ struct GearState {
     std::vector<Wheel> wheels;                    // sized to config.gear.size()
     bool   inAir{true};                           // true = airborne
     bool   planted{false};                        // stationary on ground
+    /// REPAIR-T1: one-shot latch, set when the FM transitions
+    /// airborne -> on-ground. The host's crash arbiter (Simulation's
+    /// ground-contact sweep) consumes and clears it — a touchdown in a
+    /// landing context is aviation, anywhere else is a crash, and
+    /// before this latch the transition published NOTHING: an aircraft
+    /// that flew into terrain became an immortal on-ground zombie the
+    /// war booked as merely "not airborne". Reading is via
+    /// FlightModel::take_touchdown_event(), which clears the latch.
+    bool   touchdown_event{false};
     double groundZ_ft{0.0};                       // terrain altitude (MSL, positive up)
     math::Vec3d groundNormal{0.0, 0.0, -1.0};     // terrain up vector (NED: -Z is up)
     double muFric{0.04};                          // current friction coefficient

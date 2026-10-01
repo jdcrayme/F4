@@ -297,6 +297,13 @@ void FlightModel::updateGear(double dt) {
     if (g.inAir && anyOnGround) {
         g.inAir = false;
         g.planted = false;
+        // REPAIR-T1: the transition itself is now observable. The FM
+        // stays dumb — it cannot know landing intent; the host's crash
+        // arbiter classifies the touchdown (see the GearState latch
+        // note). Before this latch the airborne->ground transition was
+        // silent, and a route-following aircraft that descended into
+        // terrain lived forever as an on-ground zombie.
+        g.touchdown_event = true;
     }
 
     // Lift-off detection: transition from ground to airborne.

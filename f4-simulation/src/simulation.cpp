@@ -460,6 +460,15 @@ void Simulation::record_wvr_band_flips(double sim_time_s) {
     }
 }
 
+double Simulation::ground_elevation_ft(double east_ft,
+                                       double north_ft) {
+    // The tick loop's own query shape (the configured source, else the
+    // flat default) — one definition of "what is the ground here".
+    f4::terrain::TerrainSource* ts =
+        terrain_source_ ? terrain_source_ : &default_terrain_;
+    return ts->elevation_at_ft(east_ft, north_ft);
+}
+
 bool Simulation::retire_aircraft(entities::EntityId id) {
     // C5's wreck reaper — see the header for the lifetime contract.
     // Order of operations: every in-memory reference to the id is
@@ -491,9 +500,128 @@ bool Simulation::retire_aircraft(entities::EntityId id) {
                                p) { return p->ownship_id() == v; }),
         combat_policies_.end());
 
+    // REPAIR-T1: the zombie detector's timer dies with the aircraft.
+    enroute_grounded_s_.erase(id.value);
+
     world_.destroy(id);
     ++retired_aircraft_;
     return true;
+}
+
+void Simulation::crash_aircraft_(entities::EntityId id, double sim_time_s,
+                                 const char* why) {
+    if (!id.valid()) return;
+    auto h = entities::EntityHandle(id, &world_);
+
+    // The kill, exactly the combat chain's shape: DamageStateComponent
+    // flips (or appears — every consumer's rule is "nullptr == alive",
+    // so a combat-off world's crashed aircraft needs the component to
+    // read as dead), then EntityKilledMessage flows and the existing
+    // subscribers do their jobs: the C1 sink books the loss (cause
+    // rides into the kill event's wire weapon field), the reaper
+    // schedules the corpse's removal, the deagg fold records the kill.
+    auto* dmg = h.get<entities::DamageStateComponent>();
+    if (dmg != nullptr) {
+        dmg->killed = true;
+        dmg->killed_by = 0;   // environmental — no shooter
+    } else {
+        h.add<entities::DamageStateComponent>().killed = true;
+    }
+
+    // Park the corpse NOW: nothing else stops a killed aircraft's FM
+    // (the C5 "wrecks don't fly" comment named the intent — the dormant
+    // flag is its mechanism, the same park the squadron inventory uses).
+    // Both flags before the publish so the same-tick subscribers see a
+    // parked, dead entity, never a flying one.
+    if (auto* brain = h.get<f4::ai::BrainComponent>();
+        brain != nullptr && !brain->is_dormant()) {
+        brain->set_dormant(true);
+    }
+    if (auto* fm = h.get<f4::flight::FlightModelComponent>();
+        fm != nullptr && !fm->is_dormant()) {
+        fm->set_dormant(true);
+    }
+    enroute_grounded_s_.erase(id.value);
+
+    if (std::getenv("F4_CRASH_DEBUG") != nullptr) {
+        std::fprintf(stderr, "[crash] id=%llu t=%.1f why=%s\n",
+                     (unsigned long long)id.value, sim_time_s, why);
+    }
+    bus_.publish(
+        f4::weapons::EntityKilledMessage{id.value, /*shooter=*/0,
+                                         sim_time_s, why});
+}
+
+void Simulation::sweep_ground_contacts_(double sim_time_s) {
+    // One walk over the live roster (small — the parked inventory is a
+    // different list and dormant components never reach here with an
+    // FM that could touch down). Two classifications per aircraft:
+    //
+    //   (a) the FM's one-shot airborne->ground latch — a touchdown
+    //       outside a landing/takeoff-owned brain phase is a crash;
+    //   (b) the zombie detector — a brain in Enroute while its FM reads
+    //       on-ground past the grace is a crash even without a fresh
+    //       transition (the NAV-D1 ground-spawned flight never leaves
+    //       the ground, so no transition ever fires for it).
+    //
+    // Determinism: the walk is roster order, the timers advance by dt,
+    // the publishes are synchronous bus order — same inputs, same
+    // verdicts, same bytes.
+    for (const auto eid : aircraft_entities_) {
+        entities::EntityHandle h(eid, &world_);
+        auto* fm = h.get<f4::flight::FlightModelComponent>();
+        if (fm == nullptr) continue;
+
+        // Already dead (combat kill, or this sweep's own earlier
+        // verdict): never classify again — a second EntityKilledMessage
+        // would double-book the loss in the C1 sink. The corpse's
+        // publication contract is exactly one message per aircraft.
+        if (auto* dmg = h.get<entities::DamageStateComponent>();
+            dmg != nullptr && dmg->killed) {
+            enroute_grounded_s_.erase(eid.value);
+            continue;
+        }
+
+        auto* brain = h.get<f4::ai::BrainComponent>();
+
+        // (a) consume the latch first — exactly once per transition.
+        const bool touched = fm->take_touchdown_event();
+        if (touched) {
+            // Ground = the takeoff FSM owns the aircraft (a bounced
+            // rotation settles); Approach = the landing FSM owns it
+            // (its own GoAround/re-attack ladder, Rollout, TaxiIn);
+            // Complete = parked / mission done. Everything else — an
+            // Enroute, combat-flying, or retasking aircraft that met
+            // the ground — is a crash (REPAIR-T1: the old behavior was
+            // silence, and silence was the mass disappearance).
+            using Ph = f4::ai::BrainComponent::Phase;
+            const Ph phase = (brain != nullptr)
+                                 ? brain->phase()
+                                 : Ph::Complete;  // no brain: not flying
+            if (phase != Ph::Ground && phase != Ph::Approach &&
+                phase != Ph::Complete) {
+                crash_aircraft_(eid, sim_time_s, "terrain");
+                continue;
+            }
+        }
+
+        // (b) the Enroute-on-ground timer: first sight stamps the sim
+        // time; the crash fires once the sight age passes the grace.
+        const bool grounded_enroute =
+            brain != nullptr &&
+            brain->phase() == f4::ai::BrainComponent::Phase::Enroute &&
+            !fm->state().gear.inAir;
+        if (!grounded_enroute) {
+            enroute_grounded_s_.erase(eid.value);
+            continue;
+        }
+        const auto [it, inserted] =
+            enroute_grounded_s_.emplace(eid.value, sim_time_s);
+        if (!inserted &&
+            (sim_time_s - it->second) >= kEnrouteGroundedGraceS) {
+            crash_aircraft_(eid, sim_time_s, "grounded-enroute");
+        }
+    }
 }
 
 void Simulation::ensure_campaign_brain_data() {
@@ -3223,6 +3351,14 @@ void Simulation::tick(double dt) {
             weapons::sweep_expired_decoys(world_, t_now);
         }
     }
+
+    // REPAIR-T1 (CAMPAIGN_REPAIR_PLAN.md): ground-contact truth —
+    // classify every touchdown and every Enroute-on-ground corpse.
+    // Unconditional: combat-off worlds wedge exactly the same way (the
+    // QC scenario path proved it). Runs before the transform sync so
+    // the crash's killed/parked state lands in the same tick it was
+    // decided.
+    sweep_ground_contacts_(t_now);
     const auto prof_t5 = g_prof.on ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
 

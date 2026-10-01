@@ -211,6 +211,10 @@ public:
 
     [[nodiscard]] const AircraftState& state() const noexcept { return fm_.state(); }
 
+    /// REPAIR-T1: read-and-clear the touchdown latch (the host crash
+    /// arbiter's per-tick consume; see FlightModel::take_touchdown_event).
+    bool take_touchdown_event() noexcept { return fm_.take_touchdown_event(); }
+
     // --- Pending input slot (brain writes here) ---
     // Written by BrainComponent::update() in pass 1, read by this
     // component's update() in pass 2.

@@ -382,3 +382,59 @@ TEST(FlightModelTest, TrimConvergenceAtMultipleConditions) {
             << "Alpha above +30 deg at " << cond.label << ": " << alpha_deg;
     }
 }
+
+// ============================================================================
+// ============================================================================
+// REPAIR-T1: the touchdown latch (Docs/CAMPAIGN_REPAIR_PLAN.md T1)
+//
+// The airborne->ground transition is now observable: the FM latches it
+// one-shot, and the host's crash arbiter consumes it with
+// take_touchdown_event() (read-and-clear). Before the latch the
+// transition was silent, and a route-following aircraft that descended
+// into terrain lived forever as an on-ground zombie.
+// ============================================================================
+
+TEST(FlightModelTest, TouchdownLatchFiresOncePerTransition) {
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP();
+
+    FlightModel fm;
+    fm.init(cfg, 1000.0, 500.0, 0.0, true);  // airborne, cruising
+
+    PilotInput idle;
+    const double dt = 1.0 / 60.0;
+    const Vec3d groundNormal{0.0, 0.0, -1.0};
+
+    // Before any contact: no latch.
+    EXPECT_FALSE(fm.take_touchdown_event());
+
+    // Force the contact: 1 ft over the runway, airborne. At cruise
+    // speed the liftoff gate may bounce the aircraft straight back
+    // airborne (cruise lift exceeds the margin) — the FM is being the
+    // FM; the LATCH is the truth under test.
+    fm.state().kin.z = -1.0;
+    fm.state().gear.inAir = true;
+    for (int frame = 0; frame < 10; ++frame) {
+        fm.update(dt, idle, 0.0, groundNormal);
+    }
+    EXPECT_TRUE(fm.take_touchdown_event())
+        << "the airborne->ground transition never latched";
+    // One-shot: the read cleared it.
+    EXPECT_FALSE(fm.take_touchdown_event());
+
+    // The settled case: slow (no lift bounce), on the ground, stays.
+    fm.state().kin.z = -1.0;
+    fm.state().gear.inAir = true;
+    fm.state().kin.vt = 50.0;
+    for (int frame = 0; frame < 10; ++frame) {
+        fm.update(dt, idle, 0.0, groundNormal);
+    }
+    ASSERT_FALSE(fm.state().gear.inAir) << "the slow contact never settled";
+    EXPECT_TRUE(fm.take_touchdown_event());  // the settle's own transition
+    for (int frame = 0; frame < 120; ++frame) {
+        fm.update(dt, idle, 0.0, groundNormal);
+    }
+    EXPECT_FALSE(fm.state().gear.inAir) << "the settled aircraft lifted off";
+    EXPECT_FALSE(fm.take_touchdown_event())
+        << "a grounded aircraft re-latched without a liftoff";
+}

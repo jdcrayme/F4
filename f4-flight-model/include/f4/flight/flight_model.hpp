@@ -108,6 +108,16 @@ public:
         state_.gear.groundNormal = normal;
     }
 
+    /// REPAIR-T1: read-and-clear the one-shot airborne->ground
+    /// transition latch. True exactly once per touchdown until the next
+    /// liftoff+touchdown cycle; the host's crash arbiter is the
+    /// consumer (a touchdown outside a landing context is a crash).
+    bool take_touchdown_event() noexcept {
+        const bool fired = state_.gear.touchdown_event;
+        state_.gear.touchdown_event = false;
+        return fired;
+    }
+
     /// Recompute load factors from the current force state.
     void computeLoadFactors();
 

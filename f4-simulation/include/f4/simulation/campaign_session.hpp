@@ -1148,6 +1148,17 @@ private:
     void deaggregate_flight_(std::size_t index,
                              DeaggregatedFlight::Trigger trigger);
 
+    /// REPAIR-T1: the air-spawn pose's altitude floor. The aggregate
+    /// face of a STAGED flight sits at its base — deck level — and an
+    /// Enroute brain materialized there at cruise throttle met the
+    /// ground within the first seconds (pre-T1: a silent on-ground
+    /// zombie; post-T1: an instant, honest, and still wrong crash).
+    /// The pose never spawns below terrain + 500 ft AGL.
+    static constexpr double kAirSpawnMinAglFt = 500.0;
+    [[nodiscard]] double air_spawn_altitude_ft(double east_ft,
+                                               double north_ft,
+                                               double alt_ft) const;
+
     /// FID-4: fold one live flight back (the reagg half): lead-aircraft
     /// state into the engine, the aircraft retired; an all-dead flight
     /// folds as destroyed. Returns true when a fold happened.

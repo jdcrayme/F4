@@ -2933,6 +2933,17 @@ void CampaignSession::evaluate_combat_() {
     rebuild_aggregate_feed_();
 }
 
+double CampaignSession::air_spawn_altitude_ft(double east_ft,
+                                              double north_ft,
+                                              double alt_ft) const {
+    // REPAIR-T1 (see the header): the pose never materializes an
+    // Enroute-brain aircraft at deck level — the floor is terrain +
+    // kAirSpawnMinAglFt. The tier face's own altitude stays the truth
+    // whenever it is already above the floor.
+    const double ground = sim_->ground_elevation_ft(east_ft, north_ft);
+    return std::max(alt_ft, ground + kAirSpawnMinAglFt);
+}
+
 void CampaignSession::deaggregate_flight_(
     std::size_t index, DeaggregatedFlight::Trigger trigger) {
     const auto& f = flights_->flights()[index];
@@ -3033,7 +3044,8 @@ void CampaignSession::deaggregate_flight_(
             aggregate_face_(index, fx, fy, alt);
             pose.position = f4::geo::WorldPosition{
                 fx * kFtPerGrid, fy * kFtPerGrid,
-                static_cast<double>(alt)};
+                air_spawn_altitude_ft(fx * kFtPerGrid, fy * kFtPerGrid,
+                                      static_cast<double>(alt))};
             pose.heading_rad = flights_->current_heading_rad(index);
             // Cruise: the row's OWN effective cruise (a folded flight's
             // booked ground speed; else the engine constant) — grid/min
@@ -3071,7 +3083,8 @@ void CampaignSession::deaggregate_flight_(
         aggregate_face_(index, fx, fy, alt);
         pose.position = f4::geo::WorldPosition{
             fx * kFtPerGrid, fy * kFtPerGrid,
-            static_cast<double>(alt)};
+            air_spawn_altitude_ft(fx * kFtPerGrid, fy * kFtPerGrid,
+                                  static_cast<double>(alt))};
         pose.heading_rad = flights_->current_heading_rad(index);
         // Cruise: the row's OWN effective cruise (grid/min → ft/s).
         pose.vt_fps =

@@ -103,21 +103,21 @@ std::string combat_world_json() {
        "airbase_id": 4101, "class_name": "105 FES"},
       {"type": 200, "id_num": 5001, "unit_class": "flight",
        "entity_type": 273, "domain": 2,
-       "x": 400, "y": 455, "z": 20000, "flight_altitude": 20000,
+       "x": 400, "y": 455, "z": 40000, "flight_altitude": 40000,
        "owner": 2, "mission": 7, "squadron_id": 4281,
        "package_id": 7029, "time_on_target": 43739352,
        "waypoints": [
-         {"x": 400, "y": 455, "z": 20000, "action": 15},
-         {"x": 470, "y": 455, "z": 20000, "action": 17}
+         {"x": 400, "y": 455, "z": 40000, "action": 15},
+         {"x": 470, "y": 455, "z": 40000, "action": 17}
        ]},
       {"type": 200, "id_num": 5002, "unit_class": "flight",
        "entity_type": 273, "domain": 2,
-       "x": 424, "y": 457, "z": 22000, "flight_altitude": 22000,
+       "x": 424, "y": 457, "z": 42000, "flight_altitude": 42000,
        "owner": 6, "mission": 7, "squadron_id": 4282,
        "package_id": 7030, "time_on_target": 43739352,
        "waypoints": [
-         {"x": 424, "y": 457, "z": 22000, "action": 15},
-         {"x": 354, "y": 457, "z": 22000, "action": 17}
+         {"x": 424, "y": 457, "z": 42000, "action": 15},
+         {"x": 354, "y": 457, "z": 42000, "action": 17}
        ]},
       {"type": 200, "id_num": 5003, "unit_class": "flight",
        "entity_type": 273, "domain": 2,
@@ -413,7 +413,7 @@ TEST(CombatDeagg, ConvergingAggregatesDeaggregateBoth) {
     // is still a published contact (the picture's aggregate form).
     EXPECT_EQ(st.agg_contacts, 1);
 
-    // Both spawned AIRBORNE at their aggregates' poses (20k/22k ft —
+    // Both spawned AIRBORNE at their aggregates' poses (40k/42k ft —
     // an air spawn; the flights had departed long before).
     for (const auto eid : rig.session->sim().aircraft_entities()) {
         EntityHandle h(eid, &rig.session->sim().world());

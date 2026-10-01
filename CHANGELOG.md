@@ -5,6 +5,27 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## REPAIR-T1 — ground-contact truth (the terrain-zombie killer)
+
+CAMPAIGN_REPAIR_PLAN.md's keystone tranche, landed as-built: the FM's
+airborne→ground transition latches one-shot (`GearState::
+touchdown_event` + `take_touchdown_event()`), and `Simulation::tick`'s
+new `sweep_ground_contacts_()` classifies every touchdown by brain
+phase — a landing/takeoff-owned phase is aviation, anything else is a
+CRASH: the corpse parks (dormant brain + FM) and
+`EntityKilledMessage(cause="terrain")` flows to the sink, the reaper,
+and the fold. The zombie detector kills an Enroute-on-ground aircraft
+past a 10 s grace (the NAV-D1 ground-spawned flight never produces a
+transition). The FID-4 air-spawn pose floors at terrain + 500 ft (a
+staged flight's aggregate face is deck level — pre-T1 a silent zombie,
+post-T1 an instant crash). The armed 0.3-h war now books 94 terrain
+kills / 94 retires / a non-empty ledger where it booked ZERO losses for
+the same silent wedges (C5 verdicts green, ledger MD5 re-pinned);
+the BARCAP run books its losses; the stock-landing flight engages the
+approach instead of zombie-cruising. The combat WVR merge exposed as a
+real pre-existing defect (a ~30k-fpm dive meets the deck mid-fight —
+T5 evidence). Docs/CAMPAIGN_REPAIR_PLAN.md §T1 carries the as-built.
+
 ## Step 15 — the specialist support brains (FAC + the station brains)
 
 AI_IMPLEMENTATION_PLAN.md §16's Step 15, landed as-built: the Part-III

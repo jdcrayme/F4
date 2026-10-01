@@ -92,7 +92,46 @@ Ordering is by leverage: T1+T2 kill the disappearances, T3+T4 complete
 the takeoff→fly→land chain, T5 restores the fight, T6 keeps it fixed.
 **No feature tranche starts before all gates are green.**
 
-### T1 — ground-contact truth (the keystone)
+### T1 — ground-contact truth (the keystone) — **LANDED (2026-10-01)**
+
+As-built: the FM's airborne→ground transition latches
+(`GearState::touchdown_event`, read-and-clear via
+`FlightModel::take_touchdown_event()`); `Simulation::tick` runs
+`sweep_ground_contacts_()` after `update_all` + the world sweeps and
+before the transform sync — the crash verdict classifies the touchdown
+by brain phase (Ground/Approach/Complete = aviation; anything else =
+`crash_aircraft_`: the DamageStateComponent flips or appears, the
+corpse PARKS — dormant brain + FM, the mechanism the C5 "wrecks don't
+fly" comment named but nothing implemented — and
+`EntityKilledMessage(cause="terrain")` flows), and the zombie detector
+kills an Enroute brain whose FM reads on-ground past a 10 s grace
+(`cause="grounded-enroute"`; erase-on-clear + erase-on-retire keeps the
+timers honest). Already-dead aircraft are never re-classified (one
+message per aircraft — a second would double-book the loss). Found en
+route and fixed in the same tranche: the FID-4 air-spawn pose of a
+STAGED flight sat at deck level (the aggregate face at its base), so
+the Enroute brain materialized at cruise throttle 6 ft over the ramp —
+pre-T1 a silent zombie, post-T1 an instant crash; the pose now floors
+at terrain + 500 ft (`air_spawn_altitude_ft`), and
+`Simulation::ground_elevation_ft()` exposes the tick's own query for
+it. Measured (this machine, Release): the armed 0.3-h war now books
+**94 terrain kills / 94 retires / a non-empty ledger** where it
+previously booked ZERO losses for the same silent wedges (all four C5
+verdicts still green, ledger deterministic across runs — MD5 re-pinned
+as the plan's §4 anticipated); the BARCAP filtered run books its two
+losses (`air_losses=2`, writeback non-empty); the stock-landing
+observed flight no longer zombie-cruises at deck level — it now
+engages the approach chain (phase Approach, landing ProceedToFix; the
+remaining red is T3+T4's). `CombatDeagg.CombatWindowPinsThenFolds`
+surfaced a REAL pre-existing defect the silence was hiding: the WVR
+merge dives ~20k ft in ~40 s and met the deck mid-fight (T5 evidence;
+the fixture's fight raised to 40k/42k ft to keep the window pin
+airborne). Regression surface: GroundContact 5/5, FM 10/10,
+FidelityTiers 13/13, FlightAggregate 30/30, bridge/spawner/sink/
+bubble/register/frames green; the pre-existing reds unchanged
+(CombatIntegration 15, digi-mission 14 — stash-verified pre-existing,
+EventStream 2, CampaignSession BigCatchUp/Straddled 2, CombatDeagg
+CommittedFighter 1, ResultSink.DirtySync 1).
 
 - `f4-flight-model`: the touchdown transition sets a one-shot
   per-tick flag (the FM stays dumb — it does not know landing intent).

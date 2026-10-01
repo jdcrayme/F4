@@ -60,6 +60,12 @@ target_compile_definitions(test_fidelity_tiers PRIVATE
     F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
     F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
 )
+f4_simulation_add_test(test_ground_contact         test_ground_contact.cpp)   # REPAIR-T1
+target_compile_definitions(test_ground_contact PRIVATE
+    F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"
+    F4_GENERATED_FIXTURES_DIR="${F4_GENERATED_FIXTURES_DIR}"
+    F4_MISSION_PROFILES_JSON="${F4_MISSION_PROFILES_JSON}"
+)
 f4_simulation_add_test(test_campaign_stock_landing test_campaign_stock_landing.cpp)  # CAMP-LAND (F4_STOCK_WORLD-gated)
 target_compile_definitions(test_campaign_stock_landing PRIVATE
     F4_SOURCE_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/f4-world-convert/tests/fixtures"

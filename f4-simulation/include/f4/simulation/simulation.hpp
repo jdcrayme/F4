@@ -326,6 +326,12 @@ public:
     [[nodiscard]] f4::terrain::TerrainSource* terrain_source() const noexcept {
         return terrain_source_;
     }
+    /// REPAIR-T1: the tick loop's own elevation query (the configured
+    /// source, else the flat default), exposed for hosts that must
+    /// reason about terrain outside the tick — the session's air-spawn
+    /// pose floor is the first consumer.
+    [[nodiscard]] double ground_elevation_ft(double east_ft,
+                                             double north_ft);
 
     // --- V-3DLIVE: the view bubble (camera-driven deaggregation) --------
     /// Point the deaggregation bubble at the VIEWING position instead
@@ -911,6 +917,35 @@ private:
     /// band transitions first-class replayable evidence for the WVR
     /// harness's fight-alive gate.
     void record_wvr_band_flips(double sim_time_s);
+
+    // REPAIR-T1 (CAMPAIGN_REPAIR_PLAN.md): ground-contact truth. The
+    // FM's airborne->ground transition is a one-shot latch; this sweep
+    // (called once per tick, after update_all and the world-level
+    // sweeps, BEFORE the transform sync) classifies each touchdown: a
+    // landing/takeoff-owned brain phase (Ground/Approach/Complete) is
+    // aviation; anything else is a CRASH — the corpse parks (dormant
+    // brain + FM; nothing else stops a killed aircraft's FM today) and
+    // EntityKilledMessage(cause="terrain") flows, so the C1 sink books
+    // the loss, the reaper reaps the wreck, and the deagg fold records
+    // the kill. The same walk runs the zombie detector: a brain in
+    // Enroute while its FM reads on-ground past the grace (the
+    // NAV-D1 ground-spawned flight never has a touchdown transition to
+    // catch) is the same crash. Unconditional — combat-off worlds crash
+    // too (the QC scenario path wedges without it).
+    void sweep_ground_contacts_(double sim_time_s);
+    /// The shared crash verdict of T1: park + book + publish. why is
+    /// provenance only ("terrain" / "grounded-enroute") — both ride the
+    /// kill message's cause field into the kill event's wire weapon.
+    void crash_aircraft_(entities::EntityId id, double sim_time_s,
+                         const char* why);
+    /// The zombie detector's grace: an Enroute brain whose FM reads
+    /// on-ground longer than this is a terrain corpse (10 s — a bounced
+    /// takeoff or a go-around settles or climbs well inside it).
+    static constexpr double kEnrouteGroundedGraceS = 10.0;
+    /// Per-aircraft Enroute-on-ground timers (entity id -> accumulated
+    /// sim seconds). Only abnormal aircraft ever appear; entries erase
+    /// the tick the condition clears, and retire_aircraft drops them.
+    std::unordered_map<std::uint64_t, double> enroute_grounded_s_;
 
     // C5: aircraft removed via retire_aircraft() (the wreck-reaper
     // counter — roster == initial + registered − retired).
