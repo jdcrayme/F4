@@ -450,35 +450,35 @@ public:
         // NAV-D1: airborne-spawn Enroute start — hand the route straight
         // to the NavigationModule without waiting for a takeoff that
         // already "happened" before the scenario begins.
+        // T3: the contract requires ACTUAL AIRBORNE — the ops-window
+        // deagg of a not-yet-departed row materializes ON THE GROUND
+        // with an Enroute-start plan (the air-spawn contract misapplied),
+        // and the old ungrounded jump put the nav on the runway: gear
+        // down, deck-level drag race, the T1 grounded-enroute zombie.
+        // A grounded aircraft with an Enroute-start plan runs the
+        // takeoff FSM like any ground launch; the takeoff-complete
+        // handoff below runs the same splice when it lifts.
         if (phase_ == Phase::Ground &&
             plan_.start_phase == MissionPlan::StartPhase::Enroute &&
-            !plan_.route.empty()) {
+            !plan_.route.empty() &&
+            !on_ground_now()) {
             nav_.set_route(plan_.route);
-            // FID-4 splice (the deaggregate's mid-route spawn): resume
-            // at the nearest waypoint instead of re-flying from
-            // route[0] (backward + a dive to its altitude).
-            {
+            // T3 — the ONE splice decision (see route_resume_index).
+            nav_.resume_from(route_resume_index());
+            if (std::getenv("F4_LAND_DEBUG") != nullptr) {
                 const auto* st =
                     owner_.get_interface<flight::IAircraftState>();
-                if (st != nullptr) {
-                    const double px = st->position_east_ft();
-                    const double py = st->position_north_ft();
-                    std::size_t best = 1;
-                    double best_d = 1.0e18;
-                    for (std::size_t k = 1; k < plan_.route.size(); ++k) {
-                        const double ddx = plan_.route[k].position.x - px;
-                        const double ddy = plan_.route[k].position.y - py;
-                        const double d = ddx * ddx + ddy * ddy;
-                        if (d < best_d) {
-                            best_d = d;
-                            best = k;
-                        }
-                    }
-                    nav_.resume_from(best);
-                    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
-                        std::fprintf(stderr, "[splice] resume wp %zu\n", best);
-                    }
-                }
+                const std::size_t best = nav_.current_waypoint_index();
+                std::fprintf(stderr,
+                             "[splice] navd1 wp %zu/%zu pos %.0f,%.0f"
+                             " r0 %.0f,%.0f rEnd %.0f,%.0f\n",
+                             best, plan_.route.size(),
+                             st ? st->position_east_ft() : -1.0,
+                             st ? st->position_north_ft() : -1.0,
+                             plan_.route[0].position.x,
+                             plan_.route[0].position.y,
+                             plan_.route.back().position.x,
+                             plan_.route.back().position.y);
             }
             nav_.air_steering.reset_integrators();
             phase_ = Phase::Enroute;
@@ -488,41 +488,31 @@ public:
         if (phase_ == Phase::Ground && takeoff_.is_complete()) {
             if (!plan_.route.empty()) {
                 nav_.set_route(plan_.route);
-                // CAMP-GATE-ROLL: the aircraft just took off AT its base
-                // — route[0] is the departure field behind it. Resume at
-                // route[1]: the old cursor raced the first-update abeam
-                // check at parking, and a lost race left the cursor on
-                // route[0] with a ZERO altitude target — the aircraft
-                // flew its whole mission at deck level.
-                nav_.resume_from(1);
-                // FID-4 splice: a deaggregate spawns MID-ROUTE (at the
-                // aggregate's position) — flying the route from route[0]
-                // turns it backward and dives it to the first waypoint's
-                // altitude. Resume at the nearest waypoint instead.
-                if (plan_.start_phase == MissionPlan::StartPhase::Enroute) {
+                // T3 — the ONE splice decision (see route_resume_index).
+                // The old pair — the unconditional resume_from(1)
+                // (CAMP-GATE-ROLL) plus the nearest-WAYPOINT override
+                // (the FID-4 splice, Enroute-start only) — was two rules
+                // that disagreed wherever the route revisits its
+                // departure field. The projection reduces to
+                // resume_from(1) for a launch at its own base (the
+                // projection distance to leg 0 is zero and leg 0 is
+                // scanned first) and to the route's end for a deagg
+                // materialized at the recovery field.
+                nav_.resume_from(route_resume_index());
+                if (std::getenv("F4_LAND_DEBUG") != nullptr) {
                     const auto* st =
                         owner_.get_interface<flight::IAircraftState>();
-                    if (st != nullptr) {
-                        const double px = st->position_east_ft();
-                        const double py = st->position_north_ft();
-                        std::size_t best = 1;
-                        double best_d = 1.0e18;
-                        for (std::size_t k = 1; k < plan_.route.size(); ++k) {
-                            const double ddx =
-                                plan_.route[k].position.x - px;
-                            const double ddy =
-                                plan_.route[k].position.y - py;
-                            const double d = ddx * ddx + ddy * ddy;
-                            if (d < best_d) {
-                                best_d = d;
-                                best = k;
-                            }
-                        }
-                        nav_.resume_from(best);
-                    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
-                        std::fprintf(stderr, "[splice] resume wp %zu\n", best);
-                    }
-                    }
+                    const std::size_t best = nav_.current_waypoint_index();
+                    std::fprintf(stderr,
+                                 "[splice] handoff wp %zu/%zu pos %.0f,%.0f"
+                                 " r0 %.0f,%.0f rEnd %.0f,%.0f\n",
+                                 best, plan_.route.size(),
+                                 st ? st->position_east_ft() : -1.0,
+                                 st ? st->position_north_ft() : -1.0,
+                                 plan_.route[0].position.x,
+                                 plan_.route[0].position.y,
+                                 plan_.route.back().position.x,
+                                 plan_.route.back().position.y);
                 }
                 nav_.air_steering.reset_integrators();
                 phase_ = Phase::Enroute;
@@ -1752,6 +1742,65 @@ public:
     [[nodiscard]] const modules::TakeoffModule& module() const noexcept { return takeoff_; }
 
 private:
+    /// T3 — the owner's actual ground contact, read from the flight model
+    /// (the same authority the FM's own inAir flag and the T1 sweep use).
+    /// A missing state interface counts as grounded: no model, no flight.
+    [[nodiscard]] bool on_ground_now() const {
+        const auto* st = owner_.get_interface<flight::IAircraftState>();
+        return st == nullptr || st->on_ground();
+    }
+
+    /// T3 — the ONE splice decision, shared by the NAV-D1 air-spawn
+    /// handoff and the takeoff-complete handoff. Projects the aircraft's
+    /// position onto the route POLYLINE (not the nearest waypoint) and
+    /// resumes at the end of the leg it sits within — the first waypoint
+    /// at-or-ahead of the aircraft along the route, first-among-equals in
+    /// leg order. Three contracts collapse into it:
+    ///   * CAMP-GATE-ROLL: a launch at its own base projects onto leg 0
+    ///     at distance ZERO (the base IS route[0]) and leg 0 is scanned
+    ///     first — so the resume is route[1], never the zero-altitude
+    ///     route[0] behind the tail.
+    ///   * FID-4 mid-route deagg: a materialization between legs k and
+    ///     k+1 resumes at k+1 (the nearest-WAYPOINT rule could pick the
+    ///     just-passed k).
+    ///   * A deaggregate materialized at the route's recovery end (the
+    ///     stock save's transfer rows: pos == route.back()): the
+    ///     projection is the last leg's end, the resume is the last
+    ///     waypoint, the capture fires at once and the route completes —
+    ///     the approach handoff — instead of flying the route backward.
+    /// The old pair (the unconditional resume_from(1) plus the
+    /// nearest-waypoint override, Enroute-start only) disagreed exactly
+    /// on that last population and on routes that revisit their
+    /// departure field.
+    [[nodiscard]] std::size_t route_resume_index() const {
+        const auto* st = owner_.get_interface<flight::IAircraftState>();
+        if (st == nullptr || plan_.route.size() < 2) return 1;
+        const double px = st->position_east_ft();
+        const double py = st->position_north_ft();
+        std::size_t best_leg = 0;
+        double best_d = 1.0e18;
+        for (std::size_t k = 0; k + 1 < plan_.route.size(); ++k) {
+            const auto& a = plan_.route[k].position;
+            const auto& b = plan_.route[k + 1].position;
+            const double abx = b.x - a.x;
+            const double aby = b.y - a.y;
+            const double l2 = abx * abx + aby * aby;
+            double t = 0.0;
+            if (l2 > 0.0) {
+                t = ((px - a.x) * abx + (py - a.y) * aby) / l2;
+                t = std::clamp(t, 0.0, 1.0);
+            }
+            const double dx = a.x + abx * t - px;
+            const double dy = a.y + aby * t - py;
+            const double d = dx * dx + dy * dy;
+            if (d < best_d) {  // strict: first among equals wins
+                best_d = d;
+                best_leg = k;
+            }
+        }
+        return best_leg + 1;  // resume_from clamps index 0 and >= size
+    }
+
     // Fuel check (FrameExec step 2). Pure function of the gauge: compare
     // the total usable fuel against the policy, worst state wins. Called
     // from update() every tick; no policy (bingo=0) leaves Normal.

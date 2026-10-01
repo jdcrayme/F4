@@ -148,7 +148,14 @@ AIControlOutput NavigationModule::update(double dt, const flight::IAircraftState
     if (!leg_initialized_ && !route_.empty()) {
         leg_initialized_ = true;
         leg_from_ = current_position_;
-        if (route_.size() >= 2) {
+        // T3: a splice resume (wp_index_ > 0 — the brain's ONE route
+        // decision) is authoritative; the spawn-on-leg consolidation
+        // below is for the un-spliced activation (the cursor still at
+        // the route start) and must not override it. Without this guard
+        // the consolidation dragged every resumed cursor back to wp1 —
+        // a deaggregate materialized at the route's recovery end flew
+        // the tail legs instead of completing the route.
+        if (route_.size() >= 2 && wp_index_ == 0) {
             const auto& a = route_[0].position;
             const auto& b = route_[1].position;
             const double dx = b.x - a.x, dy = b.y - a.y;

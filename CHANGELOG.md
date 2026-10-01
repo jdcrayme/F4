@@ -5,6 +5,42 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## REPAIR-T3 — the ground-spawned Enroute contract: one splice, honest launches
+
+CAMPAIGN_REPAIR_PLAN.md's T3 tranche, landed as-built. Disambiguated
+[splice] telemetry over the stock-save harness showed two deagg
+populations — flights materialized at their route's start, and
+transfers materialized at the route's RECOVERY end (pos ==
+route.back(), the departure field a distant other base) — and the
+plan's named nearest-waypoint resume was wrong for both: at a base on a
+closed route the nearest waypoint is the route's LAST waypoint (instant
+RTB), and on a route revisiting its departure field it can sit behind
+the aircraft's mission order. Fixes: NAV-D1's airborne check (a grounded
+aircraft with an Enroute-start plan runs the takeoff FSM like any
+ground launch; the air-spawn contract requires ACTUAL airborne), the
+ONE splice decision (route_resume_index: project the aircraft onto the
+route polyline, first-among-equals in leg order, resume at the leg's
+end — reduces to resume_from(1) at a base launch, to the next leg ahead
+for a mid-route deagg, and to route completion for the at-recovery
+materialization; the old resume_from(1) + nearest-waypoint override
+pair is gone), and the third defect the new pins surfaced: the nav's
+spawn-on-leg consolidation clobbered every splice resume back to wp1 —
+it now applies only to un-spliced activations. campaign_qc's "airborne
+at end" verdict was retired with the deck-level zombie: the gate passes
+on airborne OR landed.
+
+Gates: the stock-landing harness GREEN; the BARCAP 40-min run books TWO
+full-stop recoveries inside the window (Parked@782 s and Parked@1,008 s,
+zero losses — the retired exit-3 verdict read that same run as "ground
+ops stalled"); the armed 0.3-h war keeps all four C5 verdicts green
+(deterministic, 19 honest losses / 18 retires / 18 A/A kills); brain
+suite 17/17 (four new T3 pins), navigation 26/26, landing 32/32,
+GroundContact 5/5, combat integration 29/31 (the pre-existing
+guns-merge pair — T5's items); the digi suite's red set unchanged
+(the authored digi route keeps its pattern legs); landing_only +
+takeoff_only + digi_full_mission exit 0. T5 (the A/A seam: the
+guns-merge WVR entry band) is the next open tranche.
+
 ## REPAIR-T4b — the campaign end-to-end gate closes: the observed flight lands
 
 CAMPAIGN_REPAIR_PLAN.md's T4b tranche, landed as-built. The instrumented

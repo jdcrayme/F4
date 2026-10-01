@@ -2438,6 +2438,7 @@ int run_qc(int argc, char** argv) {
 
     // End-of-run state per aircraft: airborne? where?
     int airborne = 0;
+    int landed = 0;
     struct EndState {
         std::string team;
         double x = 0, y = 0, z = 0;
@@ -2464,16 +2465,28 @@ int run_qc(int argc, char** argv) {
             // gear.inAir: true = airborne, false = on the ground.
             if (fm->model().state().gear.inAir) ++airborne;
         }
-        if (brain) e.phase = brain->phase_name();
+        if (brain) {
+            e.phase = brain->phase_name();
+            // T3: a full-stop landing is a SUCCESSFUL resolution — the
+            // brain flips to Complete only when the landing module parks
+            // (or the plan has no route at all). The "airborne at end"
+            // gate predates working recoveries: a 40-min BARCAP whose
+            // flights land inside the window is the system working, not
+            // ground ops stalled. A deck-level zombie (Enroute on the
+            // runway) or a taxi stall is neither airborne nor Complete —
+            // the gate keeps its teeth.
+            if (e.phase == "Complete") ++landed;
+        }
         ends.push_back(std::move(e));
     }
-    std::printf("sim_end: airborne=%d/%zu\n", airborne, sim_spawned.size());
+    std::printf("sim_end: airborne=%d/%zu landed=%d\n",
+                airborne, sim_spawned.size(), landed);
 
-    // QC gate: the sim ran, aircraft exist, but none got airborne. The
-    // tasking didn't fly — report it as a failure (exit 3) AFTER writing
-    // the summary + trace (the artifacts are exactly what debugging this
-    // needs).
-    const bool nothing_airborne = airborne == 0;
+    // QC gate: the sim ran, aircraft exist, but none got airborne AND
+    // none completed a recovery. The tasking didn't fly — report it as a
+    // failure (exit 3) AFTER writing the summary + trace (the artifacts
+    // are exactly what debugging this needs).
+    const bool nothing_airborne = airborne == 0 && landed == 0;
 
     // A-G gate (exit 4): strike flights spawned WITH droppable ordnance
     // (a loaded Bomb-category station), yet not one bomb left the rack —

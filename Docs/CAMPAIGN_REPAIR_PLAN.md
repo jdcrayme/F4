@@ -223,17 +223,101 @@ Remaining in flight-control (the plan's forward queue):
 - **T5** owns the WVR entry band vs the now-real merge geometry (the
   guns-merge pair above) and the combat dive margin.
 
-### T3 — the ground-spawned Enroute contract
+### T3 — the ground-spawned Enroute contract — **LANDED (2026-10-01)**
 
-- NAV-D1 gains the airborne check (`on_ground() == false`); a grounded
-  aircraft with an Enroute-start plan runs the takeoff FSM like any
-  ground launch.
-- The takeoff-complete handoff collapses to ONE splice decision (the
-  nearest-waypoint resume, route[0] excluded — the CAMP-GATE-ROLL
-  concern is a special case of it, not a second rule).
-- **Gate**: `test_campaign_stock_landing` green end to end (with T4's
-  touchdown): liftoff → route at waypoint altitudes → RTB → approach →
-  Rollout.
+As-built, and the probe data reshaped the splice half of the tranche.
+Disambiguated [splice] telemetry (navd1 vs handoff, with the route's
+endpoints) over the stock-save harness showed TWO deagg populations —
+flights materialized at their route's START (the mission ahead of them)
+and flights materialized at the route's RECOVERY END (pos ==
+route.back(); the departure field is a distant other base) — and the
+plan's named rule (the nearest-waypoint resume, route[0] excluded) is
+wrong for both in different ways: for a flight standing at its own base
+on a closed route the nearest waypoint is the route's LAST waypoint
+(instant RTB — the T4b degenerate-flight note), and for a route that
+revisits its departure field the nearest waypoint can sit BEHIND the
+aircraft's mission order. The spec's literal form would also have
+broken the Ground-start campaign war (every ground launch on a closed
+route would have insta-RTB'd — no strikes, no merges). So the ONE
+splice decision is the route-PATH projection:
+
+**The three fixes (f4-ai):**
+
+1. **NAV-D1's airborne check** (`on_ground_now()`, read from the FM —
+   the T1 authority): a grounded aircraft with an Enroute-start plan
+   stays in Ground and runs the takeoff FSM like any ground launch; the
+   takeoff-complete handoff runs the splice when it lifts. The air-spawn
+   contract now requires ACTUAL AIRBORNE. (In the stock save the
+   T1 pose floor already puts the staged-flight deaggs at terrain+500 —
+   those fire NAV-D1 legitimately; the check covers the genuinely
+   grounded materializations the zombie detector used to reap.)
+2. **The ONE splice decision** — `route_resume_index()`: project the
+   aircraft's position onto the route POLYLINE (not the nearest
+   WAYPOINT), first-among-equals in leg order, and resume at the end of
+   the leg it sits within — the first waypoint at-or-ahead along the
+   route. Three contracts collapse into it: CAMP-GATE-ROLL (a launch at
+   its own base projects onto leg 0 at distance ZERO and leg 0 is
+   scanned first, so the resume is route[1] — never the zero-altitude
+   route[0] behind the tail), the FID-4 mid-route deagg (a
+   materialization between legs k and k+1 resumes at k+1 — the
+   nearest-waypoint rule could pick the just-passed k), and the
+   at-recovery materialization (the projection is the last leg's end,
+   the capture fires at once, the route completes into the approach
+   handoff instead of flying the route backward). Both handoff sites
+   (NAV-D1 and the takeoff-complete handoff) now call the one helper;
+   the old pair — the unconditional `resume_from(1)` plus the
+   Enroute-gated nearest-waypoint override — is gone.
+3. **The nav's spawn-on-leg consolidation guard** — the third defect,
+   found by the new unit pins: the NavigationModule's first-update
+   consolidation ("already past wp0 and abeam the wp0->wp1 line =>
+   anchor leg 1") ran AFTER every splice resume and CLOBBERED it back
+   to wp_index_ = 1 — a deaggregate materialized at the recovery end
+   flew the tail legs instead of completing the route. The consolidation
+   now applies only to the un-spliced activation (the cursor still at
+   the route start); a resumed cursor is authoritative.
+
+**Pins (test_brain_component 17/17, four new):** a grounded
+Enroute-start aircraft stays Ground and runs the takeoff FSM; an
+airborne Enroute-start aircraft hands the route to the nav at route[1];
+a deagg at the recovery end completes the route into the approach; a
+deagg just past a waypoint resumes at the NEXT one (the old nearest-
+waypoint rule picks the passed one).
+
+**Measured (Release, this machine):**
+
+- **The stock-landing gate is GREEN** (exit 0) — the T3 gate's chain
+  (liftoff → route → RTB → approach → Rollout) is the T4b-proven chain;
+  the splice now feeds it honestly.
+- **BARCAP 40-min filtered run** (exit 0): BOTH flights completed
+  full-stop recoveries inside the window (Rollout@755 s / Parked@782 s
+  and Rollout@981 s / Parked@1,008 s) — zero losses, zero kills. The
+  campaign_qc "airborne at end" verdict (exit 3) predates working
+  recoveries and was retired: the gate now passes on "airborne OR
+  landed" (`sim_end: airborne=%d/%zu landed=%d`), keeping its teeth for
+  the deck-level zombie and the taxi stall (neither is Complete).
+- **The armed 0.3-h war**: all four C5 verdicts green (deterministic=
+  yes, drift/leak/alive ok); 19 honest losses / 18 retires / 18 A/A
+  kills over 18 cycles — the Ground-start war still flies its routes
+  (the projection reduces to resume_from(1) at a base launch, so the
+  strike/merge profile is preserved).
+- Regression surface: the digi suite's red set UNCHANGED (2 failed +
+  11 skipped — the documented Windows set; the authored digi route keeps
+  its pattern legs because the at-base projection is leg 0); combat
+  integration 29/31 (the pre-existing guns-merge pair, T5's items);
+  GroundContact 5/5; navigation 26/26; landing 32/32; air-steering/
+  takeoff/ground-steering/tower green; landing_only + takeoff_only +
+  digi_full_mission exit 0.
+
+Notes carried forward:
+
+- The at-recovery transfer landings are now PROMPT (the capture fires
+  at once) — the war's recovery profile will shift upward as more of
+  these rows deagg inside a horizon; the C5 accounting verdicts already
+  accept it.
+- The stock-landing harness's followed flight may still be a transfer
+  (its landing is a real full chain over a degenerate mission — the
+  route was already "flown" by the aggregate); the BARCAP run is the
+  real-mission evidence.
 
 ### T4 — the approach chain closes — **LANDED (2026-10-01)** (T4b below)
 

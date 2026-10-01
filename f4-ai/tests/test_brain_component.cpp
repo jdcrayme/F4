@@ -523,3 +523,145 @@ TEST(BrainComponent, ArchetypePointerRoundtrip) {
     bc.set_brain_archetype(nullptr);
     EXPECT_EQ(bc.brain_archetype(), nullptr);
 }
+
+
+// ============================================================================
+// T3 — the ground-spawned Enroute contract (CAMPAIGN_REPAIR_PLAN §T3)
+// ============================================================================
+
+namespace {
+
+/// An Enroute-start plan through the given ENU waypoints (z = MSL ft).
+MissionPlan enroute_plan(std::vector<geo::WorldPosition> wps) {
+    MissionPlan plan;
+    for (const auto& p : wps) {
+        modules::NavigationModule::Waypoint wp;
+        wp.position = p;
+        plan.route.push_back(std::move(wp));
+    }
+    plan.start_phase = MissionPlan::StartPhase::Enroute;
+    return plan;
+}
+
+} // namespace
+
+TEST(BrainComponent, GroundedEnrouteStartRunsTakeoffNotNav) {
+    // The ops-window deagg of a not-yet-departed row materializes ON THE
+    // GROUND with an Enroute-start plan (the air-spawn contract
+    // misapplied). NAV-D1 must NOT hand the route to the nav there: the
+    // aircraft runs the takeoff FSM like any ground launch (the T3
+    // airborne check); the takeoff-complete handoff runs the splice when
+    // it lifts.
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
+
+    MessageBus bus;                 // must outlive the world (see the note above)
+    EntityWorld w;
+    StubATC atc(bus);
+    atc.set_airfield(make_kunsan_config());
+
+    auto h = w.create();
+    auto& fmc = h.add<FlightModelComponent>();
+    fmc.init(cfg, 0.0, 0.0, 0.0, false);   // on the deck at the origin
+    auto& bc = h.add<BrainComponent>();
+    bc.set_mission_plan(enroute_plan({
+        geo::WorldPosition(0.0, 60000.0, 5000.0),
+        geo::WorldPosition(0.0, 120000.0, 5000.0),
+    }));
+
+    for (int i = 0; i < 30; ++i) w.update_all(1.0 / 60.0, bus);
+    EXPECT_EQ(bc.phase(), BrainComponent::Phase::Ground)
+        << "a grounded Enroute-start aircraft must run the takeoff FSM, "
+           "not the nav";
+}
+
+TEST(BrainComponent, AirborneEnrouteStartHandsRouteToNav) {
+    // The air-spawn contract itself: an AIRBORNE Enroute-start aircraft
+    // hands the route straight to the nav. The T3 airborne check keeps
+    // this path — and only this path.
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
+
+    MessageBus bus;
+    EntityWorld w;
+    StubATC atc(bus);
+    atc.set_airfield(make_kunsan_config());
+
+    auto h = w.create();
+    auto& fmc = h.add<FlightModelComponent>();
+    fmc.init(cfg, 10000.0, 400.0, 0.0, true, 0.0, 0.0);  // 10k ft, airborne
+    auto& bc = h.add<BrainComponent>();
+    bc.set_mission_plan(enroute_plan({
+        geo::WorldPosition(0.0, 60000.0, 5000.0),
+        geo::WorldPosition(0.0, 120000.0, 5000.0),
+    }));
+
+    w.update_all(1.0 / 60.0, bus);
+    EXPECT_EQ(bc.phase(), BrainComponent::Phase::Enroute);
+    // The origin projects onto leg 0's START: the resume is route[1]
+    // (the CAMP-GATE-ROLL special case of the ONE splice).
+    EXPECT_EQ(bc.navigation().current_waypoint_index(), 1u);
+}
+
+TEST(BrainComponent, DeaggAtRecoveryEndCompletesRouteToApproach) {
+    // The stock save's transfer rows: a deaggregate materialized at the
+    // route's RECOVERY end (pos == route.back(); the departure field is
+    // far away). The ONE splice resumes at the last waypoint, the
+    // capture fires at once, and the route completes — the approach
+    // handoff — instead of flying the route backward.
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
+
+    MessageBus bus;
+    EntityWorld w;
+    StubATC atc(bus);
+    atc.set_airfield(make_kunsan_config());
+
+    auto h = w.create();
+    auto& fmc = h.add<FlightModelComponent>();
+    fmc.init(cfg, 10000.0, 400.0, 0.0, true, 0.0, 0.0);  // AT route.back()
+    auto& bc = h.add<BrainComponent>();
+    bc.set_mission_plan(enroute_plan({
+        geo::WorldPosition(0.0, 120000.0, 5000.0),  // the departure field
+        geo::WorldPosition(0.0, 60000.0, 5000.0),
+        geo::WorldPosition(0.0, 0.0, 5000.0),       // == the aircraft
+    }));
+
+    w.update_all(1.0 / 60.0, bus);   // NAV-D1: Enroute, resume = the last wp
+    for (int i = 0; i < 3; ++i) {
+        w.update_all(1.0 / 60.0, bus);
+        if (bc.phase() == BrainComponent::Phase::Approach) break;
+    }
+    EXPECT_EQ(bc.phase(), BrainComponent::Phase::Approach)
+        << "a materialization at the recovery end must complete the route "
+           "into the approach, not fly it backward";
+}
+
+TEST(BrainComponent, MidRouteDeaggResumesAheadOfProjection) {
+    // A deaggregate just PAST a waypoint resumes at the NEXT one: the
+    // old nearest-WAYPOINT rule picked the waypoint it just passed
+    // (behind the aircraft); the polyline projection cannot.
+    f4::data::AircraftConfig cfg;
+    if (!loadF16Config(cfg)) GTEST_SKIP() << "f16.json fixture not found";
+
+    MessageBus bus;
+    EntityWorld w;
+    StubATC atc(bus);
+    atc.set_airfield(make_kunsan_config());
+
+    auto h = w.create();
+    auto& fmc = h.add<FlightModelComponent>();
+    fmc.init(cfg, 10000.0, 400.0, 0.0, true, 65000.0, 0.0);  // north 65000
+    auto& bc = h.add<BrainComponent>();
+    bc.set_mission_plan(enroute_plan({
+        geo::WorldPosition(0.0, 0.0, 5000.0),
+        geo::WorldPosition(0.0, 60000.0, 5000.0),
+        geo::WorldPosition(0.0, 120000.0, 5000.0),
+    }));
+
+    w.update_all(1.0 / 60.0, bus);
+    EXPECT_EQ(bc.phase(), BrainComponent::Phase::Enroute);
+    EXPECT_EQ(bc.navigation().current_waypoint_index(), 2u)
+        << "just past wp1, the resume must be wp2 (the old nearest-"
+           "waypoint rule picks the passed wp1)";
+}
