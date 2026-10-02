@@ -3639,32 +3639,46 @@ void Simulation::record_mission_events_() {
             recorder_->record_mission_event(std::move(ev));
         };
 
+        // The CURRENT waypoint's closest approach (the PATH clause's
+        // miss metric): the module's captures are TURN-ANTICIPATED
+        // (NAV-B - the corner is cut up to a turn radius early BY
+        // DESIGN), so the distance AT the capture tick measures the
+        // lead, not the path (measured: the stock BARCAP's anchor
+        // "captured" at 13,302 ft - the lead, not a miss). The
+        // honest miss is the closest approach while the waypoint was
+        // the target.
+        if (wp < plan.route.size() && tr.wp == wp) {
+            const auto& wpt = plan.route[wp];
+            if (const auto* tf = h.get<entities::TransformComponent>()) {
+                const double dx = tf->position.x - wpt.position.x;
+                const double dy = tf->position.y - wpt.position.y;
+                const double d = std::sqrt(dx * dx + dy * dy);
+                if (!tr.wp_min_set || d < tr.wp_min_miss) {
+                    tr.wp_min_miss = d;
+                    tr.wp_min_set = true;
+                }
+            }
+        }
+
         if (tr.seen) {
             // Waypoint capture: the cursor advanced ONE index off a
             // waypoint (the module's capture walk is sequential). A jump
             // of more than one is a SPLICE (the FID-4 resume, the T3
-            // route-path projection) or a reset — not a capture, and
+            // route-path projection) or a reset - not a capture, and
             // emitting it would book a phantom miss of hundreds of
             // thousands of feet (measured: the splice's WP0 "capture" at
-            // 185,463 ft). The miss distance (the PATH clause's
-            // per-waypoint error) is the current position's distance to
-            // the captured waypoint.
+            // 185,463 ft). The miss distance is the closest approach
+            // tracked above.
             if (wp == tr.wp + 1 && tr.wp < plan.route.size()) {
                 const auto& wpt = plan.route[tr.wp];
+                const double miss =
+                    tr.wp_min_set ? tr.wp_min_miss : -1.0;
                 push(f4::recorder::MissionEvent::Kind::WaypointCaptured,
                      [&](f4::recorder::MissionEvent& ev) {
                          ev.wp_index = static_cast<int>(tr.wp);
                          ev.wp_name = wpt.name;
                          ev.wp_action = wpt.action;
-                         if (const auto* tf =
-                                 h.get<entities::TransformComponent>()) {
-                             const double dx =
-                                 tf->position.x - wpt.position.x;
-                             const double dy =
-                                 tf->position.y - wpt.position.y;
-                             ev.cross_track_ft =
-                                 std::sqrt(dx * dx + dy * dy);
-                         }
+                         ev.cross_track_ft = miss;
                      });
             }
             if (holding && !tr.holding) {
@@ -3689,6 +3703,10 @@ void Simulation::record_mission_events_() {
                          ev.to_phase = phase;
                      });
             }
+        }
+        if (wp != tr.wp) {
+            tr.wp_min_miss = 1.0e18;  // a new target - fresh approach
+            tr.wp_min_set = false;
         }
         tr.seen = true;
         tr.wp = wp;
@@ -3777,6 +3795,12 @@ void Simulation::record_snapshot() {
             // active waypoint: its position, its index, and — the
             // employment story — the waypoint's strike target when the
             // leg carries one.
+            // The nav's own cross-track error against the active leg —
+            // the PATH clause's miss metric (declared since the first
+            // snapshot format, but never filled: the EMPL-1b note's
+            // "dead field" applied to this key too).
+            snap.cross_track_error_ft = brain->navigation().cross_track_ft();
+
             const auto& plan = brain->mission_plan();
             // MC-1: the plan's own identity wins over the origin stamp
             // (the injected-spec path sets it directly), and the
@@ -3787,6 +3811,11 @@ void Simulation::record_snapshot() {
             }
             snap.tot_s = plan.tot_s;
             snap.target_objective_vu = plan.target_objective_id;
+            double station_total = 0.0;
+            for (const auto& w : plan.route) {
+                station_total += w.station_time_s;
+            }
+            snap.station_contract_s = station_total;
             const auto wp_idx = brain->navigation().current_waypoint_index();
             if (wp_idx < plan.route.size()) {
                 const auto& wp = plan.route[wp_idx];
@@ -3798,6 +3827,13 @@ void Simulation::record_snapshot() {
                 }
                 snap.target_description = std::move(wp_desc);
             }
+        }
+
+        // The internal fuel remaining (the ECONOMY clause's input; the
+        // field existed since the first snapshot format but was never
+        // filled by this path).
+        if (fm) {
+            snap.fuel_lbs = fm->state().fuel.fuel_lbs;
         }
 
         // Control commands (Tranche A4): the AI's last PilotInput, the

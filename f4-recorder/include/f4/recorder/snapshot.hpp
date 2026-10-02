@@ -56,6 +56,13 @@ struct FlightSnapshot {
     std::uint32_t home_airbase_vu{0};///< recovery base objective VU
     std::uint32_t target_objective_vu{0}; ///< the intent's target
     double tot_s{0.0};               ///< appointed TOT, campaign seconds
+    double station_contract_s{0.0};  ///< the route's total station
+                                     ///< hold (0 = no station was
+                                     ///< promised - the STATION
+                                     ///< clause skips)
+                                     ///< hold (0 = no station was
+                                     ///< promised — the STATION
+                                     ///< clause skips)
 
     // --- Track type (M4) ---------------------------------------------------
     // False for aircraft (the default and the only kind the format carried

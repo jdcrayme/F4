@@ -155,7 +155,54 @@ with an owner.
 
 ## 8. Tranches
 
-- **MC-1 — the instrumentation joins (this tranche).** Flight
+- **MC-1 — the instrumentation joins — LANDED (2026-10-02).** As-built
+  above plus two semantics the first real recordings forced: waypoint
+  captures carry the CLOSEST APPROACH while the waypoint was the target
+  (the capture-tick distance measures the NAV-B turn-anticipation lead —
+  the stock BARCAP's anchor legitimately reads ~13,000 ft), and the
+  splice's cursor jumps are excluded (sequential-advance rule — the FID-4
+  splice would have booked a phantom 185,463-ft miss). The snapshot
+  identity also carries the route's total station contract (the STATION
+  clause's applicability flag: the stock saves' own BARCAPs carry no
+  racetrack — it rides the strategy layer's filings) and the nav's leg
+  cross-track (a dead field since the first snapshot format — now
+  filled) and the internal fuel (also dead — now filled).
+- **MC-2 — the verifier + report card — LANDED (2026-10-02).**
+  `scripts/mission_verify.py` (stdlib, `--selftest` pins the evaluator's
+  verdicts on crafted traces): archetype selection from the flight's
+  AMIS name (cap/strike/support/escort/generic), the generic clause
+  evaluator, `mission_report.md` + schema-versioned
+  `mission_report.json`. Clause semantics settled by the first real
+  cards: TIMELINE accepts the airborne-start arc (Approach-start
+  scenarios); PATH is phase-scoped to Enroute and bands the
+  STEADY-STATE tracking (the p90 of the window's final quarter) with
+  the departure transient REPORTED not banded; STATION skips when no
+  station was promised; TOT measures the delivery-waypoint capture vs
+  the appointment; EMPLOYMENT counts releases (skip on a booked death);
+  RECOVERY accepts Complete, the stopped-on-deck end state, or (later)
+  a booked death. **The first surfaced findings** (the layer working as
+  designed): (a) the splice-resumed departure diverges to ~21,300 ft
+  off its first leg before converging (~4 min, self-healing — the
+  departure geometry vs the T3 route-path projection; owner: a splice
+  refinement tranche); (b) a transfer flight's enroute stub never held
+  its leg (steady p90 8,947 ft — the degenerate-stub shape; same
+  owner). Both cards carry them with numbers.
+- **MC-2b — the injected generator** (`--single-mission` /
+  `--mission-spec` in campaign_qc): build the MissionIntent directly
+  from a spec in a quiet war. Next.
+- **MC-3 — the core archetype contracts**: BARCAP (station +
+  engagement + recovery), STRIKE (path + TOT + employment +
+  recovery), ESCORT (proximity), TANKER (AAR interaction), and the
+  first new BEHAVIOR tranche the matrix schedules (the honest
+  coverage map names it — likely AIRLIFT, the logistics family whose
+  ground-side consumer, DOM-2 supply, already exists; there is no
+  paradrop anywhere in the stock wire we converted).
+- **MC-4 — tasked mode + the matrix wiring**: qc_missions.py drives
+  the verifier; verify.cmd gains the smoke rotation + the opt-in
+  matrix stage.
+- **MC-5 — the coverage map + the viewer Mission Lab.** The truth
+  table over all 41 types; the interactive door.
+ Flight
   identity on the trace snapshots (mission name, flight VU, TOT,
   target objective — threaded through MissionPlan from the campaign
   bridge); the mission EVENT stream (waypoint captures with action +

@@ -5,6 +5,28 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MC-2 — the mission contract verifier + report card
+
+MISSION_CONTRACT_PLAN.md's second tranche: `scripts/mission_verify.py`
+(stdlib, selftest-pinned) reads any MC-1 recording, selects the flight's
+ARCHETYPE CONTRACT from its own AMIS name (cap/strike/support/escort/
+generic), evaluates the typed clauses, and emits the report card —
+mission_report.md (the human one-pager) + mission_report.json
+(schema-versioned, the diffable review artifact). Clause semantics were
+settled by the first real cards, each a finding the aggregate counters
+never showed: PATH is phase-scoped to Enroute and bands the
+steady-state tracking (p90 of the window's final quarter) because the
+departure transient is real — the splice-resumed BARCAP diverges
+~21,300 ft off its first leg before converging to 110-390 ft held for
+the rest of the flight; STATION skips when the route promised no
+station (the stock saves' BARCAPs carry no racetrack); TIMELINE accepts
+the airborne-start arc; and one wingman transfer's enroute stub never
+held its leg (steady p90 8,947 ft) — the first two named findings for
+the splice-refinement tranche, carried on the cards with numbers.
+Also: three dead snapshot fields filled by this tranche (the nav's leg
+cross-track — the PATH metric, internal fuel — the ECONOMY input, and
+the station-contract presence — the STATION applicability flag).
+
 ## MC-1 — the mission-contract instrumentation joins (the plan opens)
 
 MISSION_CONTRACT_PLAN.md's first tranche — the layer that makes a run

@@ -711,6 +711,8 @@ private:
         std::size_t wp{0};
         bool holding{false};
         const char* phase{nullptr};  // static literal from phase_name()
+        double wp_min_miss{1.0e18};  // closest approach to the CURRENT
+        bool wp_min_set{false};      // waypoint while it was the target
     };
     std::unordered_map<std::uint64_t, MissionTrackState> mission_track_;
     std::unique_ptr<f4::recorder::FcsTraceWriter> fcs_trace_;

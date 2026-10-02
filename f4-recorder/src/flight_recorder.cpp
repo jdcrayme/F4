@@ -189,6 +189,11 @@ std::string FlightRecorder::to_json(const std::string& scenario_name) const {
             w.raw("    "); w.string("tot_s"); w.raw(":");
             w.number(s.tot_s);
         }
+        if (s.station_contract_s > 0.0) {
+            w.raw(",\n");
+            w.raw("    "); w.string("station_contract_s"); w.raw(":");
+            w.number(s.station_contract_s);
+        }
         w.raw("\n");
 
         w.raw("  }");
@@ -783,6 +788,7 @@ FlightSnapshot parse_snapshot(json::Reader& r) {
         else if (key == "home_airbase_vu") { snap.home_airbase_vu = static_cast<std::uint32_t>(r.read_int()); }
         else if (key == "target_objective_vu") { snap.target_objective_vu = static_cast<std::uint32_t>(r.read_int()); }
         else if (key == "tot_s")        { snap.tot_s = r.read_number(); }
+        else if (key == "station_contract_s") { snap.station_contract_s = r.read_number(); }
 
         // Position
         else if (key == "position")     { snap.position = parse_vec3(r); }
