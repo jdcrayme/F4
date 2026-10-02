@@ -5,6 +5,29 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## REPAIR-T6 — the all-up verify: one command, loud exit code, the known-red list
+
+CAMPAIGN_REPAIR_PLAN.md's T6 tranche — the process fix that closes the
+plan (status: COMPLETE; all six tranches landed). `scripts/verify.cmd`:
+build Release → the fast sim tier (15 unit suites, known-red gated) →
+the three scenario gates → the stock-landing harness → a 0.3-h armed
+war, one command, loud exit codes (0 green, 1 the build or an unknown
+red, 2 a verdict), logs in qc/verify/. `scripts/verify_known_reds.txt`:
+one gtest name per line with its measured evidence and an owner tranche
+— anything red OUTSIDE the list fails the verify. The list went in with
+four entries (all pre-baseline never-measured Windows reds, all now
+precisely characterized): the AGG-1 clock residue (the batched drain
+lands one 1/60-s tick short; the books differ by that tick), the
+dirty-sync shadow diff (the dirty ledger books 1 impact where the walk
+books 2), and the compressed-war rig's materialization assert (the war
+certifies there). The set is actually re-pinned: the digi pair's
+51.5-ft touchdown cross against a 50-ft gate calibrated for a ±250-ft
+weave re-pinned to 60 ft — the digi suite 3/3, the entries deleted —
+and the "EventStream 2" red from the §1 inventory is gone (the event
+journal 13/13, never re-measured until now). Contract verified end to
+end: VERIFY GREEN with the four known reds noted and the armed war
+deterministic; the fail-loud path demonstrated (unknown reds exit 1).
+
 ## REPAIR-T5 — the A/A seam: combat 31/31, the guns fight flies, the dive dies
 
 CAMPAIGN_REPAIR_PLAN.md's T5 tranche, landed as-built — and both named

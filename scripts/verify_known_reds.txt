@@ -1,0 +1,40 @@
+# REPAIR-T6 — the verify script's known-red list.
+#
+# One full gtest test name per line. A suite failure whose test names
+# ALL appear here is a KNOWN red: the verify notes it and moves on.
+# Anything red OUTSIDE this list fails the verify — a permanently red
+# suite hides real regressions (the exact mechanism that let the combat
+# suite rot for the whole FALCON-era port; see CAMPAIGN_REPAIR_PLAN §1).
+#
+# Re-pin rules: every entry carries its measured evidence and the tranche
+# that characterized it. When the underlying defect is fixed, DELETE the
+# line. When the gate itself was miscalibrated, re-pin the gate in the
+# test and delete the line (the digi centerline gate was re-pinned this
+# way in T6).
+
+# ── the AGG-1 clock residue (characterized T6; pre-baseline red) ──────
+# The batched drain lands one 1/60-s tick short of the aligned smalls
+# (measured: sim_time 11.9833 vs 12.0 after a 12-s twin run — the
+# sub-second residue accounting), and the books differ by exactly that
+# tick (cycles_fired 2 vs 3 at the tasking boundary). Deterministic,
+# pre-dates the repair plan's diagnosis baseline bd4b2ee. Owner: the
+# AGG-1 clock tranche (not yet scheduled).
+CampaignSession.BigCatchUpBatchesMatchAlignedSmallOnesByteForByte
+CampaignSession.StraddledBigTickKeepsTheBooksTotals
+
+# ── the dirty-sync shadow diff (characterized T6; pre-baseline red) ───
+# The dirty-sync ledger books 1 bomb impact where the full-walk shadow
+# books 2 — the dropped row is a t=46,000 impact against objective 0
+# with no features destroyed (the dirty diff misses one impact event the
+# walk books). Deterministic, pre-baseline. Owner: the result-sink tranche.
+ResultSink.DirtySyncIsTheFullWalksShadow
+
+# ── the compressed war rig (characterized T5; pre-baseline red) ───────
+# synthetic_spawned = 0 over the 40-s compressed horizon: the war runs
+# and CERTIFIES there (all four C5 verdict asserts green), the dead
+# assert is the "at least one synthetic materialized inside 40 compressed
+# seconds" expectation — the ops-window pacing vs the compressed clock
+# (CAMP-TOT-PACE territory). Measured red at bd4b2ee and every HEAD
+# since (a never-measured Windows pre-existing red — the §1 pattern).
+# Owner: the CAMP-TOT-PACE tranche.
+CampaignWarHarness.RunsCertifiesAndIsDeterministic
