@@ -5,6 +5,25 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MC-4 — ProceedToFix re-attributed (pursuit transit, not a deadlock); horizon margin +20; recovery 56 -> 65 PASS
+
+The horizons tranche's dominant finding instrumented and
+re-attributed: the AIRLIFT flights' 18 minutes in ProceedToFix were
+the pursuit transit of a 400,000-500,000 ft station-to-field distance
+(the [fix] probe prints every capture-arm's input: hdgrw pinned ~130
+deg, the lateral closing at ~375 ft/s), not a capture-gate defect.
+At a 150-minute horizon all four AIRLIFT flights recover with a
+textbook final approach. The standard FAR/AIM holding entries were
+considered and deferred: the existing wrong-side pursuit + past-fix
+sequencing + course intercept converges given horizon — a teardrop
+would shorten the chase but is a refinement, not correctness.
+Landed: the per-profile horizon formula gains the approach-and-
+recovery margin (max_time + 20, clamped [30, 120]; cap 90 -> 120).
+Measured: recovery 56 -> 65 PASS, station fully green (11/0), gate
+fails still zero across the 22-type matrix (wall 605 s). The 11
+remaining recovery FAILs are the world-geography tail. The [fix]
+probe stays as the approach-autopsy instrumentation.
+
 ## INIT-1 — the employment chain is live: 8 of 9 strike types deliver; exit-4 gates 9 -> 1
 
 The arming tranche's finding of record ("the save's delivery flights

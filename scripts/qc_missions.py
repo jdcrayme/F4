@@ -157,14 +157,18 @@ def world_mission_histogram(world_json: Path) -> tuple[Counter, int]:
 
 
 def mission_horizons(profiles_json: Path, floor_min: int,
-                     cap_min: int) -> dict[str, int]:
+                     cap_min: int, margin_min: int = 20) -> dict[str, int]:
     """Per-mission sim horizons from Falcon's own sortie windows: the
-    profile's max_time (minutes — the planner's planned duration) is the
-    honest prior for "how long until this mission's arc can complete",
+    profile's max_time (minutes — the planner's planned duration) plus an
+    approach-and-recovery margin the planning window never included,
     clamped to [floor_min, cap_min]. A 30-min horizon was cutting missions
     mid-flight (the recovery clause was measuring the horizon, not the
     behavior) and could never hold the bridge's 45-min station contracts.
-    Missing/zero max_time falls back to the floor."""
+    (The margin is measured: an AIRLIFT arc ran transit + the full 45-min
+    station + egress + a 400,000-ft pursuit approach and landed at ~95 min
+    against a max_time of 240 — and a 90-min horizon cut two INTERCEPT
+    recoveries mid-Approach.) Missing/zero max_time falls back to the
+    floor."""
     try:
         with profiles_json.open("r", encoding="utf-8") as f:
             profs = json.load(f).get("profiles") or []
@@ -176,7 +180,8 @@ def mission_horizons(profiles_json: Path, floor_min: int,
         name = p.get("name")
         if not name:
             continue
-        out[name] = max(floor_min, min(int(p.get("max_time") or 0), cap_min))
+        out[name] = max(floor_min,
+                        min(int(p.get("max_time") or 0) + margin_min, cap_min))
     return out
 
 
@@ -493,10 +498,10 @@ def main() -> int:
                    help="sim horizon FLOOR per run (default 30); the "
                         "per-mission horizon comes from the profile's "
                         "max_time clamped to [--minutes, --max-horizon]")
-    p.add_argument("--max-horizon", type=int, default=90,
-                   help="per-mission horizon cap, minutes (default 90 — "
-                        "covers the bridge's 45-min station contracts "
-                        "plus transit and recovery)")
+    p.add_argument("--max-horizon", type=int, default=120,
+                   help="per-mission horizon cap, minutes (default 120 — "
+                        "covers the bridge's 45-min station contracts plus "
+                        "transit, the pursuit approach, and recovery)")
     p.add_argument("--flat-minutes", action="store_true",
                    help="run every type at --minutes (the pre-profile "
                         "flat-horizon behavior; for A/B comparisons)")

@@ -990,6 +990,38 @@ bool LandingModule::waypoint_captured(const geo::WorldPosition& target,
 // ============================================================================
 
 void LandingModule::check_fix_reached() {
+    // ROUTE-HOLD follow-up telemetry — the F4_LAND_DEBUG pattern (1 Hz
+    // while in ProceedToFix): every capture-arm's inputs, so a stuck
+    // approach autopsies itself (the AIRLIFT flight that flew a clean
+    // 88-minute arc and then spent 18 minutes in ProceedToFix without
+    // sequencing — the horizons tranche's dominant finding).
+    if (sm_.current() == LandingState::ProceedToFix &&
+        std::getenv("F4_LAND_DEBUG") != nullptr) {
+        static int dbg_fix = 0;
+        if (++dbg_fix % 60 == 1) {
+            const double fx = std::sin(runway_heading_rad_);
+            const double fy = std::cos(runway_heading_rad_);
+            const double dfx = entry_fix_.x - current_position_.x;
+            const double dfy = entry_fix_.y - current_position_.y;
+            const double nx = std::sin(current_heading_rad_);
+            const double ny = std::cos(current_heading_rad_);
+            const double rel_along = dfx * nx + dfy * ny;
+            const double past_fix = -(dfx * fx + dfy * fy);
+            const double lat_fix = -(dfx * std::cos(runway_heading_rad_) -
+                                     dfy * std::sin(runway_heading_rad_));
+            const double hdg_to_runway = std::abs(AirSteering::heading_error(
+                runway_heading_rad_, current_heading_rad_));
+            std::fprintf(stderr,
+                         "[fix] hdg_rw %.2f lat_course %.0f rel_along %+.0f"
+                         " past_fix %+.0f lat_fix %+.0f alt %.0f"
+                         " (pat %.0f) vs %.0f armed %d timer %.0f\n",
+                         hdg_to_runway, course_lateral_ft(), rel_along,
+                         past_fix, lat_fix, current_alt_msl_ft_,
+                         pattern_altitude_ft_, current_vs_fpm_,
+                         past_fix_capture_armed_ ? 1 : 0, fix_timer_);
+        }
+    }
+
     // REPAIR-T4b: the short-touchdown strand. An aircraft that meets the
     // deck during the IAP-leg catch-down is forgiven by the T1 ground
     // sweep (the Approach phase is a landing-owned context — no crash is

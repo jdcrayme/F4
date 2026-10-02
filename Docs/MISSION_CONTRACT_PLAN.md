@@ -335,6 +335,32 @@ with an owner.
   departure-procedure tranche (turn during the climb at a lower gate)
   and the per-category horizons.
 
+- **MC-4 — the ProceedToFix "stall" re-attributed; horizon margin
+  +20 — LANDED (2026-10-02).** The horizons tranche's dominant finding
+  (AIRLIFT flights spending 18 minutes in ProceedToFix without
+  sequencing) was instrumented (a [fix] probe in check_fix_reached
+  printing every capture-arm's inputs) and RE-ATTRIBUTED: it is not a
+  capture-gate defect. The AIRLIFT station orbits sit near the mission
+  objective — 400,000-500,000 ft from the recovery field — and the
+  existing ProceedToFix law (the wrong-side pursuit of the fix, the
+  past-fix sequencing arm, the course intercept) flies that pursuit
+  transit at hdgrw ~130 deg before joining the course. At a 150-minute
+  horizon **all four AIRLIFT flights recover** (a textbook final: on
+  slope, -1,090 fpm, threshold crossing) — the 90-minute horizon was
+  cutting a pursuit transit, not a deadlock. The standard FAR/AIM
+  holding entries (direct/parallel/teardrop) were considered and
+  deferred: the existing two-shape law is a crude direct-entry that
+  CONVERGES given horizon; a teardrop would shorten the wrong-side
+  chase (hdgrw pinned ~130 deg for 15+ minutes) but is a refinement,
+  not correctness — revisit only if a deadlock survives the horizon
+  fix. Landed: the horizon formula gains the approach-and-recovery
+  margin (max_time + 20, clamped [30, 120]; the cap 90 -> 120).
+  Measured (`qc/coverage_map_init1c`): recovery 56 -> 65 PASS, station
+  11 PASS / 0 FAIL (fully green), gate fails still zero, wall 605 s.
+  Remaining recovery FAILs (11) are the world-geography tail: stations
+  whose pursuit still outlives 120 minutes, and OTHER's floor-30
+  flights. The [fix] probe stays (the approach-autopsy
+  instrumentation).
 - **MC-4 — the per-profile horizons — LANDED (2026-10-02).** The
   recovery clause was measuring the horizon, not the behavior: 38 of 76
   carded flights "failed to recover" only because the flat 30-minute
