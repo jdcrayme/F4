@@ -1,0 +1,202 @@
+# Mission Contracts — the per-mission verification layer (MC)
+
+> **Status: Active plan.** MC-1 (the instrumentation joins) is the
+> landing tranche; MC-2–MC-5 build the verifier, the core archetypes,
+> and the matrix wiring on top. This layer is the prerequisite
+> instrument panel for the TOT-pacing design pass (CAMPAIGN_LOOP_PLAN
+> §7, AIRWAR-QC) — per-flight TOT attribution is an MC-1 deliverable.
+
+## 1. The problem: a passing war that reads as noise
+
+The QC stack answers "did the machinery run" at three layers — the C++
+exit gates (generic, fast), the `qc_missions.py` matrix (per-type
+AGGREGATE counters: routes_attached, airborne_at_end, armed/released),
+and the viewer replay of `trace.json` (a per-tick firehose). Nothing
+connects a flight's IDENTITY (callsign, mission, target, TOT, station)
+to what it DID, and nothing evaluates the SHAPE of what it did. A
+human watching a green war run sees "aircraft spawning, flying around,
+disappearing" — and a regression in BARCAP station discipline is as
+invisible as a working BARCAP.
+
+The mission-contract layer is the missing judgment: a declarative
+per-archetype definition of "doing it right", evaluated per flight
+against the observable stream, emitted as a human-readable report card
+that is also machine-diffable.
+
+## 2. What it is (and is not)
+
+- **Not a replacement** for the C++ exit gates (they stay the fast
+  generic authority) or the viewer replay (it stays the autopsy tool).
+- **Supersedes** `qc_missions.py`'s hand-coded aggregate expectations
+  (the `verdict_for()` pass) — the matrix runner survives as the
+  DRIVER, invoking the contract verifier instead.
+- **Adds**: the single-mission generator (spec-driven), the contract
+  verifier, the report card, and the instrumentation joins everything
+  reads.
+
+## 3. The contract taxonomy
+
+Contracts are per-archetype templates; a spec BINDS one (this target,
+this TOT, this weapon). Clauses are TYPED so the verifier is generic:
+
+| Clause | Measures | Archetypes |
+|---|---|---|
+| TIMELINE | wheels-up window, phase order | all |
+| PATH | waypoint crossings vs lateral tolerance | all routed |
+| STATION | racetrack dwell duration | CAP family, AWACS/tanker/ECM |
+| TOT | arrival-at-delivery delta vs appointed | strike family, INTERCEPT |
+| EMPLOYMENT | releases/impacts vs aimpoint + class | strike/SEAD/CAS/BDA |
+| INTERACTION | AAR contact+transfer; escort proximity; FAC handoff | packages |
+| RECOVERY | full stop at home, or honest booked death | all |
+| ECONOMY | fuel at recovery, ordnance spent == intents | all armed |
+
+Every clause carries a tolerance band. Bands live in the contract data
+(documented like the known-reds: a re-pin shows in the card history).
+
+## 4. The spec format (the user-facing generator interface)
+
+A spec declares INTENT (what the ATM would file), not spawn poses —
+the cousin of the scenario JSON, reusing its vocabulary where possible:
+
+```json
+{
+  "name": "strike_gbu12_with_sead",
+  "primary": {
+    "mission": "AMIS_STRIKE", "team": "blue", "squadron": "auto",
+    "target": { "objective": "auto", "aimpoint": "auto" },
+    "tot_s": 3600,
+    "loadout": { "weapon": "GBU-12", "count": 4 }
+  },
+  "support": [
+    { "mission": "AMIS_SEADSTRIKE", "weapon": "AGM-45",
+      "constraint": "fires_before_primary_tot_minus_s: 300" },
+    { "mission": "AMIS_ESCORT", "constraint": "within_ft_of_package: 6000" },
+    { "mission": "AMIS_TANKER", "track": "auto" }
+  ],
+  "opposition": [
+    { "type": "sam_battalion", "objective": "same" },
+    { "type": "cap", "team": "red" }
+  ],
+  "run": { "tier": "Tiered", "seed": 7, "horizon_s": 7200 }
+}
+```
+
+Three parameter families: the mission itself (type, target selection,
+TOT, loadout/weapon), the supporting cast (each adds an INTERACTION
+clause to the primary's contract), and opposition (a SEAD contract is
+meaningless without an emitter; an escort contract needs a threat).
+Specs live in `qc/mission_specs/*.json` — versioned, diffable, the
+named-profile library (same pattern as the scenario templates).
+
+Two spawn modes:
+- **injected** — the MissionIntent is built directly from the spec
+  (deterministic, no ATM variance; the unit shape).
+- **tasked** — the ATM files it in an otherwise quiet war (the
+  integration shape; also proves the planner's target/route choice).
+
+## 5. The report card (the join-point artifact)
+
+One page per flight, verdicts plus measured numbers, tick references
+into the trace:
+
+```
+VIPER 31 — AMIS_STRIKE (blue, spec: strike_gbu12_with_sead)
+  TIMELINE   PASS  wheels-up 12:01:40 (window -60/+120s), phases in order
+  PATH       PASS  6/6 waypoints, max cross-track 380 ft (tol 2000)
+  TOT        FAIL  -04:12 vs appointed 13:00:00 (tol ±300s)   <- tick 214k
+  EMPLOYMENT PASS  4x GBU-12 released, 3 impacts, 2 within 300 ft of aim
+  INTERACTION PASS SEAD fired at TOT-06:20; escort max range 4.1k ft
+  RECOVERY   PASS  full stop Kunsan 13:24, fuel 2,100 lbs
+```
+
+Emitted as `mission_report.md` (human) + `mission_report.json`
+(schema-versioned, diffable). Failed clauses cite the tick and the
+literal replay command. Cards are the review artifact — a PR that
+touches behavior diffs cards, the same discipline as ledger MD5s.
+
+## 6. The workflow: instigate → read → replay → inspect
+
+- **Instigate, three doors**: (1) automatic — `verify.cmd`'s smoke
+  rotation writes cards to `qc/verify/mission/`, a red clause fails
+  the verify; (2) one-shot CLI —
+  `campaign_qc --mission-spec <file> --report <dir>` (prints the
+  verdict table, non-zero exit on failed clauses); (3) interactive —
+  a Mission Lab panel in the world viewer (pick a spec, launch, ride
+  the bubble) — the one new UI surface, on the existing campaign
+  session view chassis.
+- **Read**: the console table, then the card.
+- **Replay**: DETERMINISTIC by construction (same binary + world +
+  seed = same run — "replay what CI saw" is exact, not a re-roll):
+  `f4-world-viewer --replay <run>/trace.json`. MC-2 adds card-driven
+  tick bookmarks.
+- **Inspect ladder**: console verdict → `mission_report.md` → the
+  JSON diff (compare mode: same spec at two commits) → the event
+  journal + `campaign_result.json` → the trace firehose →
+  `campaign_after.world.json` / the `.cam` write-back.
+
+## 7. The depth ladder (regression fit)
+
+Single missions are CHEAP (tiered runs sustain 60–100x compression —
+a 60-min mission is <1 min wall clock), but dozens per change is
+still a non-starter:
+
+1. **Every change** (`verify.cmd`, stays fast): the injected-mode
+   smoke specs for the core archetypes (BARCAP, STRIKE, ESCORT,
+   TANKER; +3–5 min), cards diffed in review.
+2. **Pre-release / nightly** (`--mission-matrix` opt-in): the full
+   tasked-mode matrix over all filed types (~20–40 min) — this also
+   produces the HONEST COVERAGE MAP (which of the 41 wire types have
+   behavior vs vocabulary-only; the stubs become the tranche list).
+3. **Investigation (on demand)**: any spec at Full fidelity, 1x,
+   full recording.
+
+Clause-red handling follows the known-reds pattern: fix it or list it
+with an owner.
+
+## 8. Tranches
+
+- **MC-1 — the instrumentation joins (this tranche).** Flight
+  identity on the trace snapshots (mission name, flight VU, TOT,
+  target objective — threaded through MissionPlan from the campaign
+  bridge); the mission EVENT stream (waypoint captures with action +
+  cross-track, station enter/exit, brain phase changes) in the
+  recording beside combat_events. Pure instrumentation, no behavior
+  change; the events are detected in the Simulation layer (the join
+  point that already reads the brain each tick), keeping f4-ai
+  engine-agnostic. TOT attribution falls out: the delivery waypoint's
+  capture event vs the plan's tot_s.
+- **MC-2 — the verifier + report card + the injected generator**
+  (`--single-mission` / `--mission-spec`). The clause evaluator, the
+  two report formats, card-driven replay bookmarks.
+- **MC-3 — the core archetype contracts**: BARCAP (station +
+  engagement + recovery), STRIKE (path + TOT + employment +
+  recovery), ESCORT (proximity), TANKER (AAR interaction), and the
+  first new BEHAVIOR tranche the matrix schedules (the honest
+  coverage map names it — likely AIRLIFT, the logistics family whose
+  ground-side consumer, DOM-2 supply, already exists; there is no
+  paradrop anywhere in the stock wire we converted).
+- **MC-4 — tasked mode + the matrix wiring**: qc_missions.py drives
+  the verifier; verify.cmd gains the smoke rotation + the opt-in
+  matrix stage.
+- **MC-5 — the coverage map + the viewer Mission Lab.** The truth
+  table over all 41 types; the interactive door.
+
+## 9. What does NOT change
+
+- The C++ exit gates, the scenario template library, the
+  stock-landing/war harnesses, the known-reds discipline.
+- The brain/flight-control behavior — MC-1 is read-only joins; the
+  first behavior change (if any) lands with MC-3's new archetypes,
+  under its own gates.
+- Determinism: joins read sim state in walk order; recorded events
+  inherit the run's seed.
+
+## 10. Known notes
+
+- AIRLIFT (wire byte 33) is vocabulary-only today — no cargo/airdrop
+  behavior exists anywhere in the converted stock data (the paradrop
+  memory is Tactical Engagement/mod territory, not the campaign AI).
+  Its contract starts red by design; that IS the coverage map working.
+- The TOT-pacing design pass (CAMPAIGN_LOOP_PLAN §7) consumes MC-1's
+  per-flight attribution — the two tranches are sequenced MC-1 →
+  MC-2 → (TOT pass || MC-3).

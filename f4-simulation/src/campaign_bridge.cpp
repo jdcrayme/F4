@@ -791,6 +791,10 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
             // the NavigationModule (the LNAV scenarios' own contract).
             plan->start_phase = MissionPlan::StartPhase::Enroute;
         }
+        // MC-1: the saved flight's own mission byte (the origin stamp
+        // carries the same value; the plan's copy keeps the identity
+        // with the route it belongs to). Saved routes carry no TOT.
+        plan->mission_type = fp->mission;
         // EMPL-2 — the campaign AAR wiring (receiver eligibility). The
         // route's WP_REFUEL waypoints (the campaign wire byte — the
         // real saves carry it on 158 TestCamp flights) make THIS
@@ -1831,6 +1835,13 @@ spawn_aircraft_for_intent(
         if (spawn_in_air) {
             plan->start_phase = MissionPlan::StartPhase::Enroute;
         }
+        // MC-1 (MISSION_CONTRACT_PLAN §8): the mission identity joins —
+        // the intent's own appointment and target ride the plan so the
+        // recorder/verifier layer can name WHAT this flight is for and
+        // measure TOT against the appointment.
+        plan->mission_type = intent.mission_byte;
+        plan->tot_s = static_cast<double>(intent.time_on_target);
+        plan->target_objective_id = intent.target_objective_id;
         // EMPL-2 — receiver eligibility from the synthetic route (the
         // same scan the flight path runs on the saved plan; the ladder's
         // stamped routes carry kWpRefuel the same way).

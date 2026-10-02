@@ -161,6 +161,34 @@ std::string FlightRecorder::to_json(const std::string& scenario_name) const {
             w.raw(",\n");
             w.raw("    "); w.string("missile"); w.raw(":"); w.raw("true");
         }
+
+        // MC-1 campaign identity joins — emitted only when non-default so
+        // pre-MC-1 recordings and scenario runs stay byte-identical.
+        if (!s.mission.empty()) {
+            w.raw(",\n");
+            w.raw("    "); w.string("mission"); w.raw(":");
+            w.string(s.mission);
+        }
+        if (s.flight_vu != 0) {
+            w.raw(",\n");
+            w.raw("    "); w.string("flight_vu"); w.raw(":");
+            w.number(s.flight_vu);
+        }
+        if (s.home_airbase_vu != 0) {
+            w.raw(",\n");
+            w.raw("    "); w.string("home_airbase_vu"); w.raw(":");
+            w.number(s.home_airbase_vu);
+        }
+        if (s.target_objective_vu != 0) {
+            w.raw(",\n");
+            w.raw("    "); w.string("target_objective_vu"); w.raw(":");
+            w.number(s.target_objective_vu);
+        }
+        if (s.tot_s > 0.0) {
+            w.raw(",\n");
+            w.raw("    "); w.string("tot_s"); w.raw(":");
+            w.number(s.tot_s);
+        }
         w.raw("\n");
 
         w.raw("  }");
@@ -271,6 +299,70 @@ std::string FlightRecorder::to_json(const std::string& scenario_name) const {
 
             w.raw("  }");
             if (i + 1 < combat_events_.size()) w.raw(",");
+            w.raw("\n");
+        }
+        w.raw("]\n");
+    }
+
+    // Mission event stream (MC-1 — the mission SHAPE: waypoint
+    // captures, station entry/exit, phase changes). Emitted only when
+    // present, after combat_events: recordings without mission events
+    // end exactly where they did before.
+    if (!mission_events_.empty()) {
+        w.raw(",\n");
+        w.string("mission_event_count"); w.raw(":");
+        w.number(static_cast<std::uint64_t>(mission_events_.size()));
+        w.raw(",\n");
+        w.string("mission_events"); w.raw(": [\n");
+        for (std::size_t i = 0; i < mission_events_.size(); ++i) {
+            const auto& e = mission_events_[i];
+            w.raw("  {\n");
+            bool first = true;
+            auto next_field = [&w, &first]() {
+                if (!first) w.raw(",\n");
+                first = false;
+                w.raw("    ");
+            };
+            next_field(); w.string("tick"); w.raw(":"); w.number(e.tick);
+            next_field(); w.string("kind"); w.raw(":");
+                w.string(mission_event_kind_name(e.kind));
+            next_field(); w.string("entity_id"); w.raw(":");
+                w.number(e.entity_id);
+            if (!e.callsign.empty()) {
+                next_field(); w.string("callsign"); w.raw(":");
+                    w.string(e.callsign);
+            }
+            if (!e.mission.empty()) {
+                next_field(); w.string("mission"); w.raw(":");
+                    w.string(e.mission);
+            }
+            if (e.kind == MissionEvent::Kind::WaypointCaptured) {
+                next_field(); w.string("wp_index"); w.raw(":");
+                    w.number(static_cast<std::uint64_t>(
+                        static_cast<int>(e.wp_index)));
+                if (!e.wp_name.empty()) {
+                    next_field(); w.string("wp_name"); w.raw(":");
+                        w.string(e.wp_name);
+                }
+                if (e.wp_action != 0) {
+                    next_field(); w.string("wp_action"); w.raw(":");
+                        w.number(static_cast<std::uint64_t>(e.wp_action));
+                }
+                next_field(); w.string("cross_track_ft"); w.raw(":");
+                    w.number(e.cross_track_ft);
+            }
+            if (e.kind == MissionEvent::Kind::PhaseChanged) {
+                next_field(); w.string("from_phase"); w.raw(":");
+                    w.string(e.from_phase);
+                next_field(); w.string("to_phase"); w.raw(":");
+                    w.string(e.to_phase);
+            }
+            // Timing tail (always present, never followed by a comma).
+            if (!first) w.raw(",\n");
+            w.raw("    "); w.string("sim_time_s"); w.raw(":");
+            w.number(e.sim_time_s); w.raw("\n");
+            w.raw("  }");
+            if (i + 1 < mission_events_.size()) w.raw(",");
             w.raw("\n");
         }
         w.raw("]\n");
@@ -685,6 +777,13 @@ FlightSnapshot parse_snapshot(json::Reader& r) {
         else if (key == "entity_id")    { snap.entity_id = static_cast<std::uint64_t>(r.read_int()); }
         else if (key == "callsign")     { snap.callsign = r.read_string(); }
 
+        // MC-1 identity joins (absent in pre-MC-1 documents — defaults hold)
+        else if (key == "mission")      { snap.mission = r.read_string(); }
+        else if (key == "flight_vu")    { snap.flight_vu = static_cast<std::uint32_t>(r.read_int()); }
+        else if (key == "home_airbase_vu") { snap.home_airbase_vu = static_cast<std::uint32_t>(r.read_int()); }
+        else if (key == "target_objective_vu") { snap.target_objective_vu = static_cast<std::uint32_t>(r.read_int()); }
+        else if (key == "tot_s")        { snap.tot_s = r.read_number(); }
+
         // Position
         else if (key == "position")     { snap.position = parse_vec3(r); }
 
@@ -812,6 +911,45 @@ CombatEvent parse_combat_event(json::Reader& r) {
     return e;
 }
 
+// Parse a single MissionEvent object (MC-1). Unknown keys skip — the
+// same forward-compatibility rule.
+MissionEvent parse_mission_event(json::Reader& r) {
+    MissionEvent e;
+    r.expect('{');
+    while (!r.consume('}')) {
+        auto key = r.read_string();
+        r.expect(':');
+
+        if (key == "tick")            { e.tick = static_cast<std::uint64_t>(r.read_int()); }
+        else if (key == "sim_time_s") { e.sim_time_s = r.read_number(); }
+        else if (key == "kind") {
+            const auto name = r.read_string();
+            for (std::uint8_t k = 0;
+                 k <= static_cast<std::uint8_t>(
+                         MissionEvent::Kind::PhaseChanged); ++k) {
+                const auto kk = static_cast<MissionEvent::Kind>(k);
+                if (name == mission_event_kind_name(kk)) {
+                    e.kind = kk;
+                    break;
+                }
+            }
+        }
+        else if (key == "entity_id")  { e.entity_id = static_cast<std::uint64_t>(r.read_int()); }
+        else if (key == "callsign")   { e.callsign = r.read_string(); }
+        else if (key == "mission")    { e.mission = r.read_string(); }
+        else if (key == "wp_index")   { e.wp_index = static_cast<int>(r.read_int()); }
+        else if (key == "wp_name")    { e.wp_name = r.read_string(); }
+        else if (key == "wp_action")  { e.wp_action = static_cast<std::uint8_t>(r.read_int()); }
+        else if (key == "cross_track_ft") { e.cross_track_ft = r.read_number(); }
+        else if (key == "from_phase") { e.from_phase = r.read_string(); }
+        else if (key == "to_phase")   { e.to_phase = r.read_string(); }
+        else { r.skip_value(); }
+
+        r.consume(',');  // optional trailing comma
+    }
+    return e;
+}
+
 } // anonymous namespace
 
 FlightRecorder FlightRecorder::from_json(const std::string& json_str) {
@@ -844,6 +982,14 @@ FlightRecorder FlightRecorder::from_json(const std::string& json_str) {
             r.expect('[');
             while (!r.consume(']')) {
                 rec.record(parse_combat_event(r));
+                r.consume(',');
+            }
+        } else if (key == "mission_event_count") {
+            (void)r.read_int();     // informational; we parse the array
+        } else if (key == "mission_events") {
+            r.expect('[');
+            while (!r.consume(']')) {
+                rec.record_mission_event(parse_mission_event(r));
                 r.consume(',');
             }
         } else {

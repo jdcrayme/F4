@@ -5,6 +5,32 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MC-1 — the mission-contract instrumentation joins (the plan opens)
+
+MISSION_CONTRACT_PLAN.md's first tranche — the layer that makes a run
+readable as mission stories instead of glyph noise, and the instrument
+panel the TOT-pacing pass needs. Two joins, pure instrumentation (no
+behavior change; the BARCAP pair still lands both flights, verify
+GREEN):
+
+- Flight identity on the trace snapshots: mission (the AMIS name), the
+  campaign flight VU, the home airbase, the appointed TOT, and the
+  target objective — threaded from the MissionIntent through
+  MissionPlan (both bridge paths) and CampaignOriginComponent, emitted
+  only when non-default (pre-MC-1 recordings and identity-less
+  scenario snapshots stay byte-identical).
+- The mission EVENT stream beside combat_events: waypoint captures
+  (index, name, wire action, miss distance — the splice's cursor jumps
+  are excluded by the sequential rule), station entry/exit, and brain
+  phase changes (Ground->Enroute is wheels-up; ->Complete is the
+  recovery). Round-trip pinned in the recorder suite (22/22); the
+  recorder suite joins verify's fast tier.
+
+Demo (the BARCAP trace, reads from the joins alone): CS111-3
+AMIS_BARCAP2 flight 10673 home 1341 — wheels-up 119 s, station anchor
+captured 273 s, the LAND waypoint 508 s, Approach the same tick,
+Complete (landed) 1,131 s.
+
 ## REPAIR-T6 — the all-up verify: one command, loud exit code, the known-red list
 
 CAMPAIGN_REPAIR_PLAN.md's T6 tranche — the process fix that closes the

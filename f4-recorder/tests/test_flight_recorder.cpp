@@ -428,3 +428,81 @@ TEST(RoundTrip, FileRoundTrip) {
     // Cleanup
     std::filesystem::remove(path);
 }
+
+// ============================================================================
+// MC-1 — the mission event stream + identity joins
+// ============================================================================
+TEST(MissionEvents, EmitOnlyWhenPresent) {
+    FlightRecorder rec;
+    FlightSnapshot s;
+    s.entity_id = 1;
+    rec.record(s);
+    const auto json = rec.to_json("mc1_empty");
+    EXPECT_EQ(json.find("mission_events"), std::string::npos)
+        << "a recording without mission events must not carry the key "
+           "(pre-MC-1 byte compatibility)";
+}
+
+TEST(MissionEvents, RoundTrip) {
+    FlightRecorder rec;
+    FlightSnapshot s;
+    s.entity_id = 9;
+    s.callsign = "CS111-3";
+    s.mission = "AMIS_BARCAP2";       // MC-1 identity joins
+    s.flight_vu = 10673;
+    s.home_airbase_vu = 1341;
+    s.target_objective_vu = 4101;
+    s.tot_s = 3600.0;
+    rec.record(s);
+
+    f4::recorder::MissionEvent ev;
+    ev.tick = 144000;
+    ev.sim_time_s = 2400.0;
+    ev.kind = f4::recorder::MissionEvent::Kind::WaypointCaptured;
+    ev.entity_id = 9;
+    ev.callsign = "CS111-3";
+    ev.mission = "AMIS_BARCAP2";
+    ev.wp_index = 3;
+    ev.wp_name = "WP4:TARGET";
+    ev.wp_action = 17;                 // the STRIKE delivery action
+    ev.cross_track_ft = 380.0;
+    rec.record_mission_event(std::move(ev));
+
+    f4::recorder::MissionEvent ph;
+    ph.tick = 150000;
+    ph.sim_time_s = 2500.0;
+    ph.kind = f4::recorder::MissionEvent::Kind::PhaseChanged;
+    ph.entity_id = 9;
+    ph.from_phase = "Enroute";
+    ph.to_phase = "Approach";
+    rec.record_mission_event(std::move(ph));
+
+    const auto json = rec.to_json("mc1");
+    EXPECT_NE(json.find("mission_event_count"), std::string::npos);
+    EXPECT_NE(json.find("waypoint_captured"), std::string::npos);
+    EXPECT_NE(json.find("from_phase"), std::string::npos);
+    EXPECT_NE(json.find("to_phase"), std::string::npos);
+    EXPECT_NE(json.find("AMIS_BARCAP2"), std::string::npos);
+
+    const auto back = FlightRecorder::from_json(json);
+    ASSERT_EQ(back.mission_event_count(), 2u);
+    const auto& e0 = back.mission_events()[0];
+    EXPECT_EQ(e0.kind, f4::recorder::MissionEvent::Kind::WaypointCaptured);
+    EXPECT_EQ(e0.wp_index, 3);
+    EXPECT_EQ(e0.wp_name, "WP4:TARGET");
+    EXPECT_EQ(e0.wp_action, 17);
+    EXPECT_DOUBLE_EQ(e0.cross_track_ft, 380.0);
+    EXPECT_EQ(e0.mission, "AMIS_BARCAP2");
+    const auto& e1 = back.mission_events()[1];
+    EXPECT_EQ(e1.from_phase, "Enroute");
+    EXPECT_EQ(e1.to_phase, "Approach");
+
+    // The snapshot identity joins survive the round trip too.
+    ASSERT_EQ(back.snapshots().size(), 1u);
+    const auto& bs = back.snapshots()[0];
+    EXPECT_EQ(bs.mission, "AMIS_BARCAP2");
+    EXPECT_EQ(bs.flight_vu, 10673u);
+    EXPECT_EQ(bs.home_airbase_vu, 1341u);
+    EXPECT_EQ(bs.target_objective_vu, 4101u);
+    EXPECT_DOUBLE_EQ(bs.tot_s, 3600.0);
+}

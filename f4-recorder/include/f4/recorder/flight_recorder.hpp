@@ -34,6 +34,7 @@
 
 #include "f4/recorder/snapshot.hpp"
 #include "f4/recorder/combat_event.hpp"
+#include "f4/recorder/mission_event.hpp"
 
 namespace f4::recorder {
 
@@ -60,6 +61,17 @@ public:
         combat_events_.push_back(std::move(event));
     }
 
+    // --- Recording (mission events; MC-1 — the mission SHAPE stream:
+    // waypoint captures, station entry/exit, phase changes; call from
+    // the sim's per-tick transition detector) ---
+    void record_mission_event(const MissionEvent& event) {
+        mission_events_.push_back(event);
+    }
+
+    void record_mission_event(MissionEvent&& event) {
+        mission_events_.push_back(std::move(event));
+    }
+
     // --- Access ---
     [[nodiscard]] const std::vector<FlightSnapshot>& snapshots() const noexcept {
         return snapshots_;
@@ -69,8 +81,16 @@ public:
         return combat_events_;
     }
 
+    [[nodiscard]] const std::vector<MissionEvent>& mission_events() const noexcept {
+        return mission_events_;
+    }
+
     [[nodiscard]] std::size_t combat_event_count() const noexcept {
         return combat_events_.size();
+    }
+
+    [[nodiscard]] std::size_t mission_event_count() const noexcept {
+        return mission_events_.size();
     }
 
     [[nodiscard]] std::size_t size() const noexcept {
@@ -162,6 +182,7 @@ public:
 private:
     std::vector<FlightSnapshot> snapshots_;
     std::vector<CombatEvent> combat_events_;
+    std::vector<MissionEvent> mission_events_;
     std::string scenario_name_;
 };
 

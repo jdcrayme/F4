@@ -667,6 +667,12 @@ private:
                                      std::uint64_t airbase_id);
     void wire_atc();              // ATC (stub|tower per scenario.atc) + AirfieldConfig
     void record_snapshot();
+    /// MC-1 (MISSION_CONTRACT_PLAN §8): the mission event detector —
+    /// waypoint captures, station entry/exit, brain phase changes,
+    /// detected per recorded tick by state comparison (the nav cursor,
+    /// the hold flag, the phase). NOT decimated with snapshots: the
+    /// transitions are discrete.
+    void record_mission_events_();
     void record_fcs_trace_sample();
     /// Load scenario_.class_table_path into class_table_ ONCE per
     /// initialize() — every long-lived borrower (the spawn paths, the
@@ -696,6 +702,17 @@ private:
     std::unique_ptr<f4::sim::WeatherSystem> weather_;  // Task 73; null = not configured
     std::unique_ptr<f4::ai::atc::IAirTrafficControl> atc_;
     std::unique_ptr<f4::recorder::FlightRecorder> recorder_;
+
+    /// MC-1: the per-aircraft previous-state block the mission event
+    /// detector diffs against. Keyed by EntityId::value; a missing brain
+    /// resets the track (a respawned entity id is a new flight).
+    struct MissionTrackState {
+        bool seen{false};
+        std::size_t wp{0};
+        bool holding{false};
+        const char* phase{nullptr};  // static literal from phase_name()
+    };
+    std::unordered_map<std::uint64_t, MissionTrackState> mission_track_;
     std::unique_ptr<f4::recorder::FcsTraceWriter> fcs_trace_;
     f4::data::AircraftConfig aircraft_cfg_;
 

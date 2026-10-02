@@ -50,6 +50,7 @@
 #include <f4/weapons/f4_weapons.hpp>
 
 #include <f4/campaign/api/events.hpp>   // CAMP-HOST-2: weather_changed
+#include <f4/campaign/mission_type.hpp>  // MC-1: mission_type_name
 #include <f4/sensors/f4_sensors.hpp>
 
 #include <chrono>
@@ -3541,7 +3542,10 @@ void Simulation::tick(double dt) {
     // when bubble_manager_ is null (scenario-list spawn mode).
     update_bubble();
 
-    if (recorder_) record_snapshot();
+    if (recorder_) {
+        record_mission_events_();  // MC-1: every tick (no decimation)
+        record_snapshot();
+    }
     if (fcs_trace_) record_fcs_trace_sample();
 
     if (g_prof.on) {
@@ -3569,6 +3573,127 @@ void Simulation::tick(double dt) {
                 g_prof.t_sweeps / 1000.0, g_prof.t_sync / 1000.0,
                 g_prof.t_guns / 1000.0, g_prof.t_record / 1000.0);
         }
+    }
+}
+
+// ============================================================================
+// MC-1 — the mission event detector (MISSION_CONTRACT_PLAN §8)
+// ============================================================================
+// Runs every recorded tick (NOT decimated like snapshots): the mission
+// SHAPE transitions are discrete, and a record_every > 1 run would
+// otherwise miss them. Detection is by state comparison — the nav
+// cursor, the station-hold flag, the brain phase — read in the same
+// walk order record_snapshot uses, so the events inherit the run's
+// determinism. f4-ai stays engine-agnostic: nothing there knows a
+// recorder exists; this layer JOINS.
+void Simulation::record_mission_events_() {
+    std::size_t roster_index = 0;  // scenario-order callsigns (as snapshots)
+    for (const auto eid : aircraft_entities_) {
+        entities::EntityHandle h(eid, &world_);
+        auto* brain = h.get<f4::ai::BrainComponent>();
+        if (brain == nullptr) {
+            mission_track_[eid.value].seen = false;
+            ++roster_index;
+            continue;
+        }
+        auto& tr = mission_track_[eid.value];
+
+        // The same callsign resolution the snapshot path uses.
+        std::string callsign;
+        const auto* org = h.get<f4::simulation::CampaignOriginComponent>();
+        if (org != nullptr) {
+            char cs[32];
+            std::snprintf(cs, sizeof(cs), "CS%03u-%u",
+                          static_cast<unsigned>(org->callsign_id),
+                          static_cast<unsigned>(org->callsign_num));
+            callsign = cs;
+        } else if (roster_index < scenario_.aircraft.size()) {
+            callsign = scenario_.aircraft[roster_index].callsign;
+        }
+        ++roster_index;
+
+        const auto& plan = brain->mission_plan();
+        std::string mission;
+        const std::uint8_t mission_byte =
+            plan.mission_type != 0 ? plan.mission_type
+                                   : (org != nullptr ? org->mission_byte : 0);
+        if (mission_byte != 0) {
+            mission = std::string(
+                f4::campaign::mission_type_name(mission_byte));
+        }
+
+        const auto& nav = brain->navigation();
+        const std::size_t wp = nav.current_waypoint_index();
+        const bool holding = nav.holding_station();
+        const char* phase = brain->phase_name();  // static strings — safe
+
+        auto push = [&](f4::recorder::MissionEvent::Kind kind, auto&& fill) {
+            f4::recorder::MissionEvent ev;
+            ev.tick = tick_;
+            ev.sim_time_s = sim_time_s_;
+            ev.kind = kind;
+            ev.entity_id = eid.value;
+            ev.callsign = callsign;
+            ev.mission = mission;
+            fill(ev);
+            recorder_->record_mission_event(std::move(ev));
+        };
+
+        if (tr.seen) {
+            // Waypoint capture: the cursor advanced ONE index off a
+            // waypoint (the module's capture walk is sequential). A jump
+            // of more than one is a SPLICE (the FID-4 resume, the T3
+            // route-path projection) or a reset — not a capture, and
+            // emitting it would book a phantom miss of hundreds of
+            // thousands of feet (measured: the splice's WP0 "capture" at
+            // 185,463 ft). The miss distance (the PATH clause's
+            // per-waypoint error) is the current position's distance to
+            // the captured waypoint.
+            if (wp == tr.wp + 1 && tr.wp < plan.route.size()) {
+                const auto& wpt = plan.route[tr.wp];
+                push(f4::recorder::MissionEvent::Kind::WaypointCaptured,
+                     [&](f4::recorder::MissionEvent& ev) {
+                         ev.wp_index = static_cast<int>(tr.wp);
+                         ev.wp_name = wpt.name;
+                         ev.wp_action = wpt.action;
+                         if (const auto* tf =
+                                 h.get<entities::TransformComponent>()) {
+                             const double dx =
+                                 tf->position.x - wpt.position.x;
+                             const double dy =
+                                 tf->position.y - wpt.position.y;
+                             ev.cross_track_ft =
+                                 std::sqrt(dx * dx + dy * dy);
+                         }
+                     });
+            }
+            if (holding && !tr.holding) {
+                push(f4::recorder::MissionEvent::Kind::StationEntered,
+                     [&](f4::recorder::MissionEvent& ev) {
+                         ev.wp_index = static_cast<int>(wp);
+                     });
+            }
+            if (!holding && tr.holding) {
+                push(f4::recorder::MissionEvent::Kind::StationExited,
+                     [&](f4::recorder::MissionEvent& ev) {
+                         ev.wp_index = static_cast<int>(wp);
+                     });
+            }
+            // phase_name() returns static literals — pointer identity is
+            // the cheap correct compare.
+            if (phase != tr.phase) {
+                push(f4::recorder::MissionEvent::Kind::PhaseChanged,
+                     [&](f4::recorder::MissionEvent& ev) {
+                         ev.from_phase =
+                             tr.phase != nullptr ? tr.phase : "spawn";
+                         ev.to_phase = phase;
+                     });
+            }
+        }
+        tr.seen = true;
+        tr.wp = wp;
+        tr.holding = holding;
+        tr.phase = phase;
     }
 }
 
@@ -3612,6 +3737,15 @@ void Simulation::record_snapshot() {
                           static_cast<unsigned>(org->callsign_id),
                           static_cast<unsigned>(org->callsign_num));
             snap.callsign = cs;
+            // MC-1: the campaign identity joins (MISSION_CONTRACT_PLAN §8).
+            // The mission NAME is resolved below (the brain block), where
+            // the plan's own byte can override the origin stamp.
+            snap.flight_vu = org->flight_vu;
+            snap.home_airbase_vu = org->home_airbase_vu;
+            if (org->mission_byte != 0) {
+                snap.mission = std::string(
+                    f4::campaign::mission_type_name(org->mission_byte));
+            }
         } else if (roster_index < scenario_.aircraft.size()) {
             snap.callsign = scenario_.aircraft[roster_index].callsign;
         }
@@ -3644,6 +3778,15 @@ void Simulation::record_snapshot() {
             // employment story — the waypoint's strike target when the
             // leg carries one.
             const auto& plan = brain->mission_plan();
+            // MC-1: the plan's own identity wins over the origin stamp
+            // (the injected-spec path sets it directly), and the
+            // appointment/target ride beside it.
+            if (plan.mission_type != 0) {
+                snap.mission = std::string(
+                    f4::campaign::mission_type_name(plan.mission_type));
+            }
+            snap.tot_s = plan.tot_s;
+            snap.target_objective_vu = plan.target_objective_id;
             const auto wp_idx = brain->navigation().current_waypoint_index();
             if (wp_idx < plan.route.size()) {
                 const auto& wp = plan.route[wp_idx];

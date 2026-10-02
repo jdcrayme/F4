@@ -38,7 +38,8 @@ echo [verify] 1/5 build Release...
 cmake --build "%BUILD%" --config Release -j 8 ^
   --target test_brain_component test_navigation_module test_takeoff_module ^
   test_landing_module test_air_steering test_ground_steering ^
-  test_tower_atc test_ground_contact test_combat_integration ^
+  test_tower_atc test_flight_recorder ^
+  test_ground_contact test_combat_integration ^
   test_fidelity_combat test_campaign_session test_campaign_result_sink ^
   test_digi_mission test_campaign_stock_landing campaign_qc
 if errorlevel 1 (
@@ -55,6 +56,7 @@ call :run_gated "%BUILD%\f4-ai\tests\Release\test_landing_module.exe"
 call :run_gated "%BUILD%\f4-ai\tests\Release\test_air_steering.exe"
 call :run_gated "%BUILD%\f4-ai\tests\Release\test_ground_steering.exe"
 call :run_gated "%BUILD%\f4-ai\tests\Release\test_tower_atc.exe"
+call :run_gated "%BUILD%\f4-recorder\tests\Release\test_flight_recorder.exe"
 call :run_gated "%BUILD%\f4-simulation\tests\Release\test_ground_contact.exe"
 call :run_gated "%BUILD%\f4-simulation\tests\Release\test_combat_integration.exe"
 call :run_gated "%BUILD%\f4-simulation\tests\Release\test_fidelity_combat.exe"

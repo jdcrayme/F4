@@ -147,6 +147,23 @@ struct MissionPlan {
     /// the course to test intercept geometry (NAV-D1).
     enum class StartPhase { Ground, Approach, Enroute };
     StartPhase start_phase{StartPhase::Ground};
+
+    // --- MC-1 (MISSION_CONTRACT_PLAN §8): the mission IDENTITY joins.
+    // The recorder/verifier layer reads these to name WHAT this flight
+    // is for (the report card's header row) and to measure TOT (the
+    // delivery waypoint's capture event vs the appointment). Filled by
+    // the campaign bridge from the MissionIntent; scenario-list flights
+    // keep the defaults (no campaign identity). Pure data — no behavior
+    // reads these.
+    /// The AMIS mission wire byte (0 = AMIS_NONE / unspecified).
+    std::uint8_t mission_type{0};
+    /// The intent's appointment, campaign seconds (0 = none appointed).
+    /// The intent field is named time_on_target; the TOT clause measures
+    /// the delivery waypoint's capture against it (MC-2 does the
+    /// campaign->sim clock mapping — the plan carries it verbatim).
+    double tot_s{0.0};
+    /// The target objective's VU_ID.num (0 = none).
+    std::uint32_t target_objective_id{0};
 };
 
 // ============================================================================

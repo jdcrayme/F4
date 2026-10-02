@@ -45,6 +45,18 @@ struct FlightSnapshot {
     std::uint64_t entity_id{0};
     std::string callsign;
 
+    // --- MC-1: campaign identity joins (MISSION_CONTRACT_PLAN §8) ------
+    // What this flight IS FOR, beside where it is. Filled by the sim's
+    // snapshot path from CampaignOriginComponent + MissionPlan; scenario
+    // flights without campaign identity keep the defaults. Serialized
+    // ONLY when non-default, so pre-MC-1 recordings and scenario runs
+    // stay byte-identical (the M4 missile-flag rule).
+    std::string mission;             ///< AMIS_* name ("" = non-campaign)
+    std::uint32_t flight_vu{0};      ///< campaign flight VU_ID.num
+    std::uint32_t home_airbase_vu{0};///< recovery base objective VU
+    std::uint32_t target_objective_vu{0}; ///< the intent's target
+    double tot_s{0.0};               ///< appointed TOT, campaign seconds
+
     // --- Track type (M4) ---------------------------------------------------
     // False for aircraft (the default and the only kind the format carried
     // before M4). True for missile tracks: callsign carries the weapon name
