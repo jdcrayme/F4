@@ -5,6 +5,27 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MC-2b — the single-mission isolation profile
+
+MISSION_CONTRACT_PLAN.md's generator tranche:
+`campaign_qc --single-mission TYPE` (STRIKE or AMIS_STRIKE) — the
+mission filter pinned, one aircraft, one seeded ladder cycle, the
+saved-flight emission skipped (a saved flight would consume the cap at
+t=0), a 45-h recorded horizon. Deterministic force-file through the new
+`Campaign::seed_mission_request` -> `AirTaskingManager::seed_request`:
+a MissionRequest per belligerent (defend own first objective / strike
+the first enemy objective), riding the NORMAL pipeline — prioritize,
+deconflict, package, escorts, TOT slotting; a team that cannot field
+the profile lands in the ATM's own unfilled counter. The STRIKE
+isolation flew end to end (draw -> spawn -> fly -> record -> card), and
+the card immediately named the employment seam: the ATM-composed strike
+flew STK1-3 with NO target and NO TOT on the intent (the release
+trigger never armed) — the employment tranche's finding, pointed at by
+the card's EMPLOYMENT FAIL and the identity join's tgt/tot columns.
+Also surfaced: TANKER cannot isolate on TestCamp (no tanker unit — the
+coverage map's first row) and the plain qc path's ATM-spawn unit-map
+seam (the C5 war's session path spawns these fine).
+
 ## MC-2 — the mission contract verifier + report card
 
 MISSION_CONTRACT_PLAN.md's second tranche: `scripts/mission_verify.py`

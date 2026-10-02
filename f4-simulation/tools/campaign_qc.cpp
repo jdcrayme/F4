@@ -107,6 +107,11 @@
 //     --sim-dt <sec>               (default 1/60)
 //     --tasking <m>                (C2: synthetic tasking minutes; 0 = off)
 //     --tasking-cycle <sec>        (C2: ladder cycle period; default 1800)
+//     --single-mission <type>      (MC-2b: the mission-contract isolation
+//                                  profile — one seeded draw of the named
+//                                  type (AMIS name or byte), no further
+//                                  tasking, one aircraft, a 45-h recorded
+//                                  horizon; --mission-spec rides later)
 //     --reinforce-period <sec>     (C2: reinforcement cadence; 0 = off,
 //                                   default 43200 = 12 h)
 //     --profiles <json>            (default: <bin>/generated_campaign/MissionProfiles.json)
@@ -265,6 +270,11 @@ struct Args {
     // demo needs tanker flights AND their refuel-leg receivers in the
     // same run — different bytes, one filter (the EMPL-2 follow-up).
     std::vector<int> missions;
+    // MC-2b (MISSION_CONTRACT_PLAN §8): the single-mission isolation
+    // profile — one seeded ladder draw of the named type, no further
+    // tasking, one aircraft, a long recorded horizon. The contract
+    // layer's smoke-rotation input.
+    std::string single_mission;
     int max_flights = 0;
     bool max_flights_set = false;  // --max-flights passed (0 = UNCAPPED)
     // SHOWCASE-1 — the scenario QC arm (--scenario <json>): run a
@@ -520,6 +530,7 @@ Args parse_args(int argc, char** argv) {
         else if (k == "--repair-period")
             a.ground_repair_sec = std::atoi(next());
         else if (k == "--replacement-stock") a.replacement_stock_flow = true;
+        else if (k == "--single-mission") a.single_mission = next();
         else if (k == "--mission") {
             // A comma list of names/bytes (the two-byte spawn mix —
             // EMPL-2's named follow-up: a tanker AND its receivers in
@@ -1844,7 +1855,48 @@ int main(int argc, char** argv) {
 }
 
 int run_qc(int argc, char** argv) {
-    const Args args = parse_args(argc, argv);
+    Args args = parse_args(argc, argv);
+
+    // MC-2b — compose the single-mission isolation profile: the mission
+    // filter pinned to the named type, ONE aircraft, one small tasking
+    // cycle (the cycle period pushed past the horizon so no second draw
+    // ever fires), and a default long recorded horizon (the flight must
+    // reach its recovery for the card's RECOVERY clause).
+    if (!args.single_mission.empty()) {
+        // The full wire name or the short form (STRIKE == AMIS_STRIKE).
+        std::string single_name = args.single_mission;
+        auto byte = mission_type_byte(single_name);
+        if (!byte && single_name.rfind("AMIS_", 0) != 0) {
+            byte = mission_type_byte("AMIS_" + single_name);
+            if (byte) single_name = "AMIS_" + single_name;
+        }
+        if (!byte) {
+            std::fprintf(stderr,
+                         "campaign_qc: unknown single-mission type '%s'\n",
+                         args.single_mission.c_str());
+            return 2;
+        }
+        // Reuse the --mission parse: mutate through the same vocabulary.
+        // (parse_args already returned; set the filter here.)
+        args.missions.assign({static_cast<int>(*byte)});
+        if (!args.max_flights_set) {
+            args.max_flights = 1;
+            args.max_flights_set = true;
+        }
+        if (args.tasking_minutes == 0) {
+            // 35 min: the first cycle (t=1800 s) fires inside the tick;
+            // the second (t=3600 s) falls outside — one draw.
+            args.tasking_minutes = 35;
+        }
+        if (!args.ticks_set) {
+            args.ticks = 45 * 3600;
+            args.ticks_set = true;
+        }
+        std::printf("single-mission: %s (byte %d) — one draw, tasking "
+                    "off after, horizon %ds\n",
+                    single_name.c_str(),
+                    static_cast<int>(*byte), args.ticks);
+    }
 
     // SHOWCASE-1: the scenario arm skips the campaign entirely — no
     // world JSON, no b3 loop, no ledger. Its gates are its own (20–24).
@@ -2138,6 +2190,53 @@ int run_qc(int argc, char** argv) {
 
         // The exit-6 precondition: belligerents actually had aircraft.
         const auto war_teams = ladder.belligerent_teams();
+
+        // MC-2b — force-file the spec's mission so the isolation is
+        // deterministic (the ATM's own generated requests depend on the
+        // theater's mood). Seeded for EVERY belligerent — the pick is
+        // per-team (defensive missions defend the flier's OWN first
+        // objective, the strategy layer's station rule; offensive ones
+        // strike the first enemy objective in wire order) — and the
+        // one-aircraft cap keeps a single flight; a team whose roster
+        // cannot field the profile lands in the ATM's own unfilled
+        // counter (honest, printed).
+        if (!args.single_mission.empty() && !war_teams.empty()) {
+            const std::uint8_t byte =
+                static_cast<std::uint8_t>(args.missions.front());
+            const bool defensive = f4::campaign::mission_category(byte)
+                == f4::campaign::MissionCategory::CAP;
+            for (const auto& wt : war_teams) {
+                const auto flier = static_cast<std::uint8_t>(wt);
+                std::uint32_t target_vu = 0;
+                for (const auto& obj : ws.objectives) {
+                    const bool owned_by_flier = obj.owner == flier;
+                    const bool enemy =
+                        std::find(war_teams.begin(), war_teams.end(),
+                                  static_cast<int>(obj.owner))
+                            != war_teams.end()
+                        && obj.owner != flier;
+                    if (defensive ? owned_by_flier : enemy) {
+                        target_vu = obj.id_num;
+                        break;
+                    }
+                }
+                if (target_vu == 0) continue;
+                f4::campaign::MissionRequest req;
+                req.mission = byte;
+                req.team = flier;
+                req.target_id = target_vu;
+                req.tot = ws.campaign.current_time + 2700;  // 45 min out
+                req.priority = 100;  // above the generated requests
+                req.aircraft = 1;
+                ladder.seed_mission_request(req);
+                std::printf("single-mission: seeded request team=%d "
+                            "byte=%d target=%u tot=%lld\n",
+                            static_cast<int>(flier),
+                            static_cast<int>(byte), target_vu,
+                            static_cast<long long>(req.tot));
+            }
+        }
+
         for (const auto& s : result_ledger.squadrons()) {
             if (s.availability <= 0) continue;
             if (std::find(war_teams.begin(), war_teams.end(),
@@ -2247,20 +2346,29 @@ int run_qc(int argc, char** argv) {
                     threat_ad_units, threat_cells);
     }
 
-    const auto intents = emit_flight_intents(
-        static_cast<const f4::world::IUnitCoreSource&>(adapters.units),
-        static_cast<const f4::world::IFlightSource&>(adapters.units),
-        bus, ws.campaign.current_time,
-        &static_cast<const f4::world::ITeamSource&>(adapters.teams));
-
+    // MC-2b: the single-mission isolation skips the saved-flight
+    // emission entirely — the spec's synthetic draw is the ONLY flight
+    // (a saved flight would consume the one-aircraft cap at t=0, before
+    // the ladder's own tick ever runs).
+    std::size_t b3_intent_count = 0;
+    if (args.single_mission.empty()) {
+        const auto intents = emit_flight_intents(
+            static_cast<const f4::world::IUnitCoreSource&>(adapters.units),
+            static_cast<const f4::world::IFlightSource&>(adapters.units),
+            bus, ws.campaign.current_time,
+            &static_cast<const f4::world::ITeamSource&>(adapters.teams));
+        b3_intent_count = intents.size();
+    }
     const auto& b3_stats = spawner.stats();
     std::printf("b3_loop: intents=%zu spawned=%d routes=%d synthetic=%d "
                 "unknown=%d dups=%d\n",
-                intents.size(), b3_stats.aircraft_spawned,
+                b3_intent_count, b3_stats.aircraft_spawned,
                 b3_stats.routes_attached, b3_stats.synthetic_spawned,
                 b3_stats.unknown_flight_ids, b3_stats.duplicate_skips);
 
-    if (b3_stats.aircraft_spawned == 0) {
+    if (args.single_mission.empty()
+            ? b3_stats.aircraft_spawned == 0
+            : b3_stats.synthetic_spawned == 0) {
         std::fprintf(stderr,
                      "campaign_qc: filter matched no flights — nothing to "
                      "run\n");
@@ -2807,7 +2915,7 @@ int run_qc(int argc, char** argv) {
         }
 
         w.put(",\n  \"b3_loop\": {\n    ");
-        w.number_key("intents_emitted", intents.size());
+        w.number_key("intents_emitted", b3_intent_count);
         w.put(",    ");
         w.number_key("intents_seen", b3_stats.intents_seen);
         w.put(",    ");

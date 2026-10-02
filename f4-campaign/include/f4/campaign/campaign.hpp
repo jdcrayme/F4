@@ -404,6 +404,14 @@ public:
         return atm_ ? &atm_->stats() : nullptr;
     }
 
+    /// MC-2b — force-file a mission request into the ATM's backlog (the
+    /// single-mission isolation profile's injection point; see
+    /// AirTaskingManager::seed_request). No-op when the pipeline is
+    /// disarmed.
+    void seed_mission_request(const MissionRequest& req) {
+        if (atm_) atm_->seed_request(req);
+    }
+
     /// C4: the flights the ATM has booked (in-flight, awaiting
     /// recovery) — null when the pipeline is not armed.
     [[nodiscard]] const std::vector<FlightTasking>* atm_booked_flights()

@@ -609,6 +609,17 @@ public:
     [[nodiscard]] std::vector<MissionRequest>
     generate_requests(std::uint8_t team, CampaignTime now);
 
+    /// MC-2b (MISSION_CONTRACT_PLAN §8): force-file a request — the
+    /// injection point for the single-mission isolation profile (and,
+    /// later, the spec generator). The request joins the team's backlog
+    /// and rides the NORMAL pipeline (prioritize, deconflict, package
+    /// build, escort assignment, TOT slotting) on the next cycle: the
+    /// ATM's own machinery around a spec-controlled filing, no
+    /// generated-request variance. Deterministic per seed.
+    void seed_request(const MissionRequest& req) {
+        backlog_[req.team].push_back(req);
+    }
+
     /// PHASE 2 — prioritization: stable sort (priority desc, byte asc,
     /// seeds first) and the tempo budget (missions_per_cycle; 0 =
     /// unlimited).

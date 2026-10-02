@@ -187,10 +187,33 @@ with an owner.
   refinement tranche); (b) a transfer flight's enroute stub never held
   its leg (steady p90 8,947 ft — the degenerate-stub shape; same
   owner). Both cards carry them with numbers.
-- **MC-2b — the injected generator** (`--single-mission` /
-  `--mission-spec` in campaign_qc): build the MissionIntent directly
-  from a spec in a quiet war. Next.
-- **MC-3 — the core archetype contracts**: BARCAP (station +
+- **MC-2b — the isolation profile — LANDED (2026-10-02).**
+  `campaign_qc --single-mission TYPE` (short form or AMIS name): the
+  mission filter pinned, one aircraft, one seeded ladder cycle (35-min
+  tick contains the 1800-s first cycle; the 3600-s second falls
+  outside), saved-flight emission SKIPPED (a saved flight would consume
+  the cap at t=0), and a 45-h recorded horizon. Deterministic
+  force-file: the tool seeds a MissionRequest per belligerent (each
+  defending its own first objective / striking the first enemy
+  objective in wire order — per-team pick; the one-aircraft cap keeps a
+  single flight) through the new `Campaign::seed_mission_request` ->
+  `AirTaskingManager::seed_request` — the request rides the NORMAL
+  pipeline (prioritize/deconflict/package/escorts/TOT slot); a team
+  that cannot field the profile lands in the ATM's own unfilled
+  counter. **First findings** (the generator immediately paid for
+  itself): (a) the ATM-composed strike flew waypoints STK1-3 with NO
+  target and NO TOT on the intent (plan.target_objective_id == 0,
+  tot_s == 0 — the release trigger never armed; the card's EMPLOYMENT
+  FAIL + the identity join's tgt/tot columns point straight at it;
+  owner: the employment tranche — the ATM package's target/TOT must
+  reach the intent); (b) TANKER cannot isolate on TestCamp — no tanker
+  unit resolves (the coverage map's first row); (c) ATM-composed spawns
+  of some squadrons hit unknown-flight-id in the PLAIN qc path (the C5
+  war's session path spawns them — the synthetic=48 certificate — so
+  the seam is the plain path's unit map; owner: the coverage/MC-4
+  tranche).
+  `--mission-spec` (the full spec file: loadouts, the supporting cast,
+  opposition) rides with MC-3's archetype contracts.- **MC-3 — the core archetype contracts**: BARCAP (station +
   engagement + recovery), STRIKE (path + TOT + employment +
   recovery), ESCORT (proximity), TANKER (AAR interaction), and the
   first new BEHAVIOR tranche the matrix schedules (the honest
