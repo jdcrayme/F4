@@ -268,17 +268,35 @@ def eval_tot(f: dict, clause: dict) -> tuple[str, str]:
 
 
 def eval_employment(f: dict, clause: dict) -> tuple[str, str]:
+    """EMPLOYMENT = opportunity vs execution. The route's delivery-action
+    waypoints (wp_action 14-19, carried on the capture events) are the
+    OPPORTUNITY; the BombReleased combat events are the EXECUTION. A
+    flight with no delivery waypoint on its route never had the chance —
+    SKIP (the loadout/tasking concern qc_missions' own taxonomy names) —
+    that split is what separates "the chain broke" from "there was
+    nothing to employ". Measured on the isolation runs: the saved strike
+    routes carry their delivery waypoints with action 0 and no target
+    stamp (the A-G route arming's saved-flight gap — the EMPL tranche's
+    finding), which reads SKIP until the arming lands.
+    """
     releases = 0
     for e in f.get("combat_events", []):
         if e.get("kind") == "BombReleased" and e.get("subject_id") == f["entity_id"]:
             releases += 1
+    opportunities = [e for e in f["events"]
+                     if e["kind"] == "waypoint_captured"
+                     and e.get("wp_action") in DELIVERY_ACTIONS]
     died = any(e.get("kind") == "AircraftKilled" and e.get("subject_id") == f["entity_id"]
                for e in f.get("combat_events", []))
     if releases >= clause["min_releases"]:
         return "PASS", f"{releases} release(s)"
     if died:
-        return "SKIP", f"shot down before employment (0 releases)"
-    return "FAIL", (f"{releases} releases (min {clause['min_releases']}) — "
+        return "SKIP", "shot down before employment (0 releases)"
+    if not opportunities:
+        return "SKIP", ("no delivery waypoint on the route (no employment "
+                        "opportunity — the route arming/tasking concern)")
+    return "FAIL", (f"{releases} releases across {len(opportunities)} "
+                    f"delivery waypoint(s) (min {clause['min_releases']}) — "
                     f"the flight survived without employing")
 
 
@@ -417,10 +435,14 @@ def selftest() -> int:
     check("good barcap station", verdicts["station"], "PASS")
     check("good barcap recovery", verdicts["recovery"], "PASS")
 
-    # 2. A strike that never released -> EMPLOYMENT FAIL.
+    # 2. A strike with a delivery waypoint and no release -> the real
+    # EMPLOYMENT FAIL (opportunity existed, execution didn't happen).
+    evs2 = base_events()
+    evs2.append(ev("waypoint_captured", t=1500, wp_index=2, wp_action=17,
+                   cross_track_ft=180))
     trace2 = {
         "snapshots": [snap(t, mission="AMIS_STRIKE") for t in range(0, 2400, 60)],
-        "mission_events": base_events(),
+        "mission_events": evs2,
         "combat_events": [],
     }
     flights = flights_from_trace(trace2)

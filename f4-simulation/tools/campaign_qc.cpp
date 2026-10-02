@@ -2253,6 +2253,22 @@ int run_qc(int argc, char** argv) {
         // become aircraft WITH ROUTES immediately.
         ladder.tick(static_cast<CampaignTime>(args.tasking_minutes) * 60);
         tasking_ran = true;
+        // MC-2b: the isolation's own intent, printed verbatim — the
+        // target/TOT carry diagnosis (conversion vs spawn).
+        if (!args.single_mission.empty()) {
+            for (const auto& in : ladder.intents()) {
+                if (in.mission_byte !=
+                        static_cast<std::uint8_t>(args.missions.front())) {
+                    continue;
+                }
+                std::printf("single-mission intent: flight=%u sq=%u "
+                            "tot=%lld target=%u synthetic=%d route=%zu\n",
+                            in.flight_id, in.squadron_id,
+                            static_cast<long long>(in.time_on_target),
+                            in.target_objective_id,
+                            in.synthetic ? 1 : 0, in.route.size());
+            }
+        }
         tasking_cycles = ladder.cycles_fired();
         tasking_intents = static_cast<int>(ladder.intents().size());
         for (const auto& in : ladder.intents()) {

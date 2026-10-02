@@ -213,7 +213,24 @@ with an owner.
   the seam is the plain path's unit map; owner: the coverage/MC-4
   tranche).
   `--mission-spec` (the full spec file: loadouts, the supporting cast,
-  opposition) rides with MC-3's archetype contracts.- **MC-3 — the core archetype contracts**: BARCAP (station +
+  opposition) rides with MC-3's archetype contracts.- **MC-3 — the core archetype contracts — OPEN; the employment
+  semantics LANDED (2026-10-02).** The EMPLOYMENT clause now splits
+  OPPORTUNITY from EXECUTION: the route's delivery-action waypoints
+  (wp_action 14-19 on the capture events) are the opportunity; the
+  BombReleased events are the execution; no opportunity = SKIP (the
+  loadout/route-arming concern), opportunity-missed = FAIL. That split
+  was forced by the isolation runs' finding of record: **the
+  saved-flight strike routes carry their delivery waypoints with
+  action 0 and NO target stamp** (measured on the single-mission
+  STRIKE: aims STK1-3 with no tgt= suffix, captures with action 0/4/7 —
+  the A-G route arming resolved targets for the harness path but not
+  for the saved-flight path; owner: the EMPL tranche, which also owns
+  the target/TOT carry to the intent that MC-2b named). The CAP
+  engagement awareness, ESCORT proximity (needs the package_id join),
+  and TANKER AAR clauses are designed (§3) and land with their
+  exercisable runs (the escort/tanker isolation needs the MC-4 tasked
+  mode or a tanker-carrying world).
+- **MC-3 — the core archetype contracts**: BARCAP (station +
   engagement + recovery), STRIKE (path + TOT + employment +
   recovery), ESCORT (proximity), TANKER (AAR interaction), and the
   first new BEHAVIOR tranche the matrix schedules (the honest

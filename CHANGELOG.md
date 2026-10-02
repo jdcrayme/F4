@@ -5,6 +5,20 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MC-3 (opening) — the employment clause splits opportunity from execution
+
+MISSION_CONTRACT_PLAN.md's MC-3 opens with the clause its first
+isolation runs forced: EMPLOYMENT now separates the OPPORTUNITY (the
+route's delivery-action waypoints, carried on the capture events) from
+the EXECUTION (the BombReleased events) — no opportunity is SKIP (the
+route-arming concern), opportunity-missed is FAIL. The split is the
+finding of record made precise: the saved-flight strike routes carry
+their delivery waypoints with action 0 and no target stamp (the A-G
+route arming resolved targets for the harness path, not the
+saved-flight path) — the EMPL tranche's owner, alongside the
+target/TOT carry MC-2b named. Selftest extended (the no-release strike
+now presents an opportunity so the FAIL is the real one).
+
 ## MC-2b — the single-mission isolation profile
 
 MISSION_CONTRACT_PLAN.md's generator tranche:
