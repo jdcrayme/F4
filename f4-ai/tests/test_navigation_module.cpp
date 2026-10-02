@@ -229,18 +229,71 @@ TEST(NavigationLnav, LeftOfCourseSteersRight) {
 
 TEST(NavigationLnav, InterceptAngleSaturates) {
     // 14,000 ft right (inside the abeam window so leg 1 is active):
-    // raw correction atan2(-14k, 8k) = -60 deg clamps at
-    // max_intercept_rad, never more — an aircraft bank-limited to 30 deg
-    // cannot fly a steeper stable intercept anyway. (50k ft off would NOT
-    // reach leg 1 — the abeam-window rule sends it to wp0 first, which is
-    // the correct consolidation behavior.)
+    // ROUTE-HOLD distance schedule — the limit grows from
+    // max_intercept_rad at xte_gain_ft to max_intercept_far_rad at
+    // 3*xte_gain_ft; at 14,000 ft, 9,000 of the 10,000-ft ramp, it is
+    // 0.35 + 0.6*0.9 = 0.89 rad, and the raw atan2(-14k, 5k) = -70.3 deg
+    // saturates there. The old flat clamp held -20 deg and (through the
+    // damp fixed point) actually chased at ~12 deg — the AWACS departure
+    // that flew parallel-commanded for 224 s.
     NavigationModule mod;
     mod.set_route({make_wp("BACK", 0, 0, 10000),
                    make_wp("WP1", 0, 100000, 10000)});
     auto s = make_state(14000, 20000, 10000, /*hdg=*/0.0);
     mod.update(0.1, s.get());
     EXPECT_EQ(mod.current_waypoint_index(), 1u);
-    EXPECT_NEAR(mod.nav_heading_rad(), -mod.max_intercept_rad, 1e-9);
+    const double lim = mod.max_intercept_rad
+        + (mod.max_intercept_far_rad - mod.max_intercept_rad) * 0.9;
+    EXPECT_NEAR(mod.nav_heading_rad(), -lim, 1e-9);
+}
+
+TEST(NavigationLnav, FarFieldSaturatesAtTheFarLimit) {
+    // 24,000 ft right: well past the ramp (2*xte_gain_ft = 10,000) —
+    // the commanded intercept is the full max_intercept_far_rad
+    // (~54 deg), closing ~0.8 of TAS. The consolidation still anchors
+    // leg 1 (24,000 < abeam_capture_ft).
+    NavigationModule mod;
+    mod.set_route({make_wp("BACK", 0, 0, 10000),
+                   make_wp("WP1", 0, 100000, 10000)});
+    auto s = make_state(24000, 20000, 10000, /*hdg=*/0.0);
+    mod.update(0.1, s.get());
+    EXPECT_EQ(mod.current_waypoint_index(), 1u);
+    EXPECT_NEAR(mod.nav_heading_rad(), -mod.max_intercept_far_rad, 1e-9);
+}
+
+TEST(NavigationLnav, FarFieldCutIgnoresTheStaleClosingDamper) {
+    // The damp fixed-point pin. 20,000 ft right of a due-north leg with
+    // the nose ALREADY 54 deg left of course (a converging cut):
+    // the closing-rate damper — unfaded — would oppose the very
+    // convergence it rides and flip the command toward the course
+    // (corr = -0.35 - 0.6*sin(-0.95) = +0.14: the parallel chase the
+    // AWACS departure flew). Past the ramp the damper is fully faded:
+    // the command stays the scheduled full cut.
+    NavigationModule mod;
+    mod.set_route({make_wp("BACK", 0, 0, 10000),
+                   make_wp("WP1", 0, 100000, 10000)});
+    const double cut = -mod.max_intercept_far_rad;
+    auto s = make_state(20000, 20000, 10000, /*hdg=*/cut);
+    mod.update(0.1, s.get());
+    EXPECT_NEAR(mod.nav_heading_rad(), cut, 1e-9);
+}
+
+TEST(NavigationLnav, MidFieldDamperFadesWithDistance) {
+    // 7,500 ft right (a quarter of the way up the ramp: t = 1/4, limit
+    // 0.5 rad) with the nose 0.3 rad left of course (closing): the
+    // damper rides at (1 - t) = 3/4 strength — the command is the
+    // saturated limit eased by the faded damp, not the limit itself and
+    // not the old full-strength fixed point.
+    NavigationModule mod;
+    mod.set_route({make_wp("BACK", 0, 0, 10000),
+                   make_wp("WP1", 0, 100000, 10000)});
+    auto s = make_state(7500, 20000, 10000, /*hdg=*/-0.3);
+    mod.update(0.1, s.get());
+    const double lim = mod.max_intercept_rad
+        + (mod.max_intercept_far_rad - mod.max_intercept_rad) / 4.0;
+    const double expected = -lim - (1.0 - 0.25) * mod.xte_damp_gain
+                                    * std::sin(-0.3);
+    EXPECT_NEAR(mod.nav_heading_rad(), expected, 1e-9);
 }
 
 TEST(NavigationLnav, PastAbeamStillFlysTheCourse) {

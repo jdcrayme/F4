@@ -645,7 +645,14 @@ AIControlOutput TakeoffModule::controls_for_flyout() const {
     in.vs_fpm = current_vs_fpm_;
     in.vcas_kts = current_vcas_kts_;
     in.alt_msl_ft = current_alt_msl_ft_;
-    output = air_steering.steer(runway_heading_rad_, departure_alt_ft,
+    // ROUTE-HOLD: past the gear gate, climb out on the plan's first-leg
+    // bearing (see departure_course_rad in the header) — the runway
+    // heading is the fallback and the no-route contract.
+    const double flyout_course =
+        (departure_course_rad >= 0.0 && current_alt_agl_ft_ > gear_up_alt_ft)
+            ? departure_course_rad
+            : runway_heading_rad_;
+    output = air_steering.steer(flyout_course, departure_alt_ft,
                                 flyout_speed_kts, in);
 
     // Override pitch with the climb attitude command (the cascade's altitude

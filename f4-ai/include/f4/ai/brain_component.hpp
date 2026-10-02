@@ -501,6 +501,16 @@ public:
             phase_ = Phase::Enroute;
         }
 
+        // ROUTE-HOLD — the FlyOut departure-course seed (see
+        // seed_departure_course_): one shot, at FlyOut entry, only while
+        // the refuel protocol hasn't already taken the departure over.
+        if (phase_ == Phase::Ground &&
+            takeoff_.state() == modules::TakeoffState::FlyOut &&
+            !departure_course_seeded_) {
+            departure_course_seeded_ = true;
+            if (!refuel_armed_ && !is_tanker_) seed_departure_course_();
+        }
+
         // Sequence the mission phases.
         if (phase_ == Phase::Ground && takeoff_.is_complete()) {
             if (!plan_.route.empty()) {
@@ -1265,6 +1275,44 @@ public:
     void set_mission_plan(MissionPlan plan) { plan_ = std::move(plan); }
     [[nodiscard]] const MissionPlan& mission_plan() const noexcept { return plan_; }
 
+private:
+    /// ROUTE-HOLD — seed the FlyOut's departure course from the plan's
+    /// first leg (TakeoffModule::departure_course_rad). A ground launch
+    /// resumes at route[1] (the CAMP-GATE-ROLL leg-0 projection — the
+    /// base IS route[0] and leg 0 is scanned first), so the leg the nav
+    /// will establish is route[0] -> route[1]; the FlyOut turns onto its
+    /// bearing during the climb instead of reversing after the whole
+    /// 2,500-ft runway-heading climb (the measured departure transient:
+    /// ~90 bank-limited seconds diverging to 21,000-34,000 ft before the
+    /// convergence even started). No route, or a degenerate first leg,
+    /// leaves the runway-heading fallback — the takeoff-only contract.
+    ///
+    /// Seeded at FLYOUT ENTRY, not at spawn, and only while the refuel
+    /// protocol is NOT armed — and never on a TANKER: an already-armed
+    /// receiver flies the REFUEL PROTOCOL's departure (its chase of the
+    /// tanker IS the departure guidance), and a tanker's racetrack is
+    /// timed against the package's own climb-outs — the campaign AAR
+    /// e2e's join choreography (a co-based receiver closing during the
+    /// coincident climb-out) breaks if EITHER aircraft turns onto its
+    /// route course inside that window (measured: the closure stalled
+    /// 9,500-17,000 ft short and the pair flew the tanker's egress
+    /// descent into the deck). A receiver that arms later — the
+    /// coverage-map population, waiting on a stack no tanker ever
+    /// joins — never arming before FlyOut gets the route departure.
+    void seed_departure_course_() {
+        if (plan_.route.size() < 2 || is_tanker_) return;
+        const auto& a = plan_.route[0].position;
+        const auto& b = plan_.route[1].position;
+        const double dx = b.x - a.x;
+        const double dy = b.y - a.y;
+        if (dx * dx + dy * dy < 1.0e6) return;  // degenerate first leg
+        takeoff_.departure_course_rad = AirSteering::bearing_to(a, b);
+    }
+    /// The one-shot guard for the FlyOut-entry seed above.
+    bool departure_course_seeded_{false};
+
+public:
+
     // --- CAMP-CMD-2 — the mid-flight plan swap (retask / abort RTB) ---
     //
     // Replaces the mission plan of a LIVE aircraft. The phase machine's
@@ -1288,6 +1336,12 @@ public:
         }
         if (plan.route.empty()) return false;
         plan_ = std::move(plan);
+        // A ground-phase retask re-evaluates the FlyOut's departure
+        // course (the Enroute swap below re-splices through set_route;
+        // only the pre-takeoff swap can still use the hint). The armed
+        // gate re-runs at the next FlyOut entry — a retask while the
+        // refuel protocol owns the departure stays protocol-owned.
+        departure_course_seeded_ = false;
         if (phase_ == Phase::Enroute) {
             nav_.set_route(plan_.route);
             nav_.air_steering.reset_integrators();
@@ -1783,6 +1837,17 @@ private:
                 best_leg = k;
             }
         }
+        // ROUTE-HOLD note: a projection landing inside a station hold's
+        // span keeps the plain projection (the span's tail) — measured
+        // both ways on the coverage matrix (53/19 with the tail rule,
+        // 59/14 without): the rule is semantically cleaner for flights
+        // that missed their rendezvous, but the metric's final-quarter
+        // sampling reshuffles which short-window transit lands in
+        // transient, and the AAR e2e's co-based receiver DEPARTS through
+        // its own orbit's first legs (armed-gating the rule recovered
+        // the join but not the verdicts). The transit's residual
+        // egress excursion is the same departure-reversal physics the
+        // runway population shows.
         return best_leg + 1;  // resume_from clamps index 0 and >= size
     }
 

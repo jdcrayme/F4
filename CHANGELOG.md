@@ -5,6 +5,37 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## ROUTE-HOLD — flights hold their saved legs: PATH fails 52 -> 13
+
+The coverage map's dominant finding, root-caused on its own traces and
+fixed in three layers. (1) The nav's intercept clamp + the NAV-B2
+damper's fixed point (`corr = corr_p - g*sin(corr)` throttles a
+saturated intercept to ~12 deg — the AWACS departure flew
+parallel-COMMANDED for 224 s, roll_cmd 0.00 at xte 22,700 ft) converged
+every departure-scale excursion at ~140 ft/s: the intercept limit is now
+distance-scheduled (20 deg at or inside xte_gain_ft, ramping to 54 deg
+at 3x gain — the ramp's near-field is byte-identical, and it stops short
+of the steeper 2x version per the BVR two-ship's wingman rejoin) and the
+damper fades on the same schedule. (2) The takeoff FlyOut climbed the
+whole 2,500 ft on the runway heading and THEN reversed — the brain now
+seeds the FlyOut's departure course from the plan's first leg (at FlyOut
+entry; never a tanker, never an already-armed receiver — the AAR e2e's
+co-based join choreography owns those departures); BARCAP2's departure
+transient fell 21,311 -> 7,371 ft. (3) The receiver join-stack orbit was
+unflyable — a 12k x 6k racetrack, legs under one turn radius at any of
+the nav's speeds, held a waiting receiver at a permanent 8,000-20,000 ft
+offset (the SAD waiter's whole 30-min station: xte -20,284..-989) — it
+is now a twelve-point circle at R = 24,000 ft flown at the nav's 200-kt
+floor (30-deg corners leave ~700-ft bows), which the waiters hold.
+Matrix re-run (22 types): PATH fails 52 -> 13, PASS 22 -> 55; the BARCAP
+lead's PASS holds (392 ft). Residuals documented in the plan: the
+~170-deg departures (ONCALLCAS pair) still peak ~22k with 3-min windows
+ending mid-recovery, two co-based flights' routes collapse to 30-s
+Enroute windows beside their own orbit (a counted regression each), and
+the AWACS departure-tail metric artifact. Suites green (nav 29/29 with
+three new pins, landing 32, brain 17, combat 31 incl. the rejoin gate,
+recorder 22); verify.cmd GREEN; the scenario trio exits 0.
+
 ## EMPL — the saved-flight arming synthesis; the TestCamp target gap named
 
 build_mission_plan_from_flight now synthesizes the delivery waypoint

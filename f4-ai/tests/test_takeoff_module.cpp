@@ -385,6 +385,48 @@ TEST_F(TakeoffTestFixture, FlyOutRetractsGearAboveAltitude) {
     }
 }
 
+TEST_F(TakeoffTestFixture, FlyOutSteersTheDepartureCourseAboveTheGearGate) {
+    // ROUTE-HOLD: the brain seeds the plan's first-leg bearing; the
+    // FlyOut turns onto it once the gear is up instead of climbing the
+    // whole 2,500 ft on the runway heading (the departure transient the
+    // coverage map measured: ~90 bank-limited seconds reversing AFTER
+    // the handoff, 21,000-34,000 ft of excursion). Below the gear gate
+    // — and with no hint — the runway heading contract stands.
+    StubATC atc(bus);
+    atc.set_airfield(make_kunsan_config());
+    mod.initialize(1, world, bus);
+
+    // Fast-forward through the flow to airborne FlyOut (the
+    // FlyOutRetractsGear pattern: taxi points, then liftoff).
+    auto state = make_state(0.0, 0.0, 0.0);
+    mod.update(0.1, state.get());
+    state = make_state(0.0, 2549.0, 0.0);
+    mod.update(0.1, state.get());
+    state = make_state(0.0, 5049.0, 0.0);
+    mod.update(0.1, state.get());
+    state = make_state(0.0, 5200.0, 50.0, 150.0, false);
+    mod.update(0.1, state.get());
+    state = make_state(0.0, 5300.0, 150.0, 200.0, false);
+    mod.update(0.1, state.get());
+    ASSERT_EQ(mod.state(), TakeoffState::FlyOut);
+
+    // Below the gear gate the runway heading (north, = current heading)
+    // is held: no bank command.
+    auto output = mod.update(0.1, make_state(0.0, 5350.0, 150.0, 200.0, false).get());
+    EXPECT_NEAR(output.roll_cmd, 0.0, 1e-6);
+
+    // Seed the hint (the brain does this from the plan's first leg) and
+    // climb through the gate: the FlyOut now banks toward the course.
+    mod.departure_course_rad = 0.5;   // ~29 deg right of the runway
+    output = mod.update(0.1, make_state(0.0, 5400.0, 300.0, 200.0, false).get());
+    EXPECT_GT(output.roll_cmd, 0.01) << "the departure turn must start in the FlyOut";
+
+    // No hint: runway heading, wings level at zero heading error.
+    mod.departure_course_rad = -1.0;
+    output = mod.update(0.1, make_state(0.0, 5450.0, 320.0, 200.0, false).get());
+    EXPECT_NEAR(output.roll_cmd, 0.0, 1e-6);
+}
+
 // ============================================================================
 // Trace
 // ============================================================================

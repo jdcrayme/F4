@@ -978,10 +978,36 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                 // the waiters are not being joined YET, and the arm
                 // ring is 3D (a 3,000-ft waiter under a 20,000-ft boom
                 // 5 NM out is 5.7 NM of the 10-NM ring).
+                //
+                // ROUTE-HOLD: the waiting orbit is a CIRCLE approximated
+                // by twelve 30-deg legs, not a four-corner racetrack. A
+                // bank-limited jet cannot fly a 90-deg corner without a
+                // bow wave: every fly-through corner of the old 12k x 6k
+                // racetrack peeled the orbit 4,000-20,000 ft off its legs
+                // for the whole 45-minute station (the measured SAD
+                // waiter held xte -20,284 .. -989; resizing to
+                // 30k x 30k at the 250-kt turn-slow speed and every
+                // capture-rule variant of corner anticipation measured
+                // the same or worse — the bow wave is the corner ANGLE,
+                // not the box). At the 250-kt orbit speed the turn
+                // radius is ~9,000 ft; thirty-degree fly-through corners
+                // leave ~700-ft bows — a circuit a waiter can actually
+                // HOLD. Twelve points on R = 24,000 ft: legs 12.4k ft,
+                // lap ~7 min, everything within 24k ft = 4 NM of the
+                // rendezvous — well inside the 10-NM arm ring.
+                constexpr double kStackOrbitRadiusFt = 24000.0;
+                constexpr int kStackOrbitPoints = 12;
+                constexpr double kStackLegSpeedKts = 200.0; // the nav's enroute speed
+                // floor: the slowest legal orbit. The corner bow scales with
+                // the turn radius (R ~ v^2), and the waiter's verdict is the
+                // FINAL-QUARTER p90 of a lap — at 250 kts the SAD waiter's
+                // residual measured 2,242 ft (242 over the band); at 200 the
+                // radius shrinks ~20% and the bows with it.
                 const auto& rp = plan->route[rend].position;
                 const geo::WorldPosition anchor{rp.x, rp.y,
                                                 std::max(rp.z, 3000.0)};
                 plan->route[rend].position.z = anchor.z;
+                plan->route[rend].speed_kts = kStackLegSpeedKts;
                 double ux = 0.0, uy = 1.0;   // entry course (north failover)
                 if (rend > 0) {
                     const auto& prev = plan->route[rend - 1].position;
@@ -994,37 +1020,48 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                     }
                 }
                 const double rx = uy, ry = -ux;   // right of course (ENU)
-                constexpr double kStackLegFt = 12000.0;   // ~2 NM long leg
-                constexpr double kStackWidthFt = 6000.0;  // ~1 NM width
-                auto stack_corner = [&](const char* name, double al,
-                                        double aw) {
-                    modules::NavigationModule::Waypoint w{
-                        name,
-                        geo::WorldPosition{anchor.x + ux * al + rx * aw,
-                                           anchor.y + uy * al + ry * aw,
-                                           anchor.z},
-                        kDefaultLegSpeedKts};
-                    // The corners carry the REFUEL action: while the nav
-                    // cycles the loop the CURRENT waypoint must keep
-                    // answering "this is the refuel leg" — the leg flag
-                    // is what keeps the pairing (and the arm) alive
-                    // through the orbit.
-                    w.action = f4::campaign::kWpRefuel;
-                    return w;
-                };
+                // The circle is TANGENT to the entry course at the
+                // anchor: its center sits one radius to the right of the
+                // course, and P_k sweeps 2*pi*k/N around it with
+                // P_0 == anchor — the receiver rolls out of its transit
+                // straight onto the circuit.
                 // The post-hold tail (the recovery) — the refuel
                 // waypoint may BE the last waypoint (an orbit-to-end
                 // tasking): no tail, the flight ends in the stack.
                 modules::NavigationModule::Waypoint tail;
                 const bool have_tail = rend + 1 < plan->route.size();
                 if (have_tail) tail = std::move(plan->route.back());
+                auto stack_point = [&](int k) {
+                    const double theta =
+                        2.0 * 3.14159265358979 * k / kStackOrbitPoints;
+                    modules::NavigationModule::Waypoint w{
+                        "STK" + std::to_string(k),
+                        geo::WorldPosition{
+                            anchor.x
+                                + ux * kStackOrbitRadiusFt * std::sin(theta)
+                                - rx * kStackOrbitRadiusFt
+                                        * (1.0 - std::cos(theta)),
+                            anchor.y
+                                + uy * kStackOrbitRadiusFt * std::sin(theta)
+                                - ry * kStackOrbitRadiusFt
+                                        * (1.0 - std::cos(theta)),
+                            anchor.z},
+                        kStackLegSpeedKts};
+                    // Every point carries the REFUEL action: while the
+                    // nav cycles the orbit the CURRENT waypoint must
+                    // keep answering "this is the refuel leg" — the leg
+                    // flag is what keeps the pairing (and the arm)
+                    // alive through the orbit.
+                    w.action = f4::campaign::kWpRefuel;
+                    return w;
+                };
                 plan->route.resize(rend + 1);
-                plan->route.push_back(stack_corner("STK1", kStackLegFt, 0.0));
-                plan->route.push_back(stack_corner(
-                    "STK2", kStackLegFt, kStackWidthFt));
-                plan->route.push_back(stack_corner("STK3", 0.0, kStackWidthFt));
+                for (int k = 1; k < kStackOrbitPoints; ++k) {
+                    plan->route.push_back(stack_point(k));
+                }
                 if (have_tail) plan->route.push_back(std::move(tail));
-                plan->route[rend].loop_waypoints = 4;   // anchor + 3
+                plan->route[rend].loop_waypoints =
+                    static_cast<std::uint8_t>(kStackOrbitPoints);
                 plan->route[rend].station_time_s = 45.0 * 60.0;
             }
         }

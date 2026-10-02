@@ -144,6 +144,20 @@ public:
     double departure_alt_ft{2500.0};      // climb to this MSL before Done
     double taxi_speed_kts{15.0};          // max taxi speed
 
+    /// ROUTE-HOLD — the course the FlyOut climbs out on, once the gear is
+    /// up. The brain seeds it from the mission plan's FIRST LEG bearing
+    /// (negative = no hint: steer the runway heading, the takeoff-only
+    /// contract). The departure transient the mission-contract coverage
+    /// map measured is built entirely in the FlyOut: the aircraft held
+    /// the runway heading for the whole 2,500-ft climb and THEN needed
+    /// ~90 bank-limited seconds to reverse onto a leg that pointed back
+    /// over the field — a 21,000-34,000 ft excursion whose recovery ate
+    /// the PATH clause's final quarter on every short Enroute window.
+    /// Turning onto the leg course during the climb shrinks the
+    /// excursion to the turn-radius scale; the NavigationModule's own
+    /// cross-track law finishes it.
+    double departure_course_rad{-1.0};
+
     // The airbase this aircraft is parked at (VU_ID.num of the airbase
     // objective; 0 = unknown). Published in TaxiRequest / HoldShortRequest /
     // TakeoffRequest so a multi-airbase ATC answers with THIS field's taxi

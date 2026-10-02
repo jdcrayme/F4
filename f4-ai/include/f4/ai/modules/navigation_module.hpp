@@ -241,7 +241,25 @@ public:
     /// min|xte| reached 0 but |hdg-course| stayed >5 deg at every
     /// crossing). 20 deg keeps the chase inside the bank envelope and
     /// the convergence damped.
+    /// ROUTE-HOLD: this is the NEAR-FIELD limit — the limit at or inside
+    /// xte_gain_ft, where the NAV-B2 overshoot damper lives. Beyond the
+    /// gain the limit schedules up to max_intercept_far_rad.
     double max_intercept_rad{0.35};   // ~20 deg
+    /// ROUTE-HOLD — the far-field intercept limit (rad). The mission-
+    /// contract coverage map measured every departure-scale excursion
+    /// (runway-vs-route reversals and NAV-B's own 22,000-ft turn-lead
+    /// corner cuts produce 21,000-34,000 ft) converging at a flat-clamp
+    /// ~140 ft/s — 3-4 minutes of chase that put the transient into the
+    /// PATH clause's final quarter on 52 of 86 flights. Beyond
+    /// xte_gain_ft the limit grows linearly to this value at
+    /// 3*xte_gain_ft: a 54-deg cut the bank loop flies as a plain
+    /// intercept, closing ~0.8 of true airspeed — a 21,000-ft excursion
+    /// recovers in ~1 min instead of ~4. At or inside xte_gain_ft the
+    /// law is byte-identical to the flat clamp. (The ramp stops short of
+    /// the 2x-denominator version per CombatIntegration.
+    /// AiVersusAiTwoShipBvrFight: the full cut at 10,000 ft chased the
+    /// BVR two-ship's rejoining wingman past its 4,000-ft station gate.)
+    double max_intercept_far_rad{0.95};  // ~54 deg
     /// Turn anticipation: lead = R*tan(dtheta/2) + turn_lead_lag_s * v,
     /// with R = v^2/(g*tan(max_bank)). The geometric term is the textbook
     /// symmetric-tangent construction (scale 1.0 EXACT — a 1.15 trial put

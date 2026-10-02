@@ -364,23 +364,24 @@ TEST(CampaignBridge, SpawnFromFlightsReceiverRefuelLegGetsJoinStack) {
     ASSERT_NE(brain, nullptr);
     const auto& route = brain->mission_plan().route;
     // The plan drops the leading takeoff waypoint: [enroute, refuel,
-    // land] + 3 stack corners = 6.
-    ASSERT_EQ(route.size(), 6u);
+    // land] + the 11-point orbit circuit = 14.
+    ASSERT_EQ(route.size(), 14u);
     // The refuel waypoint (index 1) anchors the orbit.
     EXPECT_EQ(route[1].action, f4::campaign::kWpRefuel);
-    EXPECT_EQ(route[1].loop_waypoints, 4);
+    EXPECT_EQ(route[1].loop_waypoints, 12);
     EXPECT_DOUBLE_EQ(route[1].station_time_s, 45.0 * 60.0);
     // LEVEL above the nav's terrain floor (the grid z=20 ft leg).
     EXPECT_GE(route[1].position.z, 3000.0);
-    // The corners carry the REFUEL action — the leg flag stays live.
-    for (int i = 2; i <= 4; ++i) {
+    // The circuit points carry the REFUEL action — the leg flag stays
+    // live — and every one of them rides at the anchor's level.
+    for (int i = 2; i <= 12; ++i) {
         EXPECT_EQ(route[static_cast<std::size_t>(i)].action,
                   f4::campaign::kWpRefuel);
         EXPECT_EQ(route[static_cast<std::size_t>(i)].position.z,
                   route[1].position.z);
     }
     // The recovery rides behind the stack.
-    EXPECT_EQ(route[5].action, f4::campaign::kWpLand);
+    EXPECT_EQ(route[13].action, f4::campaign::kWpLand);
 }
 
 TEST(CampaignBridge, SpawnFromFlightsUnratedTankerByteSpawnsAReceiver) {
@@ -446,12 +447,12 @@ TEST(CampaignBridge, SpawnFromFlightsUnratedTankerByteSpawnsAReceiver) {
         << "an unrated byte-39 flight must not spawn into the tanker role";
     EXPECT_TRUE(brain->refuel_eligible())
         << "its refuel leg still makes it a receiver";
-    // The receiver's join stack (the same shape the receiver test pins).
+    // The receiver's join orbit (the same shape the receiver test pins).
     const auto& route = brain->mission_plan().route;
-    ASSERT_EQ(route.size(), 6u);
+    ASSERT_EQ(route.size(), 14u);
     EXPECT_EQ(route[1].action, f4::campaign::kWpRefuel);
-    EXPECT_EQ(route[1].loop_waypoints, 4);
-    EXPECT_EQ(route[5].action, f4::campaign::kWpLand);
+    EXPECT_EQ(route[1].loop_waypoints, 12);
+    EXPECT_EQ(route[13].action, f4::campaign::kWpLand);
 }
 
 TEST(CampaignBridge, SpawnFromFlightsRatedTankerByteSpawnsTheTanker) {

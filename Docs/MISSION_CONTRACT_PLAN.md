@@ -292,6 +292,48 @@ with an owner.
   delivery point. ESCORT and OTHER book 0 airborne (the plain-path
   ground-ops crawl); the CAP/support/logistics families fly and
   recover. TANKER: no flights in this world (the known TestCamp gap).
+
+- **MC-4 — the route-holding tranche — LANDED (2026-10-02).** The
+  dominant finding's root causes, each measured on the coverage map's
+  own traces:
+  1. **The intercept clamp + the NAV-B2 damper's fixed point.** The
+     flat 20-deg intercept clamp (plus the closing-rate damper whose
+     equilibrium `corr = corr_p − g·sin(corr)` throttles a saturated
+     intercept to ~12 deg) converged every departure-scale excursion at
+     ~140 ft/s — the AWACS departure flew parallel-COMMANDED for 224 s
+     (roll_cmd 0.00 at xte 22,700 ft) before crawling onto its line.
+     Fix: the intercept limit is distance-scheduled (max_intercept_rad
+     at or inside xte_gain_ft, ramping to max_intercept_far_rad 0.95 rad
+     at 3×gain) and the damper fades out on the same schedule. Near-
+     field law byte-identical (all NAV-B/NAV-B2 pins hold).
+  2. **The departure itself.** The takeoff FlyOut climbed the whole
+     2,500 ft on the runway heading and THEN reversed — the measured
+     21,000-34,000 ft excursions are the bank-limited turn that follows.
+     Fix: the brain seeds the FlyOut's departure course from the plan's
+     first leg (FlyOut entry, gated: not tankers, not already-armed
+     receivers — the AAR e2e's co-based join choreography owns those
+     departures). BARCAP2's departure transient: 21,311 → 7,371 ft.
+  3. **The receiver join-stack orbit was unflyable.** A 12k×6k
+     racetrack (legs under one turn radius at ANY of the nav's speeds;
+     at the 400-kt leg speed R ≈ 33,000 ft) held a waiting receiver at
+     a permanent 8,000-20,000 ft offset — the SAD waiter's whole
+     30-minute station cycled xte −20,284..−989. Fix: the orbit is a
+     twelve-point circle (30-deg fly-through corners leave ~700-ft
+     bows), R = 24,000 ft, the whole lap at the nav's 200-kt floor —
+     the SAD/AIRLIFT/TANK waiters hold it.
+  Matrix re-run (same 22 types, `qc/coverage_map_routehold12`):
+  **PATH fails 52 → 13, PASS 22 → 55**; the BARCAP lead's PASS holds
+  (392 ft; transient 7,371 ft). Residuals, honestly: the ~170-degree
+  runway-vs-leg departures (the ONCALLCAS pair, deterministic) still
+  peak ~22k — the turn cannot complete inside a 2,500-ft climb, and
+  their 3-minute windows end mid-recovery; two co-based flights whose
+  route collapses to a 30-second Enroute window beside their own orbit
+  (SEADESCORT CS008-5, BDA CS004-5 — both PASSED at baseline on the old
+  box's longer walk; a regression, counted); the AWACS departure-tail
+  artifact (the metric's final quarter lands on the convergence because
+  the flight settles left of the line). Owner of the remainder: the
+  departure-procedure tranche (turn during the climb at a lower gate)
+  and the per-category horizons.
 - **MC-4 — tasked mode + the matrix wiring (the remainder)**: the
   tasked runs (ATM packages, the session path) as card sources; the
   verify smoke rotation.- **MC-5 — the coverage map + the viewer Mission Lab.** The truth

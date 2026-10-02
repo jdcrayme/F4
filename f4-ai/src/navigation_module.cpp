@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 #include <string>
 
@@ -172,6 +174,22 @@ AIControlOutput NavigationModule::update(double dt, const flight::IAircraftState
         }
     }
 
+    // ROUTE-HOLD telemetry — the F4_LAND_DEBUG pattern (1 Hz, gated on
+    // the env var; the module carries no entity id, so the brain's
+    // [splice] prints bracket the phases and the position correlates).
+    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        static int dbg_nav = 0;
+        if (++dbg_nav % 60 == 1) {
+            std::fprintf(stderr,
+                         "[nav] wp %zu/%zu xte %.0f hdg %.1f"
+                         " alt %.0f vcas %.0f\n",
+                         wp_index_, route_.size(),
+                         cross_track_ft(),
+                         current_heading_rad_ * 57.29577951308232,
+                         current_alt_msl_ft_, current_vcas_kts_);
+        }
+    }
+
     for (int iter = 0; iter < 8; ++iter) {
         const auto before = sm_.current();
         if (sm_.current() == NavigationState::ToWaypoint) {
@@ -257,6 +275,11 @@ void NavigationModule::check_waypoint_capture()
     // pairing and join are keyed on (a 180° corner's clamped lead
     // sequenced the waypoint before the receiver ever flew its leg:
     // the e2e catch).
+    // ROUTE-HOLD: the join-stack orbit this tranche synthesizes is a
+    // twelve-point circle (see campaign_bridge) precisely so this
+    // must-fly contract costs nothing — thirty-degree fly-through
+    // corners leave ~700-ft bows, where a racetrack's ninety-degree
+    // corners left 4,000-20,000 ft for the whole 45-minute station.
     if (wp_index_ + 1 < route_.size() &&
         !is_ag_delivery_action(route_[wp_index_].action) &&
         !is_campaign_refuel_action(route_[wp_index_].action)) {
@@ -320,6 +343,10 @@ void NavigationModule::check_waypoint_capture()
     // during a turn easily exceeds 400 ft (0.8 s of lateral velocity) —
     // the tight check blocked the lead capture mid-turn, forcing the
     // aircraft to fly past the waypoint without sequencing.
+    // (ROUTE-HOLD lesson: widening this gate inside a station hold to
+    // let the turn anticipation fire off a recovering leg sequenced
+    // every corner UNSETTLED and measured worse everywhere — the
+    // "late beats inherited chaos" rule stands.)
     const bool established_enough = std::abs(xte_now) < 1500.0;
     // Tranche 37: speed-proportional capture radius. At 300 kts the old
     // fixed 3000 ft is 3 s of flight — the aircraft flies through it in
@@ -561,8 +588,9 @@ double NavigationModule::nav_heading_rad() const
     // On the centerline the commanded heading IS the course — the aircraft
     // ESTABLISHES and flies the leg, which pursuit guidance never does.
     // Off to one side it cuts a stable intercept angle toward the course
-    // (bounded by max_intercept_rad, matched to the bank limit), which
-    // converges without the bow-then-overshoot of a pursuit curve.
+    // (bounded by the distance-scheduled limit, matched to the bank
+    // limit near the line), which converges without the bow-then-overshoot
+    // of a pursuit curve.
     const double course = AirSteering::bearing_to(leg_from_, wp.position);
     const double leg_dx = wp.position.x - leg_from_.x;
     const double leg_dy = wp.position.y - leg_from_.y;
@@ -572,6 +600,28 @@ double NavigationModule::nav_heading_rad() const
     const double right_y = -leg_dx / leg_len;
     const double xte = (current_position_.x - leg_from_.x) * right_x
                      + (current_position_.y - leg_from_.y) * right_y;
+    // ROUTE-HOLD: the intercept limit is distance-scheduled. The flat
+    // 20-deg clamp converged a departure-scale excursion (the measured
+    // 21,000-34,000 ft the runway-vs-route reversals and NAV-B's own
+    // 22,000-ft turn-lead corner cuts produce) at the damp-fixed-point
+    // ~140 ft/s — 3-4 minutes of chase that carried the transient into
+    // the PATH clause's final quarter on 52 of 86 coverage-map flights.
+    // t: 0 at or inside xte_gain_ft (the law below is byte-identical to
+    // the flat clamp there), 1 at 3*xte_gain_ft — the ramp must complete
+    // by the mid-field because that is where the REPEATED excursions
+    // live (the loiter-stack leg changes re-anchor 4,000-8,000 ft off
+    // and their windows are too short for a throttled recovery; the
+    // first smoke run still failed three of four BARCAPs at
+    // 4,160-11,047 ft with the gentler 4x ramp). The 2x ramp — the full
+    // cut at 10,000 ft — measured the same matrix but chased the BVR
+    // two-ship's rejoining wingman past its 4,000-ft station gate
+    // (CombatIntegration.AiVersusAiTwoShipBvrFight); 3x is the
+    // calibration point on both harnesses.
+    const double axte = std::abs(xte);
+    const double t = std::clamp((axte - xte_gain_ft) / (2.0 * xte_gain_ft),
+                                0.0, 1.0);
+    const double lim = max_intercept_rad
+                     + (max_intercept_far_rad - max_intercept_rad) * t;
     // NAV-B2: track-rate damping. The bare atan2 correction is P-only on
     // cross-track; through the heading loop's lag it converges by
     // OVERSHOOTING (~600 ft past each zero-crossing on the square route —
@@ -581,13 +631,21 @@ double NavigationModule::nav_heading_rad() const
     // Subtracting a term proportional to the CURRENT closing rate
     // (sin of track offset) is phase LEAD: it eases off the intercept as
     // the aircraft converges, canceling the loop lag. Zero when settled.
+    // ROUTE-HOLD: the damper fades out with the same schedule t. Its own
+    // fixed point corr = corr_p - g*sin(corr) permanently throttles a
+    // SATURATED intercept to ~12 deg (the AWACS departure chase: roll_cmd
+    // 0.00 at xte 22,700 ft, closing exactly v*sin(12.9 deg) — the
+    // measured 140 ft/s — for 224 s). Full strength near the line, where
+    // the zero-crossing overshoot it was tuned for lives; zero far out,
+    // where the steady intercept IS the maneuver.
     const double corr_p = std::clamp(std::atan2(-xte, xte_gain_ft),
-                                     -max_intercept_rad, max_intercept_rad);
+                                     -lim, lim);
     const double closing = AirSteering::heading_error(current_heading_rad_,
                                                       course);
     const double corr = std::clamp(corr_p
-                                     - xte_damp_gain * std::sin(closing),
-                                   -max_intercept_rad, max_intercept_rad);
+                                     - (1.0 - t) * xte_damp_gain
+                                                 * std::sin(closing),
+                                   -lim, lim);
     return course + corr;
 }
 
