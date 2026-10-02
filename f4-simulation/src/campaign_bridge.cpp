@@ -1440,6 +1440,22 @@ constexpr double kMinDeliveryWaypointAltFt = 1500.0;
 /// legs, so they're not worth attaching.
 constexpr std::size_t kMinUsableWaypoints = 2;
 
+// The delivery WP_ACTION for a mission byte (the wire vocabulary the
+// brain's A-G trigger keys on: 17 STRIKE, 14 GNDSTRIKE, 19 SEAD).
+// The profile's own target action is the reference source; this map
+// covers the objective/ground delivery families for paths without the
+// profile table.
+std::uint8_t delivery_action_for(std::uint8_t mission_byte) {
+    switch (f4::campaign::mission_category(mission_byte)) {
+        case f4::campaign::MissionCategory::SEAD:
+            return 19;  // kWpSead
+        case f4::campaign::MissionCategory::CAS:
+            return 14;  // kWpGndstrike
+        default:
+            return 17;  // kWpStrike
+    }
+}
+
 } // namespace
 
 std::optional<f4::ai::MissionPlan>
@@ -1542,6 +1558,74 @@ build_mission_plan_from_flight(
         // indices — the brain consults it there.
         route_wp.aimpoint_feature = w.target_building;
         plan.route.push_back(std::move(route_wp));
+    }
+
+    // EMPL (the saved-flight arming, the coverage map's finding of
+    // record): TestCamp's generated save writes its flights' routes as
+    // takeoff → LAND — no delivery point at all — while the doctrine
+    // arms the flight by mission byte. An armed delivery flight whose
+    // route carries no delivery waypoint can never employ: the coverage
+    // matrix's entire strike family (8 types) gated exit 4 on exactly
+    // this. When the flight's mission DELIVERS (the strike/SEAD/CAS
+    // families), its own resolved target exists, and the route has no
+    // delivery waypoint, synthesize one before the terminal LAND: the
+    // target's position, the family's delivery action, the flight's
+    // target as the trigger key — the C3 arming rule applied to the
+    // save's own flights.
+    {
+        const std::uint8_t daction = delivery_action_for(fp->mission);
+        const bool delivery_mission =
+            f4::ai::modules::is_ag_delivery_action(daction);
+        const bool has_delivery_wp =
+            std::any_of(plan.route.begin(), plan.route.end(),
+                        [](const auto& w) {
+                            return f4::ai::modules::is_ag_delivery_action(
+                                w.action);
+                        });
+        if (delivery_mission && !has_delivery_wp && flight_target != 0) {
+            f4::entities::EntityId tgt_id{};
+            bool tgt_found = false;
+            for (const auto* m : {objective_id_map, unit_id_map}) {
+                if (m == nullptr) continue;
+                const auto it = m->find(
+                    static_cast<std::uint32_t>(flight_target));
+                if (it != m->end() && it->second.valid()) {
+                    tgt_id = it->second;
+                    tgt_found = true;
+                    break;
+                }
+            }
+            if (tgt_found) {
+                const auto* tgt_tf =
+                    EntityHandle(tgt_id, const_cast<EntityWorld*>(&world))
+                        .get<TransformComponent>();
+                if (tgt_tf != nullptr) {
+                    geo::WorldPosition pos = tgt_tf->position;
+                    pos.z = std::max(pos.z + 300.0,
+                                     kMinDeliveryWaypointAltFt);
+                    char sname[40];
+                    std::snprintf(sname, sizeof(sname), "WP%d:%s",
+                                  static_cast<int>(plan.route.size() + 1),
+                                  wp_action_text(daction));
+                    NavigationModule::Waypoint strike_wp{
+                        sname, pos, kDefaultLegSpeedKts};
+                    strike_wp.action = daction;
+                    strike_wp.target_id = flight_target;
+                    // Insert before the terminal LAND waypoint (the
+                    // recovery stays last); a route with no trailing
+                    // LAND appends.
+                    std::size_t insert_at = plan.route.size();
+                    if (!plan.route.empty() &&
+                        plan.route.back().action == 7 /* WP_LAND */) {
+                        insert_at = plan.route.size() - 1;
+                    }
+                    plan.route.insert(
+                        plan.route.begin() +
+                            static_cast<std::ptrdiff_t>(insert_at),
+                        strike_wp);
+                }
+            }
+        }
     }
 
     // start_phase stays Ground: the campaign flight departs from its

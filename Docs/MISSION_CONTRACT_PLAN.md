@@ -278,10 +278,20 @@ with an owner.
   points them only roughly.
 
   The rest of the map: the strike family's 8 types all gate-fail
-  (exit 4 — the saved-flight arming gap, the EMPL finding); ESCORT and
-  OTHER book 0 airborne (the plain-path ground-ops crawl); the CAP/
-  support/logistics families fly and recover. TANKER: no flights in
-  this world (the known TestCamp gap).
+  (exit 4) — **re-attributed by the arming tranche (2026-10-02)**: the
+  saved-flight arming synthesis is LANDED (build_mission_plan_from_
+  flight synthesizes the delivery waypoint — the target's position, the
+  family's delivery action, the trigger key — before the terminal LAND,
+  when the mission delivers, the route lacks the point, and the flight's
+  own target VU resolves), but on TestCamp it never fires: **the
+  generated save's delivery flights carry NO target VU at all** (both
+  the INTSTRIKE and STRIKE isolations' flights read fp.target invalid).
+  The strike-family FAILs are a FIXTURE DATA gap (the generator wrote
+  no targets — owner: the fixture/INIT-1 tranche), not an arming-code
+  gap; real saves whose ATO writes target VUs get the synthesized
+  delivery point. ESCORT and OTHER book 0 airborne (the plain-path
+  ground-ops crawl); the CAP/support/logistics families fly and
+  recover. TANKER: no flights in this world (the known TestCamp gap).
 - **MC-4 — tasked mode + the matrix wiring (the remainder)**: the
   tasked runs (ATM packages, the session path) as card sources; the
   verify smoke rotation.- **MC-5 — the coverage map + the viewer Mission Lab.** The truth

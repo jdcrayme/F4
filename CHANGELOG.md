@@ -5,6 +5,23 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## EMPL — the saved-flight arming synthesis; the TestCamp target gap named
+
+build_mission_plan_from_flight now synthesizes the delivery waypoint
+for armed delivery flights whose saved route carries none (TestCamp's
+generated save writes its routes takeoff -> LAND): the flight's own
+resolved target's position, the family's delivery action (STRIKE 17 /
+GNDSTRIKE 14 / SEAD 19), inserted before the terminal LAND — the C3
+arming rule applied to the save's own flights. On real saves whose ATO
+writes target VUs, armed strike flights now have something to deliver
+on. On TestCamp the synthesis never fires: **the generated save's
+delivery flights carry NO target VU** (both the INTSTRIKE and STRIKE
+isolations' flights read fp.target invalid) — so the coverage map's
+strike-family FAILs re-attribute from an arming-code gap to a FIXTURE
+DATA gap (owner: the fixture/INIT-1 tranche — the generator should
+stamp targets). The card reads honestly either way (employment SKIP:
+no opportunity).
+
 ## MC-4 (opening) — the matrix wires the cards: the coverage map exists
 
 `qc_missions.py --record` now runs the contract verifier on every
