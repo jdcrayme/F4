@@ -111,6 +111,11 @@ api::StepResult EngineSessionHost::step(std::uint32_t ticks) {
         // boolean is the cap-hit flag — the plan's dilation signal.
         res.dilated = session_->advance(
             static_cast<double>(ticks) * opts_.sim_dt, static_cast<int>(ticks));
+        // AGG-3, PV-2b companion: the DoCompressionLoop state rides
+        // the step result — the pacing host clamps per batch without
+        // a query round trip (the snapshot mirror this replaces tied
+        // the clamp's cadence to the client's refresh).
+        res.bubble_live = session_->bubble_live_flights();
         return res;
     }
     // CAMP-CMD-1 — the replay path: segment the request around the
@@ -152,6 +157,9 @@ api::StepResult EngineSessionHost::step(std::uint32_t ticks) {
                       static_cast<int>(remaining)) || dilated;
     }
     res.dilated = dilated;
+    // AGG-3: same per-batch report on the replay path (the clamp is
+    // pacing, and pacing does not care how the ticks were fed).
+    res.bubble_live = session_->bubble_live_flights();
     return res;
 }
 
@@ -377,6 +385,16 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
         // any UX that asks. The map is a pure function of the world (no
         // RNG), rebuilt by the route builder per tasking cycle; an
         // unbuilt map (no cycle yet) reads as an empty grid.
+        //
+        // PV-2b: the map is built ONCE at create and immutable for the
+        // session's lifetime, so the encoded grid is cached after the
+        // first ask — the per-frame re-serialize (~2×29k ints on Korea)
+        // was pure overhead under the frame lock.
+        if (threat_json_cached_) {
+            res.ok = true;
+            res.data_json = threat_json_cache_;
+            return res;
+        }
         api::ThreatView t;
         t.viewer_team = session_->threat_viewer_team();
         const auto& map = session_->route_builder().threat_map();
@@ -399,6 +417,10 @@ api::QueryResult EngineSessionHost::query(const api::QuerySpec& spec) {
         api::encode(w, t);
         res.ok = true;
         res.data_json = std::move(w).str();
+        // PV-2b: freeze the encoded grid — the map is immutable, every
+        // future ask is a string copy.
+        threat_json_cache_ = res.data_json;
+        threat_json_cached_ = true;
         return res;
     }
 

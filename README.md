@@ -1111,9 +1111,12 @@ ladder generates, in one simulation world. Controls:
 - **War status** — cycles fired, missions generated, routes
   built/failed, aircraft drawn (the one pool), combat losses,
   reinforcement fires/deliveries, live/airborne counts.
-- **Generated missions** — one row per tasked mission (mission, team,
-  TOT, target, route waypoints, package size); click a target to
-  select + pan to it.
+- **Generated missions (the ATO)** — one row per tasked mission (mission,
+  package role, squadron, airframe, team, scheduled takeoff, TOT, target,
+  route waypoints, aircraft count); click a target to select + pan to it.
+  Every column is sortable — click the header to sort by squadron,
+  airframe, T.O./TOT, etc. (click again to invert, a third time restores
+  the engine's append order).
 - **Canvas live layer** — the aircraft as they fly (owner colors,
   grounded dimmed), each with its route polyline + numbered waypoints;
   the threat-map overlay (View > Threat map overlay) paints the enemy

@@ -218,6 +218,7 @@ namespace {
         else if (key == "synthetic") in.synthetic = r.read_int() != 0;
         else if (key == "route_waypoints") in.route_waypoints = read_i(r);
         else if (key == "flight_role") in.flight_role = read_i(r);
+        else if (key == "takeoff") in.takeoff = read_i64(r);
         else return false;
         return true;
     });

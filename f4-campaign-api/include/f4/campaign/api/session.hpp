@@ -43,6 +43,14 @@ struct StepResult {
     /// True when the engine's per-advance tick cap hit — time dilated
     /// (the debt is dropped, never queued; the caller may surface it).
     bool dilated{false};
+    /// AGG-3 (the DoCompressionLoop rule, PV-2b companion): the count
+    /// of deaggregated flights whose live lead sits inside the
+    /// observer bubble RIGHT NOW. While > 0, a pacing host holds its
+    /// feed at 1× so full-fidelity aircraft the player watches never
+    /// fast-forward — reported per step (the batch cadence the
+    /// reference's own compression loop ran at), not per query, so a
+    /// host that throttles its query plane still clamps immediately.
+    int bubble_live{0};
 };
 
 struct SaveResult {

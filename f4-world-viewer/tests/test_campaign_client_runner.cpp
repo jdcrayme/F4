@@ -54,6 +54,11 @@ public:
     // --- knobs ---
     std::atomic<int> latency_us{0};       // simulated work per batch
     std::atomic<std::uint32_t> dilate_above{0};  // 0 = never dilate
+    /// PV-2b companion: the engine-reported AGG-3 state — the mock's
+    /// step result carries it so the runner's clamp reads the same
+    /// source the real engine reports per batch (StepResult::
+    /// bubble_live).
+    std::atomic<int> bubble_live{0};
 
     // --- observations (guarded by m_) ---
     std::mutex m;
@@ -84,6 +89,7 @@ public:
         StepResult r;
         const auto cap = dilate_above.load();
         r.dilated = cap > 0 && ticks > cap;
+        r.bubble_live = bubble_live.load();
         return r;
     }
     void set_time_scale(double scale) override {
@@ -249,17 +255,21 @@ TEST(CampaignClientRunner, EffectiveSpeedTracksRunningRate) {
 // While action is live in the observer bubble, the feed holds at 1× —
 // full-fidelity aircraft the player is watching never fast-forward. The
 // preset is untouched; the control (same preset, no flag) shows what the
-// unclamped feed delivers.
+// unclamped feed delivers. PV-2b companion: the state comes from the
+// ENGINE now — each step result carries the live count (the mock's
+// bubble_live knob), the same source the real EngineSessionHost reports
+// per batch.
 TEST(CampaignClientRunner, BubbleActionHoldsTheFeedAtOneX) {
     MockSession session;
     CampaignClientRunner runner(session, kTickSec, 60.0, /*paused=*/false);
-    runner.set_bubble_action(true);   // set BEFORE start: no unclamped burst
+    session.bubble_live.store(1);   // set BEFORE start: no unclamped burst
     runner.start();
     std::this_thread::sleep_for(std::chrono::milliseconds(600));
     runner.stop();
     const double held_rate = session.ticks() * kTickSec / 0.6;
     EXPECT_GT(held_rate, 0.25);   // it feeds real time
     EXPECT_LT(held_rate, 4.0);    // ...and NOWHERE near the 60× preset
+    EXPECT_TRUE(runner.bubble_action());  // the mirror tracks the reports
 
     // The control: the same preset, no action flag — the feed is the
     // preset's (the instant mock never caps; AIMD stays at 1.0).
@@ -280,10 +290,10 @@ TEST(CampaignClientRunner, BubbleActionHoldsTheFeedAtOneX) {
 TEST(CampaignClientRunner, BubbleActionClearResumesThePreset) {
     MockSession session;
     CampaignClientRunner runner(session, kTickSec, 60.0, /*paused=*/false);
-    runner.set_bubble_action(true);
+    session.bubble_live.store(1);
     runner.start();
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    runner.set_bubble_action(false);
+    session.bubble_live.store(0);
     std::this_thread::sleep_for(std::chrono::milliseconds(600));
     runner.stop();
     EXPECT_FALSE(runner.bubble_action());

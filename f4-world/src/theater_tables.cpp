@@ -355,13 +355,28 @@ resolve_entity_type_name(const TheaterTables& tables,
     // squadron of F-16Cs displays "F-16C", not the UCD's generic role
     // word ("Attack", "Airlift") — and falls back to the unit-class
     // name when the group chain fails.
+    //
+    // The UCD's vehicle_type[] is a CLASS-TABLE link, not a VCD
+    // position: entity_type = vehicle_type[i] + 100 (the converter's
+    // own field contract, theater_data.hpp). The walk is therefore
+    // CT row → DTYPE_VEHICLE → VCD row → name. (Reading it as a bare
+    // VCD index only worked on the test fixture, where the fixture's
+    // VCD rows happen to sit at their CT data_ptrs — on the real
+    // Korea tables it resolved "Airlift" squadrons to "Leopard 2"
+    // tanks and fell back to role words for every aircraft row.)
     if (data_type == static_cast<uint8_t>(f4::world_types::DTYPE_UNIT)) {
         if (const auto* u = tables.unit_at(data_ptr)) {
             if (!u->vehicle_type.empty() && u->vehicle_type[0] >= 0) {
-                if (const auto* v =
-                        tables.vehicle_at(
-                            static_cast<std::size_t>(u->vehicle_type[0]))) {
-                    if (!v->name.empty()) return v->name;
+                const auto vehicle_entity_type = static_cast<std::uint16_t>(
+                    u->vehicle_type[0] + 100);
+                uint8_t vdt = 0;
+                uint32_t vp = 0;
+                if (ct.data_ptr_for(vehicle_entity_type, vdt, vp) &&
+                    vdt == static_cast<uint8_t>(
+                               f4::world_types::DTYPE_VEHICLE)) {
+                    if (const auto* v = tables.vehicle_at(vp)) {
+                        if (!v->name.empty()) return v->name;
+                    }
                 }
             }
             return u->name;

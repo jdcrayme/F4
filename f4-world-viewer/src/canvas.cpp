@@ -33,6 +33,13 @@
 
 namespace f4::viewer {
 
+namespace {
+// PV-2c: the objectives pass's no-session stand-in for the ATO-mark
+// set (ato_targets_set returns the live cache only when a session
+// runs; a static world has no ATO).
+const std::unordered_set<std::uint32_t> kEmptyTargets;
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
@@ -531,15 +538,12 @@ void ViewerApp::draw_canvas() {
         // priority ring (every objective with priority >= 40 — most of
         // the map on a stock save) read as unexplained static clutter;
         // a ring now MEANS something: this objective is a target of a
-        // filed mission this cycle.
-        std::unordered_set<std::uint32_t> ato_targets;
-        if (impl_->session) {
-            for (const auto& t : impl_->session_snap.tasking) {
-                if (t.target_objective_id != 0) {
-                    ato_targets.insert(t.target_objective_id);
-                }
-            }
-        }
+        // filed mission this cycle. PV-2c: the set is Impl-cached per
+        // snapshot identity (ato_targets_set) — the per-frame rebuild
+        // from the whole tasking vector was pure allocation churn.
+        const std::unordered_set<std::uint32_t>& ato_targets =
+            impl_->session ? impl_->ato_targets_set()
+                           : kEmptyTargets;
 
         for (const auto& eid : impl_->objectives()) {
             auto h = impl_->handle(eid);
@@ -620,14 +624,20 @@ void ViewerApp::draw_canvas() {
             // means the owner keeps a garrisoned battalion beside it
             // (the same troop-gate stamp the FLOT draws); an
             // un-garrisoned objective renders HOLLOW and dimmed —
-            // ownership without a position.
+            // ownership without a position. PV-2c: the vu is read
+            // ONCE (the defended gate and the ATO ring below used to
+            // pay the string-keyed pb lookup twice per objective per
+            // frame); the defended call itself is O(log N) engine-side
+            // since PV-2a.
+            const std::uint32_t obj_vu =
+                pb ? static_cast<std::uint32_t>(
+                         impl_->pb_int(pb, "vu_id_num", 0))
+                   : 0u;
             bool defended = true;
-            if (impl_->session) {
+            if (impl_->session && obj_vu != 0) {
                 if (const auto* gw =
                         impl_->session->engine().ground_war()) {
-                    defended = gw->objective_defended(
-                        static_cast<std::uint32_t>(
-                            impl_->pb_int(pb, "vu_id_num", 0)));
+                    defended = gw->objective_defended(obj_vu);
                 }
             }
             if (defended) {
@@ -643,16 +653,11 @@ void ViewerApp::draw_canvas() {
                                                outline, /*filled=*/false,
                                                &impl_->symbol_library);
             }
-            {
-                const std::uint32_t vu =
-                    static_cast<std::uint32_t>(
-                        impl_->pb_int(pb, "vu_id_num", 0));
-                if (vu != 0 && ato_targets.count(vu) != 0) {
-                    const float ring_r = base_size * 0.5f + 3.0f;
-                    DrawCircleLines(static_cast<int>(p.x),
-                                    static_cast<int>(p.y), ring_r,
-                                    Color{255, 215, 0, 200});
-                }
+            if (obj_vu != 0 && ato_targets.count(obj_vu) != 0) {
+                const float ring_r = base_size * 0.5f + 3.0f;
+                DrawCircleLines(static_cast<int>(p.x),
+                                static_cast<int>(p.y), ring_r,
+                                Color{255, 215, 0, 200});
             }
             if (draw_labels) {
                 std::string label;

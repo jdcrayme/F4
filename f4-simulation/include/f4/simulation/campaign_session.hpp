@@ -438,6 +438,20 @@ struct CampaignSessionOptions {
     /// reagg rules apply (the transient window; the phase pin).
     int combat_window_sec = 600;
 
+    /// PV-4b (Docs/VIEWER_PERFORMANCE_ANALYSIS.md §7): the Tier-B
+    /// ceiling for BUBBLE-driven deaggregations — while the session
+    /// already holds this many deaggregated flights, the attention-
+    /// driven (Bubble) tier trigger defers. The war's own windows
+    /// (Ops/OpsTakeoff — the ATC roll, the TOT delivery, the recovery)
+    /// and the Combat/Force triggers are NEVER capped: they fly the
+    /// war's outcomes; only the display-fidelity trigger yields. 0 =
+    /// uncapped — the golden identity every QC certificate and test
+    /// ran under (the FID-6 certificate measured ≤ 32 live at the
+    /// default war tempo naturally; the viewer arms 32 to bound the
+    /// deep-zoom + combat engagement spiral the certificates never
+    /// ran).
+    int max_live_flights = 0;
+
     /// Stock-save bridge: assign every squadron whose wire airbase VU is
     /// 0 a home base from the objective list (nearest friendly /
     /// allied airbase-type objective; see
@@ -629,8 +643,30 @@ public:
         return epoch_ + ladder_->clock();
     }
 
-    /// Snapshot of the one-frame numbers (recomputed by advance()).
-    [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
+    /// Snapshot of the one-frame numbers. PV-4a
+    /// (Docs/VIEWER_PERFORMANCE_ANALYSIS.md §7): LAZY — advance()
+    /// marks the stats dirty instead of paying the full walk per
+    /// 1–2-tick step batch (the viewer's worker fed ~60 batches/s at
+    /// speed; each one re-walked the intents, the ground books, and
+    /// the whole aircraft roster twice for a reader that came along
+    /// once per frame). The FIRST reader after a change computes the
+    /// snapshot once; every reader in between reuses it. Thread
+    /// contract unchanged: every reader already sits under the
+    /// session lock (the worker's step, the host's query).
+    [[nodiscard]] const Stats& stats() const {
+        if (stats_dirty_) refresh_stats_();
+        return stats_;
+    }
+
+    /// AGG-3, PV-2b companion: the DoCompressionLoop state RIGHT NOW —
+    /// deaggregated flights whose live lead sits inside the observer
+    /// bubble. step()'s result carries it so a pacing host clamps per
+    /// batch WITHOUT a stats round trip (the snapshot-mirror this
+    /// replaces lagged a frame and tied the clamp's cadence to the
+    /// client's refresh throttle). O(deaggregated) — the small walk.
+    [[nodiscard]] int bubble_live_flights() const {
+        return count_bubble_live_();
+    }
 
     /// The ledger as campaign_result.json bytes (byte-stable).
     [[nodiscard]] std::string ledger_json() const {
@@ -738,7 +774,7 @@ public:
         // the user zooms into (the next advance() re-evaluates anyway).
         if (flights_ != nullptr) {
             evaluate_tiers_();
-            refresh_stats_();
+            stats_dirty_ = true;   // PV-4a: lazy — the next reader pays
         }
     }
 
@@ -1176,8 +1212,11 @@ private:
         const DeaggregatedFlight& rec,
         f4::geo::WorldPosition& out) const;
 
-    /// Recompute stats_ from the live objects.
-    void refresh_stats_();
+    /// Recompute stats_ from the live objects. PV-4a: const + the
+    /// dirty-flag clear — the lazy stats() accessor calls it on first
+    /// read after a change (stats_/stats_dirty_ are mutable for
+    /// exactly this; every dependency it reads is const).
+    void refresh_stats_() const;
 
     /// AGG-3: count the deaggregated flights whose live lead is inside
     /// the observer bubble (the DEAGG radius — the same test the bubble
@@ -1194,6 +1233,11 @@ private:
     // options object is long gone).
     double sim_dt_ = 1.0 / 60.0;
     int max_steps_per_advance_ = 240;
+
+    /// PV-4b: the Tier-B ceiling for BUBBLE-driven deaggregations
+    /// (copied from Options). 0 = uncapped (the golden identity every
+    /// QC certificate and test ran under).
+    int max_live_flights_ = 0;
 
     // CAMP-DOM-1: the verdict's baseline + the event pump's cache. The
     // opening owner per objective (wire order, snapshotted at
@@ -1372,8 +1416,12 @@ private:
     double air_bubble_radius_ft_ = 2560.0;
     f4::geo::WorldPosition air_bubble_center_{};
 
-    // Display snapshot.
-    Stats stats_;
+    // Display snapshot. PV-4a: mutable + the dirty flag — the const
+    // stats() accessor refreshes on first read (advance() only marks;
+    // the per-batch walk this replaced was the viewer's 100×-per-
+    // sim-second stats tax).
+    mutable Stats stats_;
+    mutable bool stats_dirty_ = true;
     std::uint8_t threat_viewer_ = 0;
     /// The threat map's UCD fallback (the CAMP-SCALE-1 tables + the
     /// ClassTable, when the sim loaded them): battalions whose world

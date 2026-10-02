@@ -393,6 +393,12 @@ private:
     /// The rows outlive the session. See event_log.hpp +
     /// campaign_session_view.cpp.
     void draw_event_log_view();
+    /// PV-1: the "Frame Profiler" window — only when F4_FRAME_PROF=1
+    /// armed impl_->frame_prof. The frame phases' EMAs, the worker's
+    /// batch composition, and the duty cycle (the split that ranks the
+    /// PV-3/PV-4 follow-ups). See viewer_state.hpp (FrameProf) +
+    /// imgui_panels.cpp.
+    void draw_frame_profiler_view();
     /// V-CAMP: start/stop the live campaign session over the loaded
     /// world JSON (impl_->last_world_json_path). Start resolves the
     /// class table / aircraft config / mission profiles from the

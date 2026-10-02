@@ -123,7 +123,9 @@
 #include <f4/campaign/result_ledger.hpp>
 #include <f4/world/data_source.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace f4::campaign {
@@ -565,8 +567,9 @@ public:
     /// kFrontGarrisonRangeGrid of this objective — the same truth the
     /// FLOT draws. The viewer keys its objective rendering off this
     /// (solid owner fill = a defended holding; hollow = affiliation
-    /// without troops, a territorial claim, not a position). Linear
-    /// over the mirror; callers draw-cull long before it is warm.
+    /// without troops, a territorial claim, not a position). O(log N)
+    /// over the sorted vu index (PV-2a — the canvas asks once per drawn
+    /// objective per frame).
     [[nodiscard]] bool
     objective_defended(std::uint32_t vu) const noexcept {
         if (defended_.size() != objectives_.size()) {
@@ -574,10 +577,20 @@ public:
                            // the front) — legacy display, nothing to
                            // gate on
         }
-        for (std::size_t i = 0; i < objectives_.size(); ++i) {
-            if (objectives_[i].vu == vu) return defended_[i];
+        // PV-2a (Docs/VIEWER_PERFORMANCE_ANALYSIS.md §7): binary
+        // search over the sorted vu index. The linear scan this
+        // replaced was the viewer's O(N²) map pass — the canvas asks
+        // once per drawn objective per frame, and ~3.5M iterations a
+        // frame on the default Korea view was pure overhead before a
+        // single pixel was drawn.
+        const auto it = std::lower_bound(
+            objective_vu_index_.begin(), objective_vu_index_.end(), vu,
+            [](const std::pair<std::uint32_t, std::uint32_t>& e,
+               std::uint32_t v) { return e.first < v; });
+        if (it == objective_vu_index_.end() || it->first != vu) {
+            return false;
         }
-        return false;
+        return defended_[it->second] != 0;
     }
 
     [[nodiscard]] const GroundWarStats& stats() const noexcept {
@@ -639,6 +652,13 @@ private:
     /// The troop-gate stamp per objectives_ row (the front's own
     /// holding test, exposed via objective_defended for the viewer).
     std::vector<std::uint8_t> defended_;
+    /// PV-2a: (vu, index) over objectives_, SORTED by vu — the O(log N)
+    /// lookup behind objective_defended (the unit_vus_ pattern, but
+    /// sorted: the query is the hot path, the wire order it replaced
+    /// served nothing). Built once in the constructor; the mirror is
+    /// immutable in identity — only owner/supply rows change live.
+    std::vector<std::pair<std::uint32_t, std::uint32_t>>
+        objective_vu_index_;
     std::int32_t min_x_ = 0;
     std::int32_t max_x_ = 0;
 

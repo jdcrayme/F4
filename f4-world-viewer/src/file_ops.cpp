@@ -128,6 +128,19 @@ void ViewerApp::load_world_json(const std::filesystem::path& path) {
 
     impl_->world_loaded = true;
     ++impl_->world_generation;
+    // PV-5/PV-2c: the world-static caches key on objective identity —
+    // a new world re-keys every id (the flat position index behind
+    // objectives_within_radius and the 3D panels' airfield geometry
+    // cache; the latter also guards on world_generation at its use
+    // site, this covers the former and the snapshot-derived ATO set).
+    impl_->objective_xy_cache.clear();
+    impl_->objective_xy_cache_valid = false;
+    impl_->airfield_geo_3d_cache.clear();
+    impl_->airfield_geo_3d_world_gen = impl_->world_generation;
+    impl_->ato_targets_cache.clear();
+    impl_->ato_targets_data = nullptr;
+    impl_->ato_targets_n = 0;
+    impl_->ato_targets_serial = ~0ull;
     impl_->world_path_display = path.string();
     impl_->last_world_json_path = path;
     impl_->status_msg = "Loaded world: " + path.string() +

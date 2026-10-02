@@ -192,6 +192,16 @@ private:
     std::vector<f4::campaign::api::CommandJournalEntry> replay_;
     std::size_t replay_cursor_{0};
     bool replay_active_{false};
+
+    // --- PV-2b: the threat query's encoded-JSON cache -------------------
+    // The route builder's ThreatMap is IMMUTABLE for the session's
+    // lifetime (built once at create; rebuild policy is the host's and
+    // no current host rebuilds), so the `threat` query's full-grid
+    // serialize (~2×29k ints on Korea) produces the same bytes every
+    // call. Cached after the first; the viewer's per-frame fetches (now
+    // throttled to ~10 Hz) read a string instead of re-walking the map.
+    bool threat_json_cached_{false};
+    std::string threat_json_cache_;
 };
 
 } // namespace f4::simulation

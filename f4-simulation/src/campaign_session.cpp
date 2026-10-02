@@ -551,6 +551,7 @@ CampaignSession::create(const CampaignSessionOptions& opts,
     session->pilot_skill_flow_ = opts.pilot_skill_flow;
     session->combat_lookahead_sec_ = opts.combat_lookahead_sec;
     session->combat_window_sec_ = opts.combat_window_sec;
+    session->max_live_flights_ = opts.max_live_flights;
     session->spawner_->set_synthetic_deferred(
         opts.fidelity_policy == FidelityPolicy::Tiered &&
         session->synthetic_as_aggregates_);
@@ -885,7 +886,10 @@ CampaignSession::~CampaignSession() {
 
 bool CampaignSession::advance(double real_seconds, int max_steps_override) {
     if (paused_ || real_seconds <= 0.0) {
-        refresh_stats_();
+        // PV-4a: mark, don't walk — a paused session's per-frame
+        // step() calls paid the full stats walk for nothing (the
+        // reader only comes along when the UI asks).
+        stats_dirty_ = true;
         return false;
     }
     accumulator_ += real_seconds;
@@ -1005,7 +1009,12 @@ bool CampaignSession::advance(double real_seconds, int max_steps_override) {
         // queue unbounded catch-up behind a stall).
         accumulator_ = 0.0;
     }
-    refresh_stats_();
+    // PV-4a: the stats walk is LAZY — the first reader after this
+    // advance computes it once (the viewer's worker fed 1–2-tick
+    // batches ~60×/s at speed; the eager walk here re-walked the
+    // intents + ground books + the aircraft roster twice per batch
+    // for a UI that read once per frame).
+    stats_dirty_ = true;
     return capped;
 }
 
@@ -1447,6 +1456,19 @@ void CampaignSession::evaluate_tiers_() {
             trig = (takeoff_window && !recovery_window && !tot_window)
                        ? DeaggregatedFlight::Trigger::OpsTakeoff
                        : DeaggregatedFlight::Trigger::Ops;
+        }
+        // PV-4b: the Tier-B ceiling — defer the ATTENTION-driven
+        // (Bubble) deaggregation while the session already holds
+        // max_live_flights_ live flights. The war's own windows (the
+        // ops pins, the TOT delivery, the recovery) and the combat /
+        // force triggers are never capped: they fly outcomes, not
+        // display fidelity. A deferred flight simply stays aggregate
+        // this pass — the next pass retries (the ceiling is a bound,
+        // not a refusal).
+        if (trig == DeaggregatedFlight::Trigger::Bubble &&
+            max_live_flights_ > 0 &&
+            static_cast<int>(deaggregated_.size()) >= max_live_flights_) {
+            continue;
         }
         deaggregate_flight_(i, trig);
     }
@@ -2773,7 +2795,8 @@ void CampaignSession::handle_mission_intent_(
     // The one-frame numbers go live immediately (the handler fires
     // outside the advance() cadence — a host reading stats between
     // frames sees the registration the same frame it happened).
-    refresh_stats_();
+    // PV-4a: mark — the lazy stats() computes on the host's next read.
+    stats_dirty_ = true;
 }
 
 void CampaignSession::rebuild_aggregate_feed_() {
@@ -3413,17 +3436,17 @@ void CampaignSession::force_deaggregate_flight(std::uint32_t vu) {
     // Immediate (the UI calls this under the session lock — a paused
     // session still deaggregates on request, the V-3DLIVE rule).
     deaggregate_flight_(idx, DeaggregatedFlight::Trigger::Force);
-    refresh_stats_();
+    stats_dirty_ = true;   // PV-4a: lazy — the next reader pays
 }
 
 void CampaignSession::force_reaggregate_flight(std::uint32_t vu) {
     if (flights_ == nullptr) return;
     if (reaggregate_flight_(vu)) {
-        refresh_stats_();
+        stats_dirty_ = true;   // PV-4a: lazy — the next reader pays
     }
 }
 
-void CampaignSession::refresh_stats_() {
+void CampaignSession::refresh_stats_() const {
     stats_ = {};
     if (!sim_) return;
     stats_.cycles = ladder_->cycles_fired();
@@ -3501,6 +3524,9 @@ void CampaignSession::refresh_stats_() {
         if (fm && fm->model().state().gear.inAir) ++stats_.airborne;
     }
     stats_.sim_time_s = sim_->sim_time_s();
+    // PV-4a: the snapshot is fresh the moment the walk completes —
+    // the lazy stats() accessor's gate.
+    stats_dirty_ = false;
 }
 
 int CampaignSession::count_bubble_live_() const {

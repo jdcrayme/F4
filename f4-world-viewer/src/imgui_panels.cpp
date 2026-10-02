@@ -715,6 +715,10 @@ void ViewerApp::draw_imgui() {
     // drain froze; outlives the session itself).
     draw_event_log_view();
 
+    // PV-1: the frame profiler (F4_FRAME_PROF=1 only) — reads the
+    // phase EMAs run() just rolled up + the worker's batch atomics.
+    draw_frame_profiler_view();
+
     // SHOWCASE-1: the Mission QC discovery window (scenario roster +
     // recorded traces → replay). See mission_qc_view.cpp.
     draw_mission_qc_view();
@@ -725,6 +729,104 @@ void ViewerApp::draw_imgui() {
     draw_qc_world_panel();
 
     rlImGuiEnd();
+}
+
+// ---------------------------------------------------------------------------
+// PV-1: the Frame Profiler window
+// ---------------------------------------------------------------------------
+// The viewer-perf tranche's measurement surface (FID-OPT's discipline
+// applied to the frame): the phase EMAs run() stamps (snapshot / input
+// / focus / canvas / imgui / present), the worker's batch composition
+// (hold ms, ticks, budget, delivery scale, effective speed), and the
+// DUTY CYCLE — the sim's share of the frame period. The numbers rank
+// the follow-ups: a fat canvas/imgui phase under a thin duty cycle
+// says PV-3 (the lock diet); a fat focus phase or a starving 1x feed
+// says PV-4 (the churn policy).
+// ---------------------------------------------------------------------------
+void ViewerApp::draw_frame_profiler_view() {
+    if (!impl_->frame_prof.enabled) return;
+
+    ImGui::SetNextWindowPos(ImVec2(830, 30), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(380, 330), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Frame Profiler")) {
+        ImGui::End();
+        return;
+    }
+    ImGui::TextDisabled("F4_FRAME_PROF — phase EMAs (ms), %.0f fps",
+                        impl_->frame_prof.ema_frame > 0.001
+                            ? 1000.0 / impl_->frame_prof.ema_frame
+                            : 0.0);
+
+    const auto& fp = impl_->frame_prof;
+    if (ImGui::BeginTable("frame_prof_phases", 3,
+                          ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_BordersInnerH)) {
+        ImGui::TableSetupColumn("phase");
+        ImGui::TableSetupColumn("ema ms");
+        ImGui::TableSetupColumn("share");
+        ImGui::TableHeadersRow();
+        // (label, the phase's EMA — snap..present, then the frame total)
+        const double total = fp.ema_frame > 0.0 ? fp.ema_frame : 1.0;
+        const struct {
+            const char* name;
+            double ms;
+        } rows[] = {
+            {"snapshot", fp.ema_snap},
+            {"input", fp.ema_input},
+            {"focus", fp.ema_focus},
+            {"canvas", fp.ema_canvas},
+            {"imgui", fp.ema_imgui},
+            {"present*", fp.ema_present},
+        };
+        for (const auto& r : rows) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(r.name);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.2f", r.ms);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.0f%%", 100.0 * r.ms / total);
+        }
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted("frame");
+        ImGui::TableNextColumn();
+        ImGui::Text("%.2f", fp.ema_frame);
+        ImGui::TableNextColumn();
+        ImGui::Text("%llu frames",
+                    static_cast<unsigned long long>(fp.frames));
+        ImGui::EndTable();
+    }
+    ImGui::TextDisabled("* present runs UNLOCKED (the worker's window)");
+
+    ImGui::Separator();
+    if (impl_->session_runner) {
+        const auto& r = *impl_->session_runner;
+        // Duty cycle: the worker's batch holds vs the frame period.
+        // The worker can run a batch whenever the UI does NOT hold the
+        // lock; a 16.7 ms frame carrying a 6 ms EMA hold is ~36% duty
+        // PLUS whatever fit in the present wait — the effective speed
+        // is the ground truth the duty estimate points at.
+        const double duty =
+            fp.ema_frame > 0.001
+                ? 100.0 * r.hold_ema_ms() / fp.ema_frame
+                : 0.0;
+        ImGui::Text("worker: hold %.2f ms (ema)  %d ticks  budget %d",
+                    r.hold_ema_ms(), r.last_batch_ticks(),
+                    r.tick_budget());
+        ImGui::Text("serial %llu  delivery %.3f  eff %.1fx",
+                    static_cast<unsigned long long>(r.step_serial()),
+                    r.delivery_scale(), r.effective_speed());
+        ImGui::Text("duty (hold/frame): ~%.0f%%", duty);
+        if (r.bubble_action()) {
+            ImGui::TextDisabled("AGG-3 hold ACTIVE — feed clamped to 1x "
+                                "(action in the bubble)");
+        }
+    } else {
+        ImGui::TextDisabled("(no session runner — start a campaign)");
+    }
+
+    ImGui::End();
 }
 
 } // namespace f4::viewer

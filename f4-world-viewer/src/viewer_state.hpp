@@ -109,6 +109,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <f4/renderer/symbol_library.hpp>    // SymbolLibrary (data-driven symbols)
@@ -334,23 +335,43 @@ struct ViewerApp::Impl {
 
     /// Objectives within `radius_ft` of (east_ft, north_ft). Used by the
     /// 3D panel to render neighboring objectives (towns, power plants,
-    /// etc.) alongside the selected one. O(n_objectives) per call —
-    /// acceptable for the 3D panel (called once per frame when terrain
-    /// + models are both on).
+    /// etc.) alongside the selected one — INCLUDING the 3D chase view,
+    /// which asks every frame around a MOVING aircraft.
+    ///
+    /// PV-5: the walk uses the flat position index below — objectives
+    /// never move, so the (id, x, y) triplets are captured once per
+    /// world/session and the per-frame query is a tight float loop
+    /// (~2,659 × 4 flops on Korea) instead of an entity handle +
+    /// TransformComponent get per objective per frame (the µs-class
+    /// chain the direct walk paid ~2.6 ms for).
     [[nodiscard]] std::vector<f4::entities::EntityId>
     objectives_within_radius(float east_ft, float north_ft, float radius_ft) const {
         std::vector<f4::entities::EntityId> out;
+        if (!objective_xy_cache_valid) build_objective_xy_cache_();
         const float r2 = radius_ft * radius_ft;
-        for (const auto& eid : objectives()) {
-            auto h = handle(eid);
-            auto* tf = h.get<f4::entities::TransformComponent>();
-            if (!tf) continue;
-            const float dx = static_cast<float>(tf->position.x) - east_ft;
-            const float dy = static_cast<float>(tf->position.y) - north_ft;
-            if (dx * dx + dy * dy <= r2) out.push_back(eid);
+        for (const auto& o : objective_xy_cache) {
+            const float dx = o.x - east_ft;
+            const float dy = o.y - north_ft;
+            if (dx * dx + dy * dy <= r2) out.push_back(o.eid);
         }
         return out;
     }
+
+    /// PV-5: the flat objective position index behind
+    /// objectives_within_radius — (id, x, y) in ENU feet, captured once
+    /// per world load / session adopt (objectives never move; the
+    /// ground war flips OWNERSHIP, not positions). Invalidated by
+    /// world_generation changes and session adopts.
+    struct ObjectiveXY {
+        f4::entities::EntityId eid;
+        float x = 0.0f;
+        float y = 0.0f;
+    };
+    mutable std::vector<ObjectiveXY> objective_xy_cache;
+    mutable bool objective_xy_cache_valid = false;
+    /// The capture walk (const so the lazy build works from the const
+    /// query path — the caches are mutable, the FID-OPT memo pattern).
+    void build_objective_xy_cache_() const;
     /// All unit entities. The loader tags every unit "category=unit"
     /// (tags::CATEGORY, set in populate_units), so this is a single
     /// const-ref tag-index read. The old version unioned the four
@@ -441,6 +462,48 @@ struct ViewerApp::Impl {
     f4::viewer::SessionSnapshot session_snap;
     std::uint64_t session_snap_serial = 0;
     bool session_snap_valid = false;
+    // PV-2b: the refresh THROTTLE — while stepping, the worker bumps
+    // the serial every batch (~60×/s at speed), and the old per-serial
+    // gate turned that into a full JSON round trip (4–5 queries,
+    // thousands of small allocations, all under the frame lock) every
+    // frame. The fetch now fires at most every kSnapRefreshMinSec of
+    // wall time while the serial moves (the tables re-derive from the
+    // cached rows; 100 ms of staleness is invisible against a 30-min
+    // tasking cycle), EXCEPT when forced (a command invalidated the
+    // snapshot — the D/R buttons want the next frame to show it) or on
+    // the first fetch. The event drain stays per-frame (cheap); the
+    // AGG-3 clamp no longer rides the snapshot at all (the runner
+    // reads it off each step result — see campaign_client_runner).
+    double session_snap_last_fetch_s = -1.0e9;
+    bool session_snap_force = false;
+    /// PV-2c: the canvas's ATO-mark set (the objectives the current
+    /// ATO targets), cached per snapshot identity instead of rebuilt
+    /// from the whole tasking vector every frame.
+    std::unordered_set<std::uint32_t> ato_targets_cache;
+    const f4::viewer::IntentRow* ato_targets_data = nullptr;
+    std::size_t ato_targets_n = 0;
+    std::uint64_t ato_targets_serial = ~0ull;
+    /// The identity-keyed accessor the canvas's objectives pass uses
+    /// (data pointer + size + refresh serial — the ATO table's sort
+    /// discipline).
+    [[nodiscard]] const std::unordered_set<std::uint32_t>&
+    ato_targets_set() {
+        const auto& rows = session_snap.tasking;
+        if (ato_targets_data != rows.data() ||
+            ato_targets_n != rows.size() ||
+            ato_targets_serial != session_snap_serial) {
+            ato_targets_cache.clear();
+            for (const auto& t : rows) {
+                if (t.target_objective_id != 0) {
+                    ato_targets_cache.insert(t.target_objective_id);
+                }
+            }
+            ato_targets_data = rows.data();
+            ato_targets_n = rows.size();
+            ato_targets_serial = session_snap_serial;
+        }
+        return ato_targets_cache;
+    }
     /// The save's epoch (absolute campaign time zero), captured from the
     /// time query at adopt — the session is paused at zero ticks there,
     /// so campaign_time_s IS the epoch. The missions table's absolute
@@ -766,7 +829,13 @@ struct ViewerApp::Impl {
     void refresh_session_snapshot();
     /// Contract-plane: drop the snapshot cache (after a command applied
     /// immediately — focus/deagg change state without advancing).
-    void invalidate_session_snapshot() { session_snap_valid = false; }
+    void invalidate_session_snapshot() {
+        session_snap_valid = false;
+        // PV-2b: a command-driven invalidation also BYPASSES the
+        // refresh throttle — the D/R buttons expect the next frame to
+        // show the tier change, not the next throttle window.
+        session_snap_force = true;
+    }
     /// Get the grid X coordinate from a TransformComponent (feet → grid).
     static float grid_x(const f4::entities::TransformComponent* tr) {
         return tr ? static_cast<float>(tr->position.x / 1024.0) : 0.0f;
@@ -1033,6 +1102,26 @@ struct ViewerApp::Impl {
     /// type resolved through the UCD/VCD tables. "" when the session/
     /// unit/tables don't resolve.
     [[nodiscard]] std::string unit_type_name(std::uint32_t unit_vu) const;
+    /// A SQUADRON's airframe ("F-16C") — unit_type_name over the
+    /// squadron's VU, memoized per VU (the ATO tables resolve every
+    /// intent row's squadron; the class table is immutable for the
+    /// session's lifetime, so the map fills once per distinct
+    /// squadron and never goes stale). Cleared at session adopt — a
+    /// new war over a different world re-keys its VUs. The reference
+    /// outlives the call; the "" miss is stored, not returned fresh.
+    [[nodiscard]] const std::string& squadron_airframe_name(
+        std::uint32_t squadron_vu);
+    /// The memo behind squadron_airframe_name (Impl-private state).
+    std::unordered_map<std::uint32_t, std::string> squadron_type_names;
+    /// PV-2c: a FLIGHT's airframe, the same memoization applied to the
+    /// flights table's per-row `unit_type_name(t.vu)` (the resolve
+    /// chain is a map find + entity handle + component get + table
+    /// walk — per VISIBLE ROW per FRAME before this; now once per
+    /// distinct flight per session). Cleared at session adopt with its
+    /// squadron sibling.
+    [[nodiscard]] const std::string& flight_airframe_name(
+        std::uint32_t flight_vu);
+    std::unordered_map<std::uint32_t, std::string> flight_type_names;
 
     // --- Camera transforms (defined in camera.cpp) ---
 
@@ -1114,6 +1203,31 @@ struct ViewerApp::Impl {
     // shows runway/taxiway/parking geometry).
     bool ground_layout_3d_show_models = true;
 
+    // --- PV-5: the 3D chase view's per-objective geometry cache ---------
+    //
+    // The chase view draws the WORLD around the followed aircraft: every
+    // objective within ~50 NM renders its airfield geometry (runway,
+    // taxiways, parking). build_airfield_geometry_3d is a vertex-builder
+    // — the chase view re-ran it for EVERY nearby objective EVERY frame
+    // (entity_model_3d.cpp's overlay lambda). Ground layouts are static
+    // for a world's lifetime, so the built geometry + its anchor are
+    // captured per objective id here; the per-frame overlay walks the
+    // cache and only the FIRST sighting of an objective builds. Cleared
+    // on world load / session adopt (same invalidation points as
+    // objective_xy_cache).
+    struct AirfieldGeo3D {
+        AirfieldGeometry3D geo;
+        float x = 0.0f, y = 0.0f, z = 0.0f;   // ENU feet anchor
+        bool built = false;   // true once the build ran (even if empty)
+    };
+    /// Keyed by EntityId's raw value (no std::hash specialization
+    /// exists for EntityId and the id is a packed uint64 anyway).
+    std::unordered_map<std::uint64_t, AirfieldGeo3D>
+        airfield_geo_3d_cache;
+    /// The world_generation the cache was built under — a world reload
+    /// (not just a session adopt) re-keys every objective id.
+    int airfield_geo_3d_world_gen = -1;
+
     // --- Runtime class table + glTF model cache (lazy) ------------------
     //
     // Loaded once on first use of draw_ground_layout_3d() (or the 3D
@@ -1135,6 +1249,36 @@ struct ViewerApp::Impl {
     bool models_3d_load_attempted = false;
     bool models_3d_loaded = false;
     std::string models_3d_error;  // empty if loaded successfully
+
+    // --- PV-1: the frame profiler (F4_FRAME_PROF=1) ----------------------
+    //
+    // The measurement discipline FID-OPT taught the headless tick
+    // ("every obvious cost center re-attributed when measured"),
+    // applied to the viewer's frame: run() stamps the phase boundaries
+    // (snapshot fetch / input / the Focus chain / canvas / imgui /
+    // present) and the profiler window prints the EMAs next to the
+    // worker's batch composition + the duty cycle — the split that
+    // decides PV-3 (lock diet) vs PV-4 (churn policy) follow-ups.
+    // Zero cost when off (one env probe at startup, one branch per
+    // phase).
+    struct FrameProf {
+        bool enabled = false;
+        // This frame's phase stamps (ms; written by run(), read by the
+        // window at the END of the same frame's imgui phase — no
+        // tearing, both on the UI thread).
+        double snap_ms = 0.0;    ///< refresh_session_snapshot (incl. fetch)
+        double input_ms = 0.0;   ///< input dispatch + camera keys
+        double focus_ms = 0.0;   ///< the camera-bubble / Focus chain
+        double canvas_ms = 0.0;  ///< draw_canvas
+        double imgui_ms = 0.0;   ///< draw_imgui (all windows)
+        double present_ms = 0.0; ///< EndDrawing (UNLOCKED — the worker's window)
+        double frame_ms = 0.0;   ///< the whole loop iteration
+        // EMAs (0.25), the readouts.
+        double ema_snap = 0.0, ema_input = 0.0, ema_focus = 0.0;
+        double ema_canvas = 0.0, ema_imgui = 0.0, ema_present = 0.0;
+        double ema_frame = 0.0;
+        std::uint64_t frames = 0;
+    } frame_prof;
 
     // --- Shared GPU resources (f4::renderer::RenderResources) ------------
     //

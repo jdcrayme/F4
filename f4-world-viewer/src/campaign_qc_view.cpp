@@ -9,11 +9,16 @@
 //   * Filters: mission-type combo (with live counts) + team combo (the
 //     same team_filter the canvas uses) — the canvas, mission links and
 //     this table all follow BOTH filters, so the map and the ATO agree.
-//   * The ATO table itself: one row per tasked flight, sorted by TOT.
+//   * The ATO table itself: one row per tasked flight, sorted by TOT
+//     until a header click re-sorts it (every column sorts; the sort
+//     survives filter changes and world mutations — the rebuild
+//     re-applies the armed spec).
 //     Columns: callsign, mission (name + category), team, package, TOT,
-//     target (name; click selects + pans), squadron (name), route
-//     waypoints count. Clicking a row selects the flight entity and
-//     centers the camera on it — the inspector then shows its full plan.
+//     target (name; click selects + pans), squadron (name), airframe
+//     (the flight's class-table row through the converted UCD/VCD
+//     tables — "F-16C"), route waypoints count. Clicking a row selects
+//     the flight entity and centers the camera on it — the inspector
+//     then shows its full plan.
 //
 // Row model is rebuilt only when the filters change (dirty flag), so the
 // per-frame cost of a 449-flight ATO is an ImGui clipper walk, not 449
@@ -37,7 +42,9 @@ namespace f4::viewer {
 
 namespace {
 
-// One ATO row. POD, rebuilt on filter changes.
+// One ATO row. POD, rebuilt on filter changes. The display strings
+// (squadron/target/airframe names) resolve ONCE at build — the sort
+// and the cells read the cache, never the component graph.
 struct AtoRow {
     f4::entities::EntityId eid;
     f4::entities::EntityId target;        // resolved mission target (may be invalid)
@@ -51,6 +58,9 @@ struct AtoRow {
     float gx = 0.0f, gy = 0.0f;           // grid position (camera focus)
     uint8_t owner = 0;
     int32_t fuel_burnt = 0;               // per-aircraft lbs (the aggregate burn)
+    std::string squadron_name;            // display name (may be empty)
+    std::string target_name;              // display name (may be empty)
+    std::string airframe;                 // class-table chain (may be empty)
 };
 
 } // namespace
@@ -139,9 +149,26 @@ void ViewerApp::draw_campaign_qc_view() {
             row.gy = impl_->grid_y(tr);
             row.owner = owner;
             row.fuel_burnt = fp->fuel_burnt;
+            // Display strings resolve ONCE here (the sort keys and the
+            // cells read the cache — the per-frame cost stays a clipper
+            // walk, not 449 component queries).
+            row.squadron_name = entity_display_name(fp->squadron);
+            row.target_name = entity_display_name(fp->target);
+            // The airframe: the FLIGHT's own class-table entity type
+            // through the converted UCD/VCD tables (flights carry
+            // airframe-specific types — the same chain the session
+            // window's ATO resolves through the squadron).
+            if (uc->class_table_index > 0 &&
+                impl_->class_table.loaded() &&
+                impl_->theater_tables.loaded()) {
+                row.airframe = f4::world::resolve_entity_type_name(
+                    impl_->theater_tables, impl_->class_table,
+                    static_cast<std::uint16_t>(uc->class_table_index));
+            }
             rows.push_back(row);
         }
-        // TOT order — the natural ATO reading order.
+        // TOT order — the natural ATO reading order (until a header
+        // click re-sorts; the armed spec re-applies after every rebuild).
         std::sort(rows.begin(), rows.end(),
                   [](const AtoRow& a, const AtoRow& b) {
                       return a.tot < b.tot;
@@ -261,7 +288,7 @@ void ViewerApp::draw_campaign_qc_view() {
         ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuterH |
         ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
         ImGuiTableFlags_Sortable;
-    if (ImGui::BeginTable("ato", 9, table_flags, ImVec2(0.0f, 0.0f))) {
+    if (ImGui::BeginTable("ato", 10, table_flags, ImVec2(0.0f, 0.0f))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("callsign", ImGuiTableColumnFlags_WidthFixed,
                                 84.0f, 0);
@@ -277,34 +304,82 @@ void ViewerApp::draw_campaign_qc_view() {
                                 160.0f, 5);
         ImGui::TableSetupColumn("squadron", ImGuiTableColumnFlags_WidthStretch,
                                 140.0f, 6);
+        ImGui::TableSetupColumn("airframe", ImGuiTableColumnFlags_WidthFixed,
+                                76.0f, 9);
         ImGui::TableSetupColumn("wps", ImGuiTableColumnFlags_WidthFixed,
                                 32.0f, 7);
         ImGui::TableSetupColumn("fuel", ImGuiTableColumnFlags_WidthFixed,
                                 56.0f, 8);
         ImGui::TableHeadersRow();
 
-        // Simple in-place sort when the user clicks a header (stable, on
-        // the cached rows — no re-query).
-        if (ImGuiTableSortSpecs* specs =
-                ImGui::TableGetSortSpecs()) {
+        // Sort: stable, in-place, on the cached rows — no re-query. The
+        // spec is remembered so a row-cache REBUILD (filter change,
+        // world mutation) re-applies the armed order instead of silently
+        // resetting to TOT while the header still shows its arrow.
+        static bool has_spec = false;
+        static ImGuiTableColumnSortSpecs applied{};
+        const auto apply_sort = [](ImGuiTableColumnSortSpecs spec) {
+            const auto col = static_cast<ImGuiID>(spec.ColumnUserID);
+            const bool asc =
+                spec.SortDirection == ImGuiSortDirection_Ascending;
+            // Ascending sorts by less(x,y); descending by less(y,x) —
+            // the strict reverse, so equal keys keep the build order
+            // under stable_sort in BOTH directions.
+            const auto less = [col](const AtoRow& x, const AtoRow& y) {
+                switch (col) {
+                    case 0:
+                        return std::tie(x.callsign_id, x.callsign_num) <
+                               std::tie(y.callsign_id, y.callsign_num);
+                    case 1: {
+                        // Name first (the alphabetical read), byte as
+                        // the tiebreak (string_views are temporaries —
+                        // compare directly, not through std::tie).
+                        const auto xn =
+                            f4::campaign::mission_type_name(x.mission);
+                        const auto yn =
+                            f4::campaign::mission_type_name(y.mission);
+                        return xn != yn ? xn < yn
+                                        : x.mission < y.mission;
+                    }
+                    case 2: return x.owner < y.owner;
+                    case 3: return x.package.value < y.package.value;
+                    case 4: return x.tot < y.tot;
+                    case 5:
+                        return std::tie(x.target_name, x.target.value) <
+                               std::tie(y.target_name, y.target.value);
+                    case 6:
+                        return std::tie(x.squadron_name,
+                                        x.squadron.value) <
+                               std::tie(y.squadron_name,
+                                        y.squadron.value);
+                    case 7: return x.wp_count < y.wp_count;
+                    case 8: return x.fuel_burnt < y.fuel_burnt;
+                    case 9: return x.airframe < y.airframe;
+                    default: return x.eid.value < y.eid.value;
+                }
+            };
+            std::stable_sort(rows.begin(), rows.end(),
+                             [&](const AtoRow& a, const AtoRow& b) {
+                                 return asc ? less(a, b) : less(b, a);
+                             });
+        };
+        if (ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs()) {
             if (specs->SpecsDirty) {
-                const auto col = specs->Specs[0].ColumnUserID;
-                const auto dir = specs->Specs[0].SortDirection;
-                std::stable_sort(rows.begin(), rows.end(),
-                    [col, dir](const AtoRow& a, const AtoRow& b) {
-                        bool lt;
-                        switch (col) {
-                            case 0: lt = a.callsign_id < b.callsign_id; break;
-                            case 1: lt = a.mission < b.mission; break;
-                            case 2: lt = a.owner < b.owner; break;
-                            case 4: lt = a.tot < b.tot; break;
-                            case 7: lt = a.wp_count < b.wp_count; break;
-                            case 8: lt = a.fuel_burnt < b.fuel_burnt; break;
-                            default: lt = a.eid.value < b.eid.value; break;
-                        }
-                        return dir == ImGuiSortDirection_Ascending ? lt : !lt;
-                    });
+                if (specs->SpecsCount > 0) {
+                    has_spec = true;
+                    applied = specs->Specs[0];
+                    apply_sort(applied);
+                } else {
+                    // Third click: back to the natural ATO reading order.
+                    has_spec = false;
+                    std::sort(rows.begin(), rows.end(),
+                              [](const AtoRow& a, const AtoRow& b) {
+                                  return a.tot < b.tot;
+                              });
+                }
                 specs->SpecsDirty = false;
+            } else if (dirty && has_spec) {
+                apply_sort(applied);  // rebuild keeps the armed order
             }
         }
 
@@ -363,11 +438,12 @@ void ViewerApp::draw_campaign_qc_view() {
 
                 ImGui::TableNextColumn();
                 {
-                    const std::string name =
-                        entity_display_name(row.target);
-                    if (row.target.valid() && !name.empty()) {
+                    // The target name resolves ONCE at build (the sort
+                    // and the cell share the cache).
+                    if (row.target.valid() && !row.target_name.empty()) {
                         // Clicking the target name selects the TARGET.
-                        if (ImGui::Selectable(name.c_str(), false,
+                        if (ImGui::Selectable(row.target_name.c_str(),
+                                              false,
                                               ImGuiSelectableFlags_None)) {
                             impl_->sel_kind =
                                 Impl::SelectionKind::Objective;
@@ -391,12 +467,23 @@ void ViewerApp::draw_campaign_qc_view() {
 
                 ImGui::TableNextColumn();
                 {
-                    const std::string name =
-                        entity_display_name(row.squadron);
-                    if (!name.empty()) {
-                        ImGui::TextUnformatted(name.c_str());
+                    if (!row.squadron_name.empty()) {
+                        ImGui::TextUnformatted(row.squadron_name.c_str());
                     } else if (row.squadron.valid()) {
                         ImGui::TextUnformatted("(sqdn)");
+                    } else {
+                        ImGui::TextDisabled("-");
+                    }
+                }
+
+                ImGui::TableNextColumn();
+                {
+                    // The airframe ("F-16C"): the flight's class-table
+                    // row through the converted UCD/VCD tables —
+                    // "-" when the tables aren't loaded or the chain
+                    // doesn't resolve.
+                    if (!row.airframe.empty()) {
+                        ImGui::TextUnformatted(row.airframe.c_str());
                     } else {
                         ImGui::TextDisabled("-");
                     }

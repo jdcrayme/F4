@@ -34,6 +34,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -83,6 +84,12 @@ bool take_screenshot_to(const std::string& requested) {
 // Public API
 // ---------------------------------------------------------------------------
 ViewerApp::ViewerApp()  : impl_(std::make_unique<Impl>()) {
+    // PV-1: the frame profiler's env gate — F4_FRAME_PROF=1 (any value)
+    // turns on the phase stamps + the profiler window. Probed ONCE;
+    // the per-phase cost when off is a single branch.
+    if (std::getenv("F4_FRAME_PROF") != nullptr) {
+        impl_->frame_prof.enabled = true;
+    }
     // Map symbols first: the corpus + any SVG overrides are independent
     // of the install, and every later frame reads them.
     impl_->reload_symbol_library();
@@ -296,6 +303,20 @@ void ViewerApp::run() {
         // need the session lock — releasing it for the wait gives the
         // worker the whole pace window (multiple batches per frame at
         // high speed presets) instead of one.
+        //
+        // PV-1: the frame's phase stamps. prof_stamp() closes the phase
+        // that just ran (enabled-only; one branch when off) — snap →
+        // input → focus → canvas → imgui inside the scope, present +
+        // the EMA rollup after it. The profiler window (imgui_panels)
+        // prints the EMAs against the worker's batch composition.
+        const double prof_frame_t0 = GetTime();
+        double prof_t = prof_frame_t0;
+        auto prof_stamp = [&](double& into) {
+            if (!impl_->frame_prof.enabled) return;
+            const double now = GetTime();
+            into = (now - prof_t) * 1000.0;
+            prof_t = now;
+        };
         {
             std::unique_lock<f4::viewer::FairMutex> session_frame_lock;
             if (impl_->session_runner) {
@@ -305,10 +326,13 @@ void ViewerApp::run() {
             }
 
             // CAMP-HOST-3: refresh the contract-plane snapshot — once
-            // per advance (the runner's step serial gates it), never
-            // per draw. Every window/table below reads the cached
-            // structs; the queries ran under THIS lock (session-safe).
+            // per advance (the runner's step serial gates it, PV-2b
+            // additionally throttles the fetch to ~10 Hz under a moving
+            // serial), never per draw. Every window/table below reads
+            // the cached structs; the queries ran under THIS lock
+            // (session-safe).
             impl_->refresh_session_snapshot();
+            prof_stamp(impl_->frame_prof.snap_ms);
 
             // Dispatch input handling INSIDE the frame scope — the
             // canvas click path hit-tests the session's live aircraft
@@ -419,6 +443,7 @@ void ViewerApp::run() {
                 impl_->campaign_time_dilated =
                     impl_->session_runner->time_dilated();
             }
+            prof_stamp(impl_->frame_prof.input_ms);
 
             // V-3DLIVE: the camera bubble — when the user is zoomed in
             // enough to see models, the deaggregation bubble follows
@@ -434,8 +459,15 @@ void ViewerApp::run() {
             // the user is" — the bubble anchors on it (no zoom gate),
             // so its surroundings deaggregate exactly as if the camera
             // sat there, and a moving aircraft drags the bubble with
-            // it. A moving anchor re-points often; the session's own
-            // deagg/reagg cooldowns absorb the churn.
+            // it. A moving anchor re-points at the RADIUS-SCALED
+            // threshold (PV-4d: half the bubble radius, never less
+            // than vis/16) — the deagg SET only changes when something
+            // crosses the bubble's EDGE, so re-pointing while the
+            // anchor drifts inside its own ball is pure churn (each
+            // re-point runs the bubble walk + tier evaluation + the
+            // stats mark synchronously under this lock, and every
+            // spawn/retire buys structural-rebuild debt on the
+            // worker's next ticks).
             if (impl_->session && impl_->campaign_view_bubble &&
                 !impl_->replay.active() &&
                 !impl_->scenario_player.active()) {
@@ -471,8 +503,20 @@ void ViewerApp::run() {
                                           impl_->last_bubble_gx),
                                  std::abs(anchor_gy -
                                           impl_->last_bubble_gy));
+                    // PV-4d: the radius this re-point WOULD submit (a
+                    // quarter of the visible extent, grid units,
+                    // clamped [2.5, 25]) — a selection anchor only
+                    // needs a new bubble after crossing half of it.
+                    const float radius_grid = std::clamp(
+                        0.25f * std::max(vis_w_grid, vis_h_grid), 2.5f,
+                        25.0f);
+                    const float move_threshold =
+                        selection_anchored
+                            ? std::max(vis_w_grid / 16.0f,
+                                       radius_grid * 0.5f)
+                            : vis_w_grid / 16.0f;
                     const bool camera_moved =
-                        moved > vis_w_grid / 16.0f ||
+                        moved > move_threshold ||
                         std::abs(impl_->cam_zoom -
                                  impl_->last_bubble_zoom) >
                             impl_->last_bubble_zoom * 0.15f;
@@ -517,17 +561,20 @@ void ViewerApp::run() {
                     impl_->last_bubble_gy = -1.0e9f;
                 }
             }
+            prof_stamp(impl_->frame_prof.focus_ms);
 
             BeginDrawing();
             ClearBackground(Color{20, 22, 28, 255});
             if (impl_->scenario_player.active() &&
                 !impl_->scenario_player.world_overlay) {
                 draw_scenario();
+                prof_stamp(impl_->frame_prof.canvas_ms);
                 rlImGuiBegin();
                 draw_scenario_panel();
                 rlImGuiEnd();
             } else if (impl_->replay.active()) {
                 draw_replay_canvas();
+                prof_stamp(impl_->frame_prof.canvas_ms);
                 // The replay panel uses ImGui, so it must be wrapped in
                 // rlImGuiBegin/End — same as the normal draw_imgui() path.
                 // Without this, ImGui::Begin() asserts (g.WithinFrameScope).
@@ -536,8 +583,10 @@ void ViewerApp::run() {
                 rlImGuiEnd();
             } else {
                 draw_canvas();
+                prof_stamp(impl_->frame_prof.canvas_ms);
                 draw_imgui();
             }
+            prof_stamp(impl_->frame_prof.imgui_ms);
             // V-THREAD-2: scope ends BEFORE EndDrawing() — every raylib
             // Draw* has already copied its vertices/parameters into
             // raylib's own batch buffers (and ImGui's render pass is
@@ -548,6 +597,23 @@ void ViewerApp::run() {
         }  // frame read scope — the worker resumes advancing here
 
         EndDrawing();
+        prof_stamp(impl_->frame_prof.present_ms);
+
+        // PV-1: the EMA rollup (the window reads these; the stamps
+        // above are the instantaneous values).
+        if (impl_->frame_prof.enabled) {
+            auto& fp = impl_->frame_prof;
+            fp.frame_ms = (GetTime() - prof_frame_t0) * 1000.0;
+            ++fp.frames;
+            constexpr double a = 0.25;
+            fp.ema_snap += a * (fp.snap_ms - fp.ema_snap);
+            fp.ema_input += a * (fp.input_ms - fp.ema_input);
+            fp.ema_focus += a * (fp.focus_ms - fp.ema_focus);
+            fp.ema_canvas += a * (fp.canvas_ms - fp.ema_canvas);
+            fp.ema_imgui += a * (fp.imgui_ms - fp.ema_imgui);
+            fp.ema_present += a * (fp.present_ms - fp.ema_present);
+            fp.ema_frame += a * (fp.frame_ms - fp.ema_frame);
+        }
 
         // V-THREAD: the Stop button's deferred stop — processed OUTSIDE
         // the frame lock (the join needs the worker able to finish its
@@ -833,6 +899,52 @@ std::string ViewerApp::Impl::unit_type_name(std::uint32_t unit_vu) const {
     return f4::world::resolve_entity_type_name(
         theater_tables, class_table,
         static_cast<std::uint16_t>(uc->class_table_index));
+}
+
+const std::string& ViewerApp::Impl::squadron_airframe_name(
+    std::uint32_t squadron_vu) {
+    // Memoized: the ATO tables ask per intent row, per frame — the map
+    // turns that into one resolution per distinct squadron per session.
+    // A stored "" (unresolvable squadron) is a hit, not a re-resolve.
+    const auto it = squadron_type_names.find(squadron_vu);
+    if (it != squadron_type_names.end()) return it->second;
+    auto resolved = unit_type_name(squadron_vu);
+    return squadron_type_names.emplace(squadron_vu, std::move(resolved))
+        .first->second;
+}
+
+const std::string& ViewerApp::Impl::flight_airframe_name(
+    std::uint32_t flight_vu) {
+    // PV-2c: the flights table's per-row type cell, the ATO table's
+    // squadron memo applied to its sibling — one resolution per
+    // distinct flight per session instead of per visible row per
+    // frame (the chain is a map find + entity handle + component get
+    // + class-table walk).
+    const auto it = flight_type_names.find(flight_vu);
+    if (it != flight_type_names.end()) return it->second;
+    auto resolved = unit_type_name(flight_vu);
+    return flight_type_names.emplace(flight_vu, std::move(resolved))
+        .first->second;
+}
+
+void ViewerApp::Impl::build_objective_xy_cache_() const {
+    // PV-5: capture (id, x, y) once — objectives never move (the ground
+    // war flips ownership, not positions), and the 3D panels ask the
+    // radius query per frame around a moving aircraft. const + mutable
+    // so the lazy build works from the const query path.
+    objective_xy_cache.clear();
+    objective_xy_cache.reserve(objectives().size());
+    for (const auto& eid : objectives()) {
+        auto h = handle(eid);
+        auto* tf = h.get<f4::entities::TransformComponent>();
+        if (!tf) continue;
+        ObjectiveXY o;
+        o.eid = eid;
+        o.x = static_cast<float>(tf->position.x);
+        o.y = static_cast<float>(tf->position.y);
+        objective_xy_cache.push_back(o);
+    }
+    objective_xy_cache_valid = true;
 }
 
 bool ViewerApp::Impl::export_symbols(const std::filesystem::path& dir,

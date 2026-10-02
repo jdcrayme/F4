@@ -21,15 +21,21 @@ using namespace f4::world;
 
 namespace {
 
-// A minimal falcon4.ct.json (the ct2json vocabulary) with four entries:
+// A minimal falcon4.ct.json (the ct2json vocabulary) with six entries
+// (DENSE: entity_type = 100 + position, the runtime loader's indexing):
 //   100 — a UNIT row (DTYPE_UNIT → UCD; the countermeasure resolver
 //         declines, the NAME resolver falls back to the unit-class name)
 //   101 — a VEHICLE row (DTYPE_VEHICLE → VCD row 1)
 //   102 — a VEHICLE row (DTYPE_VEHICLE → VCD row 2, no dispensers)
 //   103 — a UNIT row (DTYPE_UNIT → UCD row 2, vehicle_type[0] = 1)
+//   104 — a UNIT row (DTYPE_UNIT → UCD row 3, vehicle_type[0] = 5 — the
+//         CLASS-TABLE chain pin: CT 105 → VCD row 1 "F-16X", while a bare
+//         positional VCD read of 5 falls off the 3-row table)
+//   105 — a VEHICLE row (DTYPE_VEHICLE → VCD row 1, reached ONLY through
+//         the UCD vehicle_type link — position ≠ entity_type − 100 here)
 const char* kClassTableJson =
     "{\n"
-    "  \"count\": 4,\n"
+    "  \"count\": 6,\n"
     "  \"entries\": [\n"
     "    {\"entity_type\": 100, \"domain\": 2, \"cls\": 4, \"type\": 0,"
     " \"stype\": 3, \"vis_type\": [0, 0, 0, 0, 0, 0, 0],"
@@ -42,7 +48,13 @@ const char* kClassTableJson =
     " \"data_type\": 5, \"data_ptr_index\": 2},\n"
     "    {\"entity_type\": 103, \"domain\": 2, \"cls\": 4, \"type\": 0,"
     " \"stype\": 3, \"vis_type\": [0, 0, 0, 0, 0, 0, 0],"
-    " \"data_type\": 4, \"data_ptr_index\": 2}\n"
+    " \"data_type\": 4, \"data_ptr_index\": 2},\n"
+    "    {\"entity_type\": 104, \"domain\": 2, \"cls\": 4, \"type\": 0,"
+    " \"stype\": 3, \"vis_type\": [0, 0, 0, 0, 0, 0, 0],"
+    " \"data_type\": 4, \"data_ptr_index\": 3},\n"
+    "    {\"entity_type\": 105, \"domain\": 2, \"cls\": 4, \"type\": 0,"
+    " \"stype\": 3, \"vis_type\": [0, 0, 0, 0, 0, 0, 0],"
+    " \"data_type\": 5, \"data_ptr_index\": 1}\n"
     "  ]\n"
     "}\n";
 
@@ -59,7 +71,7 @@ const char* kClassTableJson =
 std::string tables_json() {
     std::string s = "{\n";
     s += "  \"format\": \"f4.theater.tables/1\",\n";
-    s += "  \"counts\": {\"units\": 3, \"vehicles\": 3, \"weapons\": 3},\n";
+    s += "  \"counts\": {\"units\": 4, \"vehicles\": 3, \"weapons\": 3},\n";
 
     s += "  \"units\": [\n";
     s += "    {\"index\": 332, \"name\": \"Airlift\", \"flags\": 8,"
@@ -96,6 +108,24 @@ std::string tables_json() {
          " \"rate\": 90, \"pt_data_index\": 0,"
          " \"num_elements\": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
          " \"vehicle_type\": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"scores\": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"role\": 0,"
+         " \"hit_chance\": [0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"strength\": [0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"range\": [0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"detection\": [0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"damage_mod\": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"radar_vehicle\": 0, \"special_index\": 0, \"icon_index\": 14},\n";
+    // The CLASS-TABLE chain row: vehicle_type[0] = 5 is a CT position
+    // (entity_type 105 → VCD row 1 "F-16X"), deliberately PAST the
+    // 3-row vehicle table as a bare position — only the CT walk names
+    // this squadron's aircraft.
+    s += "    {\"index\": 419, \"name\": \"Test sqn\", \"flags\": 0,"
+         " \"movement_type\": 5, \"movement_type_name\": \"Air\","
+         " \"movement_speed\": 800, \"max_range\": 300, \"fuel\": 35,"
+         " \"rate\": 80, \"pt_data_index\": 0,"
+         " \"num_elements\": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
+         " \"vehicle_type\": [5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
          " \"scores\": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],"
          " \"role\": 0,"
          " \"hit_chance\": [0, 0, 0, 0, 0, 0, 0, 0],"
@@ -207,7 +237,7 @@ std::string tables_json() {
 
 TEST(TheaterTables, ParsesFullFieldVocabulary) {
     const auto t = TheaterTables::parse(tables_json());
-    ASSERT_EQ(t.units.size(), 3u);
+    ASSERT_EQ(t.units.size(), 4u);
     ASSERT_EQ(t.vehicles.size(), 3u);
     ASSERT_EQ(t.weapons.size(), 21u);  // positional: rows 7/8/20 named
 
@@ -354,6 +384,13 @@ TEST(TheaterTables, ResolveEntityTypeNameChain) {
     // resolves: CT 103 → UCD row 2 ("Fighter sqn") → vehicle 1 →
     // "F-16X" — the squadron displays its aircraft, not its role word.
     EXPECT_EQ(resolve_entity_type_name(t, ct, 103), "F-16X");
+
+    // The vehicle_type link is a CLASS-TABLE position, not a VCD index:
+    // CT 104 → UCD row 3 ("Test sqn") → vehicle_type[0] = 5 → CT 105 →
+    // VCD row 1 "F-16X". A bare positional VCD read of 5 falls off the
+    // 3-row table — only the CT walk names this squadron's aircraft
+    // (the real Korea tables only resolve through this chain).
+    EXPECT_EQ(resolve_entity_type_name(t, ct, 104), "F-16X");
 
     // When the unit's own first-vehicle link fails (CT 100 → UCD row 0
     // → vehicle 101, past the table) the unit-class name stands in.

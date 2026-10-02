@@ -142,6 +142,11 @@ struct IntentRow {
     bool synthetic{false};
     int route_waypoints{0};
     int flight_role{0};
+    // CAMP-DOM-4's additive tail: the flight's SCHEDULED takeoff slot
+    // (campaign-relative seconds; 0 = never slotted — the legacy
+    // ladder's intents, the save's own flights). The missions table's
+    // "T.O." column + its sort key.
+    std::int64_t takeoff{0};
 };
 
 [[nodiscard]] std::vector<IntentRow> fetch_tasking(

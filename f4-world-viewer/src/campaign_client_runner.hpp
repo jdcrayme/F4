@@ -155,11 +155,14 @@ public:
     /// aircraft the player is watching never fast-forward (the
     /// reference's freefalcon-central campaign.cpp:2394-2520 rule).
     /// The preset radio keeps the user's request; this is the clamp
-    /// under it, and it lifts the moment the bubble clears. ATOMIC-ONLY
-    /// form: the frame scope reads the engine's state under the session
-    /// lock (once per advance — the same cadence the engine recomputes
-    /// it at) and mirrors it here without re-locking (the
-    /// set_paused_flag shape).
+    /// under it, and it lifts the moment the bubble clears.
+    ///
+    /// PV-2b: the WORKER maintains this flag now — each step batch's
+    /// result carries the engine's live count (StepResult::bubble_live),
+    /// so the clamp engages per batch at the reference's own
+    /// compression-loop cadence, independent of the UI's snapshot
+    /// refresh throttle. set_bubble_action() remains for hosts that
+    /// drive the contract without stepping through this runner.
     void set_bubble_action(bool a) noexcept {
         bubble_action_.store(a, std::memory_order_relaxed);
     }
@@ -206,6 +209,25 @@ public:
         return tick_budget_.load();
     }
 
+    // --- PV-1: the worker's batch composition (F4_FRAME_PROF readout) ---
+
+    /// The LAST step batch's lock-hold time (ms) — the duty-cycle
+    /// numerator (what the sim got) against the frame period (what the
+    /// UI took).
+    [[nodiscard]] double last_hold_ms() const noexcept {
+        return last_hold_ms_.load(std::memory_order_relaxed);
+    }
+    /// EMA of the batch hold (ms) — steadier than the last sample for
+    /// the duty-cycle readout.
+    [[nodiscard]] double hold_ema_ms() const noexcept {
+        return hold_ema_ms_.load(std::memory_order_relaxed);
+    }
+    /// The LAST batch's tick count (0 = the batch fed nothing — a
+    /// paused or fully de-rated iteration).
+    [[nodiscard]] int last_batch_ticks() const noexcept {
+        return last_batch_ticks_.load(std::memory_order_relaxed);
+    }
+
     /// Counts the worker's productive step() calls (ticks > 0). The UI
     /// gates its per-frame query refresh on this — "the numbers refresh
     /// once per advance, never per draw".
@@ -230,6 +252,12 @@ private:
     std::atomic<double> effective_speed_{0.0};
     std::atomic<int> tick_budget_{4};   // adaptive: 1..batch cap
     std::atomic<std::uint64_t> step_serial_{0};
+
+    // PV-1: the worker's batch composition, mirrored for the frame
+    // profiler (relaxed — diagnostics only, no ordering deps).
+    std::atomic<double> last_hold_ms_{0.0};
+    std::atomic<double> hold_ema_ms_{0.0};
+    std::atomic<int> last_batch_ticks_{0};
 
     /// The sub-tick fraction carried batch to batch (the pacing
     /// accumulator the engine's advance() used to own).

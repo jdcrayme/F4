@@ -231,6 +231,194 @@ approach instead of zombie-cruising. The combat WVR merge exposed as a
 real pre-existing defect (a ~30k-fpm dive meets the deck mid-fight —
 T5 evidence). Docs/CAMPAIGN_REPAIR_PLAN.md §T1 carries the as-built.
 
+## VIEWER-PERF-1 — the viewer-perf tranche: PV-1/2/4/5 + UI honesty (the analysis's fix path, first round)
+
+The PV-1..PV-5 ladder from VIEWER-PERF-ANALYSIS-1, implemented except the
+one structural item (PV-3, the lock diet — deliberately deferred until the
+new profiler measures the duty cycle; see the doc's updated §7). Every
+change is engine-fidelity-neutral: the war's outcomes, the golden
+identities, and the AGG-3 authenticity rule all stand.
+
+- **PV-1, the frame profiler** (`F4_FRAME_PROF=1`): run() stamps the frame
+  phases (snapshot / input / focus / canvas / imgui / present) as EMAs and
+  a new Frame Profiler window prints them beside the worker's batch
+  composition (hold ms, ticks, budget, delivery scale, effective speed)
+  and the duty cycle. Zero cost when off (one env probe, one branch per
+  phase). The measurement surface that decides whether PV-3 or the churn
+  follow-ups come next — the FID-OPT discipline, applied to the frame.
+- **PV-2a, the defended index** (ground_war): objective_defended is now a
+  binary search over a sorted (vu, index) vector built once in the
+  constructor (the unit_vus_ pattern, sorted). The canvas's objectives
+  pass asked once per drawn objective per frame — ~3.5M iterations on the
+  default Korea view → ~12 comparisons per query. 28/28 ground-war pins
+  green under the gtest shim.
+- **PV-2b, the refresh throttle** (campaign_session_view): while stepping,
+  the worker bumps step_serial every batch (~60x/s at speed) and the old
+  per-serial gate turned each bump into a full JSON round trip (4-5
+  encode/parse queries, threat grid included, under the frame lock). The
+  fetch now fires at most every 100 ms while the serial moves; command
+  invalidations (the D/R buttons) bypass the throttle; the event drain
+  stays per-frame. The supply cut-off cache rides the same cadence.
+- **PV-2b companion, the AGG-3 per-batch report**: StepResult gains
+  `bubble_live` — EngineSessionHost::step() fills it from the engine
+  (bubble_live_flights(), the O(deaggregated) walk) and the runner clamps
+  its feed off EACH STEP RESULT instead of the UI's snapshot mirror (the
+  mirror is gone). The authenticity hold now engages at the reference's
+  own compression-loop cadence, independent of the query throttle — and
+  the step-result contract is pinned by the updated runner tests (the
+  mock's step carries a bubble_live knob; 11/11).
+- **PV-2b companion, the threat cache** (host): the threat query's
+  full-grid serialize (~2x29k ints on Korea) is cached after the first
+  ask — the route builder's ThreatMap is immutable for the session's
+  lifetime, so every re-encode produced identical bytes.
+- **PV-4a, lazy stats** (campaign_session): advance() marks a dirty flag
+  instead of paying the full stats walk per 1-2-tick step batch (the
+  viewer's worker fed ~60 batches/s; each re-walked the intents, the
+  ground books, and the aircraft roster twice for a reader that came
+  once per frame). stats() refreshes on first read (mutable + const
+  refresh — every existing reader, test, and the war harness unchanged);
+  the paused-advance path and every command mutation path mark too.
+- **PV-4b, the Tier-B ceiling**: CampaignSessionOptions.max_live_flights
+  (0 = uncapped, the golden identity; the viewer arms the QC's
+  --accel-max-live default 32). While at/above the ceiling the
+  ATTENTION-driven (Bubble) tier trigger defers — the war's own windows
+  (ops/TOT/recovery) and the Combat/Force triggers are never capped:
+  they fly outcomes, only display fidelity yields. Bounds the
+  deep-zoom + combat-engagement spiral the certificates never ran.
+- **PV-4d, the re-point rate limit**: a selection-anchored bubble
+  re-points only after the anchor crosses HALF the bubble radius (never
+  less than the old vis/16) — the deagg SET only changes when something
+  crosses the bubble's edge, so re-pointing while the anchor drifts
+  inside its own ball was pure churn (each re-point runs the bubble walk
+  + tier evaluation synchronously under the frame lock and buys
+  structural-rebuild debt on the worker's next ticks).
+- **PV-5, the 3D diet**: the chase view's per-objective airfield geometry
+  is cached per world (build_airfield_geometry_3d is a vertex builder
+  that re-ran for EVERY nearby objective EVERY frame; the layouts are
+  static, so the build runs once per objective and the draw toggles
+  still apply per frame), and objectives_within_radius walks a flat
+  (id, x, y) position index captured once per world/session (objectives
+  never move) instead of an entity handle + TransformComponent get per
+  objective per frame.
+- **PV-2c, the quick wins**: the flights table's type cell is memoized
+  per flight (flight_airframe_name — the ATO table's squadron memo
+  applied to its sibling; the resolve chain ran per visible row per
+  frame); the Event Log renders through a filtered row index +
+  ImGuiListClipper (the 2,000-row cap now draws only the visible slice;
+  the filtered-index rebuild is keyed on filter text + row count); the
+  canvas's ATO-mark set is cached per snapshot identity (ato_targets_set)
+  instead of rebuilt from the whole tasking vector every frame; the
+  objectives pass reads the vu_id_num property-bag key once per
+  objective (it paid the string-keyed lookup twice).
+- **UI honesty**: the speed readout distinguishes the AGG-3 hold ("held
+  at 1x — action in bubble", the reference's own DoCompressionLoop rule)
+  from CPU dilation — and names BOTH when even the held 1x feed is
+  CPU-starved. A number under the preset no longer reads as a
+  performance bug when it is the authenticity rule working.
+- Verified: every touched TU -fsyntax-only clean against the pinned
+  headers; 87 behavior checks green across the four directly-affected
+  suites under the gtest shim (ground-war 28, runner 11, protocol 34,
+  queries 14); the simulation session/host/fidelity/commands/airwar-QC/
+  FM-divergence tests and the QC tool all compile against the new APIs.
+  NOT yet done (the next rounds, ranked by the profiler once it runs on
+  target hardware): PV-3 the lock diet (snapshot then release), the
+  minimap/parked-layer walks, threat-overlay texture batching, chase-view
+  cadence.
+- Doc: `Docs/VIEWER_PERFORMANCE_ANALYSIS.md` (§7 updated — what landed,
+  what deliberately didn't).
+
+## VIEWER-PERF-ANALYSIS-1 — why the world-viewer needs so much more CPU than FreeFalcon
+
+The diagnosis doc for the viewer's time-acceleration limits (campaigns
+CPU-limited <10x; viewing a specific aircraft occasionally <1x). Analysis
+only — fixes scoped into the PV-1..PV-5 tranches, not implemented.
+
+- **The headline**: the engine is no longer the cost (116x-1,676x headless
+  on the FID-OPT certificates, 0.157 ms/tick) — the viewer wraps it in
+  five multipliers FreeFalcon never paid: the whole-frame session lock
+  (the worker's only window is EndDrawing's pace wait; every draw
+  millisecond divides the sim's duty cycle), the per-frame contract-plane
+  JSON round trip (the step_serial gate is a no-op while stepping — 4-5
+  encode/parse queries per frame, threat grid included), the map's O(N^2)
+  objectives pass (objective_defended is a linear scan per objective per
+  frame — ~3.5M iterations), the Focus churn (each camera/selection
+  re-point runs refresh_bubble + evaluate_tiers_ + refresh_stats_
+  synchronously inside the frame lock, with ms-class materializations and
+  structural-rebuild debt on the worker's next ticks), and the 3D chase
+  view's per-frame scenery rebuild (objectives_within_radius +
+  build_airfield_geometry_3d per frame, terrain chunk rebuilds per 20,000
+  ft of drift — all under the lock).
+- **The <1x aircraft case decomposed**: AGG-3 holds the feed at 1x while
+  the viewed flight is deaggregated (the DoCompressionLoop authenticity
+  rule, by design — the UI should label it distinctly from CPU dilation);
+  the sub-1x residual is the churn spiral + unbounded deagg depth (the
+  viewer has no --accel-max-live ceiling) starving even the 1x feed.
+- **The cert-unpaid asymmetry**: viewer sessions run the ground war (the
+  116x certificate's run had it off), pay refresh_stats_ per 1-2-tick
+  step() (the QC drained 240-tick advance batches), and carry
+  near_initial_wave's front-loaded deagg windows uncapped.
+- **The fix path**: PV-1 the env-gated frame profiler first (the FID-OPT
+  lesson — every prior "obvious" cost center re-attributed when
+  measured), PV-2 the no-behavior-change quick wins (the defended index,
+  the refresh throttle, the memoizations), PV-3 the lock diet (snapshot
+  then release — draw from the copy), PV-4 the churn policy (re-point
+  rate limits, tier evaluation at the advance boundary, the max-live
+  ceiling), PV-5 the 3D diet (epoch-keyed geometry caches).
+- Doc: `Docs/VIEWER_PERFORMANCE_ANALYSIS.md`; four-way code audit with the
+  load-bearing claims spot-verified in source.
+
+## ATO-SORT-1 — the ATO windows sort: squadron, airframe, T.O. + the class-table name chain
+
+The campaign session's generated-missions table (the live war's ATO) gains
+the reading columns and the sort; the "ATO / Tasking" QC window completes
+its own. Plus the fix both ride on: the unit→airframe name chain was
+resolving through the WRONG link on real theaters.
+
+- **The name-chain fix** (`f4-world/src/theater_tables.cpp`): the UCD's
+  `vehicle_type[]` is a CLASS-TABLE position (entity_type = value + 100,
+  the converter's own field contract), not a VCD position — the resolver
+  now walks CT row → DTYPE_VEHICLE → VCD row. On the real Korea tables
+  the old positional read resolved "Airlift" squadrons to "Leopard 2"
+  tanks and fell back to role words for every aircraft row (the test
+  fixture's rows happened to sit at their CT data_ptrs, hiding it); the
+  fixed chain names F-16C / MiG-21 / F-5E / Mi-24 squadrons correctly
+  (verified against the committed Data/ exports end to end). The flights
+  table's and inspector's existing airframe cells inherit the fix.
+  Pinned: the fixture gained a row whose vehicle link resolves ONLY
+  through the CT walk (Test sqn → CT 105 → VCD 1, a bare positional read
+  falls off the table).
+- **The session ATO table** (campaign_session_view.cpp): three new
+  columns — squadron (role word + VU; the campaign carries no
+  squadron-name table yet, the identity pair is the honest unique
+  display), airframe ("F-16C", the squadron's class-table row,
+  memoized per squadron on Impl — one resolution per distinct squadron
+  per session, cleared at adopt), and T.O. (the DOM-4 scheduled takeoff
+  slot in absolute campaign time, now parsed off the tasking query's
+  additive tail; "-" when never slotted) — and EVERY column is sortable:
+  the header click cycles ascending / descending / the engine's append
+  order. The sort is an index permutation over the SHARED snapshot (the
+  canvas's ATO marks read the same vector — nothing mutates it),
+  re-derived when the spec moves, when new intents arrive, or when the
+  snapshot refreshes (data pointer + size + refresh serial).
+- **The QC ATO window** (campaign_qc_view.cpp): the airframe column
+  joins squadron/target (both now cached strings in the row build — the
+  sort keys and the cells read the cache, never the component graph),
+  and the previously unsorted columns (pkg, target, squadron, airframe)
+  sort too. The armed spec now SURVIVES filter changes and world
+  mutations — the rebuild re-applies it instead of silently resetting
+  to TOT order while the header still shows its arrow.
+- **Sort discipline** (both windows): descending is the strict reverse
+  of ascending (`less(y,x)`, not `!less(x,y)` — the latter violates
+  strict weak ordering on equal keys), stable_sort keeps the engine's
+  order within equal keys in BOTH directions, and T.O. sorts
+  unscheduled (0) rows to the END ascending ("earliest launch first").
+- **Verification**: the f4-world theater-tables suite (8 tests incl.
+  the new chain pin) green; a standalone harness over the REAL
+  Data/Classes/falcon4.ct.json + Data/Theater/korea/tables.json
+  resolves all 14 flight/squadron type pairs + the vehicle branch
+  correctly; every f4-world-viewer TU passes a full syntax check
+  against the pinned imgui v1.91.5 / raylib 5.0 headers.
+
 ## Step 15 — the specialist support brains (FAC + the station brains)
 
 AI_IMPLEMENTATION_PLAN.md §16's Step 15, landed as-built: the Part-III

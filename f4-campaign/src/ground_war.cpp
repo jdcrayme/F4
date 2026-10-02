@@ -324,6 +324,22 @@ GroundWar::GroundWar(const f4::world::ICampaignSource& camp,
     for (const auto& u : units_) {
         if (u.mobile && !u.destroyed) ++stats_.battalions_mobile;
     }
+
+    // PV-2a: the sorted (vu, index) key behind objective_defended()'s
+    // O(log N) lookup — built once here (the mirror is immutable in
+    // identity; only owner/supply rows change live, and the index maps
+    // identity, not state).
+    objective_vu_index_.clear();
+    objective_vu_index_.reserve(objectives_.size());
+    for (std::size_t i = 0; i < objectives_.size(); ++i) {
+        objective_vu_index_.emplace_back(objectives_[i].vu,
+                                         static_cast<std::uint32_t>(i));
+    }
+    std::sort(objective_vu_index_.begin(), objective_vu_index_.end(),
+              [](const std::pair<std::uint32_t, std::uint32_t>& a,
+                 const std::pair<std::uint32_t, std::uint32_t>& b) {
+                  return a.first < b.first;
+              });
 }
 
 // ============================================================================

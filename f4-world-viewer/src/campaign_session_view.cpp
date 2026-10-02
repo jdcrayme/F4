@@ -27,11 +27,15 @@
 //         losses, reinforcement fires/deliveries, live aircraft +
 //         airborne, sim time. The numbers refresh once per advance(),
 //         never per draw.
-//       - the generated-missions table: one row per ladder intent —
-//         mission, team, TOT (relative + absolute), target (click to
-//         select + pan), route waypoints, aircraft count. Rows with
-//         routes are SYNTHETIC (generation-to-spawn); clicking selects
-//         the flight's live entity when it materialized, else the
+//       - the generated-missions table (the ATO): one row per ladder
+//         intent — mission + package role, squadron (role + VU),
+//         airframe (the class-table chain, "F-16C"), team, the
+//         scheduled takeoff (T.O.), TOT (relative + absolute), target
+//         (click to select + pan), route waypoints, aircraft count —
+//         every column sortable (the header click cycles
+//         ascending / descending / engine order). Rows with routes are
+//         SYNTHETIC (generation-to-spawn); clicking selects the
+//         flight's live entity when it materialized, else the
 //         target objective.
 //       - Write Result JSON (the C1 ledger artifact, byte-stable, via
 //         the books query) and Write Back (the contract's runtime-safe
@@ -58,6 +62,8 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <limits>
+#include <tuple>
 #include <utility>
 
 namespace f4::viewer {
@@ -220,6 +226,17 @@ void ViewerApp::start_campaign_session() {
     opts.fidelity_policy = impl_->campaign_tiered
         ? f4::simulation::FidelityPolicy::Tiered
         : f4::simulation::FidelityPolicy::FullFidelity;
+    // PV-4b: the Tier-B ceiling for the attention-driven (Bubble)
+    // deagg trigger — the QC's --accel-max-live default. The war's own
+    // windows (ops/TOT/recovery) and the combat/force triggers are
+    // never capped (they fly outcomes); this bounds the deep-zoom +
+    // combat-engagement spiral the certificates never ran: without a
+    // ceiling, a followed jet's bubble + FID-5's combat deagg can
+    // materialize the whole engagement's full-FM roster, and every one
+    // of them eats the frame lock's budget and the worker's ticks.
+    if (impl_->campaign_tiered) {
+        opts.max_live_flights = 32;
+    }
     // C4: the ATM pipeline (FindBestAir replaces the C3 fallback
     // bridge this line used to arm).
 
@@ -302,6 +319,23 @@ bool ViewerApp::adopt_session_start() {
         impl_->session_snap = SessionSnapshot{};
         impl_->session_snap_serial = 0;
         impl_->session_snap_valid = false;
+        impl_->session_snap_force = false;
+        impl_->session_snap_last_fetch_s = -1.0e9;
+        // The ATO tables' squadron→airframe memo keys on the SESSION's
+        // unit VUs — a fresh war (same save or not) re-keys them.
+        impl_->squadron_type_names.clear();
+        // PV-2c: the flights table's flight→airframe memo — same
+        // re-key rule, same adopt point.
+        impl_->flight_type_names.clear();
+        // PV-2c/PV-5: the snapshot-derived and world-static caches —
+        // the new war re-keys VUs and may load over a different world.
+        impl_->ato_targets_cache.clear();
+        impl_->ato_targets_data = nullptr;
+        impl_->ato_targets_n = 0;
+        impl_->ato_targets_serial = ~0ull;
+        impl_->objective_xy_cache.clear();
+        impl_->objective_xy_cache_valid = false;
+        impl_->airfield_geo_3d_cache.clear();
         // A fresh war = a fresh log (the old rows belong to the last
         // session; they're gone the moment a new one is adopted).
         impl_->event_log.clear();
@@ -376,6 +410,19 @@ void ViewerApp::request_exit() noexcept {
 // — one query round per advance (or after a command invalidates), never
 // per draw. Runs under the frame session lock; the queries are
 // session-safe there.
+//
+// PV-2b: the THROTTLE — while stepping, the worker bumps the step
+// serial every batch (~60×/s at speed), and the old per-serial gate
+// turned each bump into a full JSON round trip (4–5 queries, thousands
+// of small allocations, all under the frame lock). The fetch now fires
+// at most every kSnapRefreshMinSec while the serial moves: the tables
+// re-derive from the cached rows either way, and 100 ms of staleness
+// is invisible against a 30-minute tasking cycle. Forced refreshes
+// (a command invalidated the snapshot — the D/R buttons) bypass the
+// throttle. The AGG-3 mirror is GONE from here entirely: the runner
+// reads the clamp state off each step's result now (per batch, at the
+// reference's own compression-loop cadence — see
+// CampaignClientRunner::worker_loop_).
 void ViewerApp::Impl::refresh_session_snapshot() {
     if (!session) return;
 
@@ -398,14 +445,25 @@ void ViewerApp::Impl::refresh_session_snapshot() {
         while (session_events.size() > 100) session_events.pop_front();
     }
 
-    // The cut-off cache: recomputed once per advance while the supply
-    // overlay is on (a battalion beyond the line-of-supply radius from
-    // every own-held objective draws nothing). O(battalions × own
-    // objectives) — a few hundred × a few hundred worst case, once per
-    // advance, not per draw.
+    // PV-2b: the throttled fetch gate. `stale` = the worker advanced
+    // (or the snapshot never ran); the fetch fires when stale AND
+    // (forced | first | the min-interval elapsed).
     const std::uint64_t serial =
         session_runner ? session_runner->step_serial() : 0;
-    if (show_supply && serial != cutoff_stamp) {
+    const bool stale =
+        !session_snap_valid || serial != session_snap_serial;
+    constexpr double kSnapRefreshMinSec = 0.100;
+    const bool gate_open =
+        stale &&
+        (session_snap_force || !session_snap_valid ||
+         GetTime() - session_snap_last_fetch_s >= kSnapRefreshMinSec);
+
+    // The cut-off cache rides the SAME cadence (it paints battalion
+    // supply rings — a display overlay with the same staleness budget
+    // as the tables; recomputed once per FETCH, not once per serial).
+    // O(battalions × own objectives) — a few hundred × a few hundred
+    // worst case.
+    if (gate_open && show_supply && serial != cutoff_stamp) {
         cutoff_stamp = serial;
         cutoff_battalions.clear();
         const auto* gw = session->engine().ground_war();
@@ -436,18 +494,12 @@ void ViewerApp::Impl::refresh_session_snapshot() {
         }
     }
 
-    if (session_snap_valid && serial == session_snap_serial) return;
+    if (!gate_open) return;
     session_snap = fetch_snapshot(*session, show_threat_overlay);
     session_snap_serial = serial;
     session_snap_valid = true;
-    // AGG-3 — mirror the engine's DoCompressionLoop state into the
-    // runner (atomic-only, lock-free). The snapshot refresh runs under
-    // the frame lock once per advance — exactly the cadence the engine
-    // recomputes bubble_live at; the worker clamps its feed to 1× while
-    // the flag holds (the reference's authenticity rule).
-    if (session_runner) {
-        session_runner->set_bubble_action(session_snap.stats.bubble_live > 0);
-    }
+    session_snap_force = false;
+    session_snap_last_fetch_s = GetTime();
 }
 
 std::string ViewerApp::session_exit_summary() const {
@@ -758,6 +810,12 @@ void ViewerApp::draw_campaign_session_view() {
     // preset (Debug build, huge world) the excess time is dropped and
     // every unsustainable preset moves the clock at the same rate —
     // this readout is what makes the speed control's effect visible.
+    // PV (UI honesty): the AGG-3 hold is NOT CPU dilation — while
+    // action is live in the observer bubble the feed is held at 1× by
+    // DESIGN (the reference's own DoCompressionLoop rule; a number
+    // under the preset used to read as a performance bug). The readout
+    // names the hold, and only reports CPU starvation when even the
+    // held 1× feed can't keep up.
     {
         const int idx = std::clamp(impl_->campaign_speed_index, 0,
                                    kSessionSpeedCount - 1);
@@ -767,10 +825,25 @@ void ViewerApp::draw_campaign_session_view() {
         const double effective = impl_->session_runner
             ? impl_->session_runner->effective_speed()
             : 0.0;
-        char sbuf[96];
+        const bool held_at_1x =
+            impl_->session_runner &&
+            impl_->session_runner->bubble_action() && requested > 1.0;
+        char sbuf[128];
         if (session_paused) {
             std::snprintf(sbuf, sizeof(sbuf), "speed: %gx (paused)",
                           requested);
+        } else if (held_at_1x) {
+            if (effective < 0.9) {
+                // Even the held 1× feed is CPU-starved — BOTH facts.
+                std::snprintf(sbuf, sizeof(sbuf),
+                              "speed: %gx (held at 1x — action in bubble; "
+                              "effective %.1fx — CPU-limited)",
+                              requested, effective);
+            } else {
+                std::snprintf(sbuf, sizeof(sbuf),
+                              "speed: %gx (held at 1x — action in bubble)",
+                              requested);
+            }
         } else if (effective < requested * 0.9) {
             std::snprintf(sbuf, sizeof(sbuf),
                           "speed: %gx (effective %.1fx — CPU-limited)",
@@ -948,9 +1021,12 @@ void ViewerApp::draw_campaign_session_view() {
                     {
                         // The aircraft type ("F-16C") — the flight's
                         // class-table row through the UCD/VCD tables;
-                        // blank when the tables aren't loaded.
-                        const std::string tname =
-                            impl_->unit_type_name(t.vu);
+                        // blank when the tables aren't loaded. PV-2c:
+                        // memoized per flight (flight_airframe_name) —
+                        // the resolve chain ran per visible row per
+                        // frame before.
+                        const std::string& tname =
+                            impl_->flight_airframe_name(t.vu);
                         if (!tname.empty()) {
                             ImGui::TextUnformatted(tname.c_str());
                         }
@@ -1068,35 +1144,153 @@ void ViewerApp::draw_campaign_session_view() {
         ImGui::Separator();
     }
 
-    // --- Generated missions table ---------------------------------------
+    // --- Generated missions table (the ATO) ------------------------------
+    //
+    // The war's tasking list, one row per filed flight: mission + package
+    // role, the SQUADRON (role word + VU — the campaign's units carry no
+    // squadron-name table yet, so the identity pair is the honest unique
+    // display), the AIRFRAME ("F-16C" — the squadron's class-table row
+    // through the converted UCD/VCD tables, memoized per squadron), team,
+    // the SCHEDULED takeoff (T.O., the DOM-4 slot), TOT, target (click to
+    // select + pan), route legs, aircraft count. Every column is SORTABLE
+    // (click the header to sort ascending, again to invert, a third time
+    // to return to the engine's append order — oldest first, newest
+    // last). The sort is an index permutation over the SHARED snapshot
+    // (the canvas's ATO marks read the same vector); it re-applies when
+    // the spec moves, when new intents arrive, or when the snapshot
+    // refreshes.
     const auto& intents = impl_->session_snap.tasking;
     ImGui::TextUnformatted("Generated missions (ATM packages):");
-    if (ImGui::BeginTable("session_missions", 7, table_flags,
+    if (ImGui::BeginTable("session_missions", 10,
+                          table_flags | ImGuiTableFlags_Sortable,
                           ImVec2(0.0f, 0.0f))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("mission", ImGuiTableColumnFlags_WidthFixed,
                                 130.0f, 0);
         ImGui::TableSetupColumn("role", ImGuiTableColumnFlags_WidthFixed,
-                                54.0f, 6);
+                                54.0f, 1);
+        ImGui::TableSetupColumn("squadron", ImGuiTableColumnFlags_WidthFixed,
+                                118.0f, 2);
+        ImGui::TableSetupColumn("airframe", ImGuiTableColumnFlags_WidthFixed,
+                                76.0f, 3);
         ImGui::TableSetupColumn("team", ImGuiTableColumnFlags_WidthFixed,
-                                56.0f, 1);
+                                56.0f, 4);
+        ImGui::TableSetupColumn("T.O.", ImGuiTableColumnFlags_WidthFixed,
+                                96.0f, 5);
         ImGui::TableSetupColumn("TOT", ImGuiTableColumnFlags_WidthFixed,
-                                100.0f, 2);
+                                100.0f, 6);
         ImGui::TableSetupColumn("target", ImGuiTableColumnFlags_WidthStretch,
-                                130.0f, 3);
+                                130.0f, 7);
         ImGui::TableSetupColumn("wps", ImGuiTableColumnFlags_WidthFixed,
-                                32.0f, 4);
+                                32.0f, 8);
         ImGui::TableSetupColumn("ac", ImGuiTableColumnFlags_WidthFixed,
-                                32.0f, 5);
+                                32.0f, 9);
         ImGui::TableHeadersRow();
 
-        // Newest last; clipper for the long runs.
+        // --- The sort: an index permutation ------------------------------
+        // (Function-local statics, the QC view's ATO-table discipline.
+        // The key is the spec + the snapshot's identity: data pointer,
+        // size, and refresh serial — a snapshot refresh replaces the
+        // vector wholesale, a growing war appends, and either re-derives
+        // the order under the still-armed spec.)
+        static std::vector<std::uint32_t> order;
+        static const f4::viewer::IntentRow* cached_data = nullptr;
+        static std::size_t cached_n = 0;
+        static std::uint64_t cached_serial = ~0ull;
+        static bool has_spec = false;
+        static ImGuiTableColumnSortSpecs applied{};
+
+        bool spec_moved = false;
+        if (ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs()) {
+            if (specs->SpecsCount > 0) {
+                const auto& s = specs->Specs[0];
+                if (!has_spec || s.ColumnUserID != applied.ColumnUserID ||
+                    s.SortDirection != applied.SortDirection) {
+                    has_spec = true;
+                    applied = s;
+                    spec_moved = true;
+                }
+            } else if (has_spec) {
+                has_spec = false;  // third click: back to append order
+                spec_moved = true;
+            }
+            if (specs->SpecsDirty) specs->SpecsDirty = false;
+        }
+        if (spec_moved || cached_data != intents.data() ||
+            cached_n != intents.size() ||
+            cached_serial != impl_->session_snap_serial) {
+            order.resize(intents.size());
+            for (std::size_t k = 0; k < intents.size(); ++k) {
+                order[k] = static_cast<std::uint32_t>(k);
+            }
+            if (has_spec) {
+                const auto col =
+                    static_cast<ImGuiID>(applied.ColumnUserID);
+                const bool asc =
+                    applied.SortDirection == ImGuiSortDirection_Ascending;
+                // T.O.: unscheduled (0) sinks in ascending order — the
+                // planner's read is "earliest launch first".
+                const auto to_key = [](const f4::viewer::IntentRow& r) {
+                    return r.takeoff != 0
+                               ? r.takeoff
+                               : std::numeric_limits<std::int64_t>::max();
+                };
+                // Ascending sorts by less(x,y); descending by less(y,x)
+                // — the strict reverse, so equal keys keep the engine's
+                // order under stable_sort in BOTH directions.
+                const auto less = [&](const f4::viewer::IntentRow& x,
+                                      const f4::viewer::IntentRow& y) {
+                    switch (col) {
+                        case 0:
+                            return std::tie(x.mission_name, x.mission_byte) <
+                                   std::tie(y.mission_name, y.mission_byte);
+                        case 1: return x.flight_role < y.flight_role;
+                        case 2:
+                            return std::tie(x.squadron_name,
+                                            x.squadron_id) <
+                                   std::tie(y.squadron_name, y.squadron_id);
+                        case 3:
+                            return impl_->squadron_airframe_name(
+                                       x.squadron_id) <
+                                   impl_->squadron_airframe_name(
+                                       y.squadron_id);
+                        case 4: return x.team < y.team;
+                        case 5: return to_key(x) < to_key(y);
+                        case 6:
+                            return x.time_on_target < y.time_on_target;
+                        case 7:
+                            return x.target_objective_id <
+                                   y.target_objective_id;
+                        case 8:
+                            return x.route_waypoints < y.route_waypoints;
+                        case 9:
+                            return x.aircraft_count < y.aircraft_count;
+                        default: return false;
+                    }
+                };
+                std::stable_sort(order.begin(), order.end(),
+                                 [&](std::uint32_t a, std::uint32_t b) {
+                                     const auto& x =
+                                         intents[static_cast<std::size_t>(a)];
+                                     const auto& y =
+                                         intents[static_cast<std::size_t>(b)];
+                                     return asc ? less(x, y) : less(y, x);
+                                 });
+            }
+            cached_data = intents.data();
+            cached_n = intents.size();
+            cached_serial = impl_->session_snap_serial;
+        }
+
+        // Newest last (absent a sort); clipper for the long runs.
         ImGuiListClipper clipper;
         clipper.Begin(static_cast<int>(intents.size()));
         while (clipper.Step()) {
             for (int i = clipper.DisplayStart; i < clipper.DisplayEnd;
                  ++i) {
-                const auto& in = intents[static_cast<std::size_t>(i)];
+                const auto& in =
+                    intents[order[static_cast<std::size_t>(i)]];
+                ImGui::PushID(i);
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(in.mission_name.c_str());
@@ -1115,9 +1309,61 @@ void ViewerApp::draw_campaign_session_view() {
                         break;
                 }
                 ImGui::TableNextColumn();
+                {
+                    // The squadron: role word + VU. The campaign's units
+                    // carry no squadron-name table yet (the UCD names are
+                    // role words) — the identity pair is the honest
+                    // unique display, and it groups per squadron.
+                    if (in.squadron_id != 0) {
+                        char sbuf[96];
+                        if (!in.squadron_name.empty()) {
+                            std::snprintf(sbuf, sizeof(sbuf), "%s %u",
+                                          in.squadron_name.c_str(),
+                                          in.squadron_id);
+                        } else {
+                            std::snprintf(sbuf, sizeof(sbuf), "#%u",
+                                          in.squadron_id);
+                        }
+                        ImGui::TextUnformatted(sbuf);
+                    } else {
+                        ImGui::TextDisabled("-");
+                    }
+                }
+                ImGui::TableNextColumn();
+                {
+                    // The airframe ("F-16C"): the squadron's class-table
+                    // row through the converted UCD/VCD tables
+                    // (memoized per squadron). "-" when the tables
+                    // aren't loaded or the chain doesn't resolve.
+                    const std::string& af =
+                        impl_->squadron_airframe_name(in.squadron_id);
+                    if (!af.empty()) {
+                        ImGui::TextUnformatted(af.c_str());
+                    } else {
+                        ImGui::TextDisabled("-");
+                    }
+                }
+                ImGui::TableNextColumn();
                 ImGui::TextUnformatted(
                     in.team_name.empty() ? "(?)"
                                          : in.team_name.c_str());
+                ImGui::TableNextColumn();
+                {
+                    // The SCHEDULED takeoff (DOM-4's slot) in absolute
+                    // campaign time (the save's epoch + the relative
+                    // slot, the TOT cell's own formula); "-" when the
+                    // flight never slotted (the save's own flights, the
+                    // legacy ladder's intents).
+                    if (in.takeoff != 0) {
+                        char tbuf[24];
+                        format_abs_campaign_time(
+                            impl_->session_epoch_s + in.takeoff,
+                            tbuf, sizeof(tbuf));
+                        ImGui::TextUnformatted(tbuf);
+                    } else {
+                        ImGui::TextDisabled("-");
+                    }
+                }
                 ImGui::TableNextColumn();
                 {
                     // TOT in ABSOLUTE campaign time (the save's epoch —
@@ -1174,6 +1420,7 @@ void ViewerApp::draw_campaign_session_view() {
                 ImGui::Text("%d", in.route_waypoints);
                 ImGui::TableNextColumn();
                 ImGui::Text("%d", in.aircraft_count);
+                ImGui::PopID();
             }
         }
         ImGui::EndTable();
@@ -1298,30 +1545,61 @@ void ViewerApp::draw_event_log_view() {
 
     const bool filtered = impl_->event_log_filter[0] != '\0';
     char tbuf[24];
-    ImGui::BeginChild("event_log_rows", ImVec2(0, 0));
-    for (const auto& row : impl_->event_log) {
-        if (filtered &&
-            !event_log_matches(impl_->event_log_filter, row.label)) {
-            continue;
-        }
-        format_event_log_time(row.abs_t, tbuf, sizeof(tbuf));
 
-        // The owning team's color dot — the map palette, one axis with
-        // the canvas; teamless families (weather, verdict, cycles) draw
-        // no dot.
-        if (row.team != 0xFF) {
-            const auto c = color_for_owner(row.team);
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            const ImVec2 p = ImGui::GetCursorScreenPos();
-            const float row_h = ImGui::GetTextLineHeight();
-            dl->AddCircleFilled(ImVec2(p.x + 5.0f, p.y + row_h * 0.5f),
-                                3.5f, IM_COL32(c.r, c.g, c.b, 255));
+    // PV-2c: the filtered row INDEX — the clipper needs one emitted
+    // item per counted row, and a filtered `continue` emits nothing
+    // (the row-height estimator would collapse skipped rows onto one
+    // line). The index rebuilds only when the filter text or the row
+    // count moves (function-local statics, the ATO table's discipline;
+    // the log is append-only + Clear, so count is a sufficient key).
+    static std::vector<std::size_t> visible_rows;
+    static std::size_t cached_n = static_cast<std::size_t>(-1);
+    static char cached_filter[64] = {};   // event_log_filter's own size
+    if (impl_->event_log.size() != cached_n ||
+        std::strncmp(cached_filter, impl_->event_log_filter,
+                     sizeof(cached_filter)) != 0) {
+        cached_n = impl_->event_log.size();
+        std::snprintf(cached_filter, sizeof(cached_filter), "%s",
+                      impl_->event_log_filter);
+        visible_rows.clear();
+        for (std::size_t i = 0; i < cached_n; ++i) {
+            if (!filtered ||
+                event_log_matches(impl_->event_log_filter,
+                                  impl_->event_log[i].label)) {
+                visible_rows.push_back(i);
+            }
         }
-        ImGui::Dummy(ImVec2(14.0f, ImGui::GetTextLineHeight()));
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", tbuf);
-        ImGui::SameLine();
-        ImGui::TextUnformatted(row.label);
+    }
+
+    ImGui::BeginChild("event_log_rows", ImVec2(0, 0));
+    // The clipper: only the visible slice of the (filtered) log runs
+    // the per-row format + draw-list work — the log is capped at 2,000
+    // rows and the window shows ~20.
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(visible_rows.size()));
+    while (clipper.Step()) {
+        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+            const auto& row =
+                impl_->event_log[visible_rows[static_cast<std::size_t>(i)]];
+            format_event_log_time(row.abs_t, tbuf, sizeof(tbuf));
+
+            // The owning team's color dot — the map palette, one axis with
+            // the canvas; teamless families (weather, verdict, cycles) draw
+            // no dot.
+            if (row.team != 0xFF) {
+                const auto c = color_for_owner(row.team);
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                const float row_h = ImGui::GetTextLineHeight();
+                dl->AddCircleFilled(ImVec2(p.x + 5.0f, p.y + row_h * 0.5f),
+                                    3.5f, IM_COL32(c.r, c.g, c.b, 255));
+            }
+            ImGui::Dummy(ImVec2(14.0f, ImGui::GetTextLineHeight()));
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", tbuf);
+            ImGui::SameLine();
+            ImGui::TextUnformatted(row.label);
+        }
     }
     // Follow: pin to the bottom while the tail is in view. Scrolling up
     // un-pins for as long as the user stays away from the bottom.

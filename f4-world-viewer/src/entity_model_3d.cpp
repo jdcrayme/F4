@@ -746,6 +746,21 @@ void ViewerApp::draw_entity_model_3d() {
         res.show_ground_layout = false;
 
         if (want_world_scenery) {
+            // PV-5: the neighbor walk + the per-objective geometry CACHE.
+            // objectives_within_radius is a flat float loop since PV-5
+            // (the position index); build_airfield_geometry_3d — a
+            // vertex builder — runs ONCE per objective per world (the
+            // layouts are static), not once per objective per FRAME as
+            // it did before. The cache re-keys on world_generation and
+            // session adopt (both clear it); the draw toggles below
+            // still apply per frame — they gate the DRAW, not the
+            // build.
+            if (impl_->airfield_geo_3d_world_gen !=
+                impl_->world_generation) {
+                impl_->airfield_geo_3d_cache.clear();
+                impl_->airfield_geo_3d_world_gen =
+                    impl_->world_generation;
+            }
             const auto nearby =
                 impl_->objectives_within_radius(cx, cy, 50000.0f);
             for (const auto nid : nearby) {
@@ -754,27 +769,41 @@ void ViewerApp::draw_entity_model_3d() {
                 if (!ntf) continue;
                 const float nx = static_cast<float>(ntf->position.x);
                 const float ny = static_cast<float>(ntf->position.y);
-                const float nz = terrain_elev_ft(nx, ny);
 
+                auto& entry =
+                    impl_->airfield_geo_3d_cache[nid.value];
                 auto* ngl = nh.get<f4::entities::GroundLayoutComponent>();
-                if (ngl && !ngl->layouts.empty()) {
-                    auto ng = f4::renderer::build_airfield_geometry_3d(
-                        ngl->layouts, nullptr);
-                    if (!ng.empty) {
-                        f4::renderer::AirfieldDrawToggles nt;
-                        nt.runway = impl_->ground_layout_3d_show_runway;
-                        nt.markers = impl_->ground_layout_3d_show_runway;
-                        nt.taxiways = impl_->ground_layout_3d_show_taxiways;
-                        nt.parking = impl_->ground_layout_3d_show_parking;
-                        nt.helipads = false;
-                        nt.features = false;  // the real models draw below
-                        f4::renderer::draw_airfield_geometry(ng, nt, nx, ny,
-                                                             nz);
+                if (!entry.built) {
+                    // First sighting: build + freeze the anchor (the
+                    // objective never moves; the terrain elevation at
+                    // its anchor never changes either). A layout-less
+                    // objective caches its emptiness too — `built` is
+                    // the one-shot guard, not geo.empty.
+                    if (ngl && !ngl->layouts.empty()) {
+                        entry.geo =
+                            f4::renderer::build_airfield_geometry_3d(
+                                ngl->layouts, nullptr);
                     }
+                    entry.x = nx;
+                    entry.y = ny;
+                    entry.z = terrain_elev_ft(nx, ny);
+                    entry.built = true;
+                }
+                if (!entry.geo.empty) {
+                    f4::renderer::AirfieldDrawToggles nt;
+                    nt.runway = impl_->ground_layout_3d_show_runway;
+                    nt.markers = impl_->ground_layout_3d_show_runway;
+                    nt.taxiways = impl_->ground_layout_3d_show_taxiways;
+                    nt.parking = impl_->ground_layout_3d_show_parking;
+                    nt.helipads = false;
+                    nt.features = false;  // the real models draw below
+                    f4::renderer::draw_airfield_geometry(
+                        entry.geo, nt, entry.x, entry.y, entry.z);
                 }
 
                 auto* nfs = nh.get<f4::entities::FeatureSetComponent>();
                 if (nfs && !nfs->features.empty()) {
+                    const float nz = terrain_elev_ft(nx, ny);
                     constexpr uint16_t VU_LAST_ENTITY_TYPE = 100;
                     for (const auto& nf : nfs->features) {
                         if (nf.index == 0 && nf.offset_x == 0.0f &&

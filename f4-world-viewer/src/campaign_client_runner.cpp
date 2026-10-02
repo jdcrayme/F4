@@ -178,10 +178,30 @@ void CampaignClientRunner::worker_loop_() {
                     static_cast<std::uint32_t>(ticks));
                 capped = capped || res.dilated;
                 step_serial_.fetch_add(1, std::memory_order_relaxed);
+                // AGG-3 (PV-2b): the clamp state rides the step result
+                // — per batch, at the reference's own compression-loop
+                // cadence, with no query round trip (the snapshot
+                // mirror this replaces tied the clamp to the UI's
+                // refresh cadence).
+                bubble_action_.store(res.bubble_live > 0,
+                                     std::memory_order_relaxed);
             }
             const double hold_ms =
                 std::chrono::duration<double, std::milli>(
                     clock::now() - t0).count();
+
+            // PV-1: the batch composition for the frame profiler's
+            // duty-cycle readout (relaxed — diagnostics only; this
+            // thread is the single writer).
+            last_hold_ms_.store(hold_ms, std::memory_order_relaxed);
+            last_batch_ticks_.store(
+                static_cast<int>(ticks), std::memory_order_relaxed);
+            {
+                const double ema =
+                    hold_ema_ms_.load(std::memory_order_relaxed);
+                hold_ema_ms_.store(ema + 0.25 * (hold_ms - ema),
+                                   std::memory_order_relaxed);
+            }
 
             const double sim_advanced = ticks * tick_sec_;
             advanced_sim_s_.store(advanced_sim_s_.load() + sim_advanced);
