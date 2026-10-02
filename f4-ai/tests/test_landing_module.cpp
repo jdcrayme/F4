@@ -307,58 +307,47 @@ TEST_F(LandingTestFixture, FlareHoldsFlapsExtended) {
     EXPECT_GT(out.lef_cmd, 0.0) << "Flare should keep LEF extended";
 }
 
-TEST_F(LandingTestFixture, EnergyManagedFlareModulatesPitchOnLongPrediction) {
-    // Phase C4 (FLIGHT_CONTROL_NEXT_STEPS.md §4 Phase C4): the flare law
-    // predicts the touchdown point and modulates pitch to manage energy.
-    // When the aircraft is fast (will land long), the flare should command
-    // MORE pitch (to bleed energy); when slow (will land short), LESS pitch.
-    //
-    // Test setup: aircraft approaches the threshold, descends through the
-    // flare height (130 ft AGL) at two different approach speeds. The
-    // high-energy case (250 kts) commands more pitch than the baseline
-    // (160 kts) because the predicted touchdown is farther past the aim.
-    //
-    // REPAIR-T4: the differentiation is checked at 80 ft — ABOVE the
-    // touchdown gate (60 ft), where the energy driver still owns the
-    // aim-point management. Inside the gate the driver is inert (the
-    // sink servo alone owns the pitch — see TouchdownGateZeroesTheEnergy
-    // below); the old 50-ft check site sat inside the gate and read the
-    // inert driver as a broken differentiation.
-
-    // Step 1: drive to OnFinal. The on_enter(OnFinal) action publishes
-    // ApproachClearance; the StubATC responds with ClearedToLand. Match
-    // the existing FlareBelowFlareHeight test pattern: 1 tick above DH
-    // (200 ft) is sufficient for the clearance to propagate.
+TEST_F(LandingTestFixture, FlareServoArrestsHardSinkAndRelaxesAtTarget) {
+    // REPAIR-T5: the flare law is the DIRECT VS SERVO FROM ENTRY (the
+    // T4 touchdown servo now owns the whole flare — the attitude/energy
+    // phase above the 60-ft gate was retired with measurement: from a
+    // real 130-ft / −978-fpm entry the energy driver's trim approached
+    // the target at ~0.157 stick while the sink GREW to −2,060, the late
+    // arrest ballooned to 300 ft, and the 15-s timeout GA'd). The
+    // servo's contract: a hard sink commands the pull clamp, the
+    // touchdown target commands zero, a balloon commands the bounded
+    // push — the energy (speed) is invisible to it.
     drive_to_on_final();
-    auto s_high_cruise = on_final(0.0, 800.0, 500.0, 0.0, 250.0);
-    s_high_cruise->vs_fpm_ = -500.0;
-    mod.update(0.1, s_high_cruise.get());
+    auto s_enter = on_final(0.0, 500.0, 100.0, 0.0, 190.0);
+    s_enter->vs_fpm_ = -800.0;    // arrestable: the E64 flare-entry gate
+    mod.update(0.1, s_enter.get());
+    auto s_hard = on_final(0.0, 450.0, 80.0, 0.0, 190.0);
+    s_hard->vs_fpm_ = -1600.0;
+    const auto out_hard = mod.update(0.1, s_hard.get());
+    ASSERT_EQ(mod.state(), LandingState::Flare);
+    EXPECT_NEAR(out_hard.pitch_cmd, 0.5, 1e-9)
+        << "a hard sink commands the pull clamp (got "
+        << out_hard.pitch_cmd << ")";
 
-    // Step 2: descend through flare height (80 ft AGL — above the
-    // touchdown gate). The flare transition fires.
-    // on_final signature: on_final(east, dist_south, alt_agl, hdg, vcas)
-    auto s_high = on_final(0.0, 500.0, 80.0, 0.0, 250.0);
-    s_high->vs_fpm_ = -500.0;
-    const auto out_high = mod.update(0.1, s_high.get());
-    ASSERT_EQ(mod.state(), LandingState::Flare)
-        << "expected flare transition at 50 ft AGL; got state="
-        << static_cast<int>(mod.state());
-
-    // Reset and run the baseline case at 160 kts.
     SetUp();
     drive_to_on_final();
-    auto s_base_cruise = on_final(0.0, 800.0, 500.0, 0.0, 160.0);
-    s_base_cruise->vs_fpm_ = -500.0;
-    mod.update(0.1, s_base_cruise.get());
-
-    auto s_base = on_final(0.0, 500.0, 80.0, 0.0, 160.0);
-    s_base->vs_fpm_ = -500.0;
-    const auto out_base = mod.update(0.1, s_base.get());
+    auto s_target = on_final(0.0, 500.0, 80.0, 0.0, 190.0);
+    s_target->vs_fpm_ = -700.0;
+    const auto out_target = mod.update(0.1, s_target.get());
     ASSERT_EQ(mod.state(), LandingState::Flare);
+    EXPECT_NEAR(out_target.pitch_cmd, 0.0, 1e-9)
+        << "at the touchdown sink the servo commands zero (got "
+        << out_target.pitch_cmd << ")";
 
-    EXPECT_GT(out_high.pitch_cmd, out_base.pitch_cmd)
-        << "high-energy flare should command MORE pitch to bleed energy "
-        << "(high=" << out_high.pitch_cmd << ", base=" << out_base.pitch_cmd << ")";
+    SetUp();
+    drive_to_on_final();
+    auto s_balloon = on_final(0.0, 500.0, 80.0, 0.0, 190.0);
+    s_balloon->vs_fpm_ = +300.0;
+    const auto out_balloon = mod.update(0.1, s_balloon.get());
+    ASSERT_EQ(mod.state(), LandingState::Flare);
+    EXPECT_LT(out_balloon.pitch_cmd, 0.0)
+        << "a balloon commands the bounded push (got "
+        << out_balloon.pitch_cmd << ")";
 }
 
 TEST_F(LandingTestFixture, TouchdownGateZeroesTheEnergyDriver) {

@@ -843,6 +843,15 @@ CampaignSession::create(const CampaignSessionOptions& opts,
         session->ladder_->run_initial_tasking_cycle();
     }
 
+    // FID-5 (T5): seed the aggregate feed BEFORE the first advance. The
+    // combat pass runs once per advance() (the AGG-1 catch-up design)
+    // and rebuilds the feed at its END for the NEXT pass — a session
+    // whose first advance covered the whole engagement window (the
+    // CommittedFighter rig's advance(40)) decided Trigger A against an
+    // EMPTY feed: the brain committed inside the tick stream, the
+    // trigger saw no aggregate VUs, and the deagg never fired.
+    session->rebuild_aggregate_feed_();
+
     session->refresh_stats_();
     return session;
 }

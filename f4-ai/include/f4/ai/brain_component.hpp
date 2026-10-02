@@ -538,53 +538,21 @@ public:
         // (throttle 0, gear down — the input slot clears every tick)
         // until the aircraft coasted into the terrain. The whole
         // campaign's deck-level glides traced to this one word.
-        if (phase_ == Phase::Enroute && !plan_.route.empty() &&
-            !nav_.is_complete()) {
-            // (The inbound-direction guard below replaces the old
-            // route-progress guard: an RTB route STARTS at the
-            // aircraft's position — wp_index_ never advances — and a
-            // round-trip route ENDS near its start. The nose-to-end
-            // projection distinguishes them: outbound = behind, RTB =
-            // ahead.)
-            const auto& last = plan_.route.back().position;
-            const auto* own_state =
-                owner_.get_interface<flight::IAircraftState>();
-            if (own_state != nullptr) {
-                const double own_x = own_state->position_east_ft();
-                const double own_y = own_state->position_north_ft();
-                const double dx = last.x - own_x;
-                const double dy = last.y - own_y;
-                constexpr double kApproachHandoffFt = 33000.0;  // ~5.4 nm
-                // The INBOUND guard: the handoff fires only when the
-                // route's end is roughly AHEAD of the nose. A round-trip
-                // route ends near its start — without this the freshly
-                // launched outbound aircraft was "landed" at the field
-                // it had just departed.
-                const double hx = std::sin(own_state->heading_rad());
-                const double hy = std::cos(own_state->heading_rad());
-                const bool inbound = dx * hx + dy * hy > 0.0;
-                const bool in_range = dx * dx + dy * dy <
-                                      kApproachHandoffFt * kApproachHandoffFt;
-                if (inbound && in_range) {
-                    auto* world = owner_.world();
-                    if (!world) {
-                        phase_ = Phase::Complete;
-                        return;
-                    }
-                    const auto& entry_fix = plan_.route.back().position;
-                    landing_.configure(entry_fix, plan_.taxi_in_route);
-                    landing_.fly_traffic_pattern = plan_.fly_traffic_pattern;
-                    landing_.airbase_id = takeoff_.airbase_id;
-                    landing_.air_steering.reset_integrators();
-                    landing_.pattern_steering.reset_integrators();
-                    landing_.initialize(owner_.id().value, *world, bus);
-                    phase_ = Phase::Approach;
-                }
-                // else: stay Enroute — the navigation module owns the
-                // jet this tick (the fall-through the old `return`
-                // prevented).
-            }
-        }
+        // CAMP-FAF early handoff — RETIRED (T5). The 33,000-ft inbound
+        // window handed the brain to the landing module while the route
+        // was still AHEAD of the aircraft, and every tactical route that
+        // came within ~5.4 nm of its endpoint inbound was hijacked into
+        // Approach — where the combat ladder (Enroute-only) never runs.
+        // The guns-merge fight is the measured case: a single 8,500-ft
+        // MERGE waypoint, head-on at 2.8 NM — the handoff fired on tick
+        // one, the fusion never initialized, and no WVR rung was ever
+        // reachable. The tune's own reason is gone too: it existed to
+        // spare the campaign's field-terminal routes the out-and-back to
+        // a synthesized FAF, and T4b's FAF synthesis made that geometry
+        // sane. The phase contract stands alone now: the route's last
+        // waypoint is the approach entry fix handed to the LandingModule
+        // WHEN THE NAVIGATION COMPLETES (the block below) — the one
+        // Enroute→Approach injector for the mission phase machine.
         if (phase_ == Phase::Enroute && nav_.is_complete()) {
             auto* world = owner_.world();
             if (world) {

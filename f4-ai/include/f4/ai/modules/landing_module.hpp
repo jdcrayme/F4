@@ -374,28 +374,20 @@ public:
                                          // (8.6 deg) — a wide intercept cut
                                          // inside the proportional band
                                          // must not saturate the command.
-    double flare_agl_ft{130.0};         // STAB-E49/E57/E62: begin the flare below
-                                        // this AGL (was 60). The E57 probe
-                                        // measured the arrest budget: the
-                                        // 2 G flare pull reaches the airframe
-                                        // through the FCS alpha lag in ~2.5 s
-                                        // — at -1,050 fpm of beam-rate sink
-                                        // that spends ~45-60 ft of height
-                                        // BEFORE the sink eases, then the
-                                        // round-out needs ~30 ft more. The
-                                        // 60 ft entry impacted (the touchdown
-                                        // metric fired 310-525 ft SHORT of
-                                        // the threshold) and the 6 ft contact
-                                        // under a live 2 G command pogo-sticked
-                                        // the airframe to 138 ft. 130 ft gives
-                                        // the lag + round-out their height
-                                        // budget with margin; the touchdown
-                                        // then lands inside the 500-2,500 ft
-                                        // aim band. (The aim-point beam's
-                                        // threshold crossing height is
-                                        // 1,500·tan(3°) = 78.6 ft — the flare
-                                        // now begins shortly before the
-                                        // threshold, as a real ILS flare does.)
+    double flare_agl_ft{180.0};         // STAB-E49/E57/E62 (REPAIR-T5 +50):
+                                        // begin the flare below this AGL.
+                                        // The E62 130-ft budget assumed the
+                                        // ENTRY sink holds; the stock-save
+                                        // measured flare (130 ft / -978) showed
+                                        // the sink DOUBLING through the ~2.5-s
+                                        // FCS lag (-2,166 by 76 ft — the idle
+                                        // gamma steepening) and the arrest
+                                        // developing at 16 ft, ballooning
+                                        // +3,760 fpm to 321 ft (the balloon
+                                        // valve GA'd every attempt). The +50
+                                        // ft is the measured lag loss (the
+                                        // sink development) the budget was
+                                        // missing.
     double flare_pitch_deg{8.0};        // flare target pitch attitude
     double flare_pitch_gain{3.0};       // stick per rad of pitch error
     // REPAIR-T4: below this AGL the flare's energy driver (the

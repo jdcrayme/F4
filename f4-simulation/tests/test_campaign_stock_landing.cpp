@@ -133,7 +133,53 @@ TEST(CampaignStockLanding, LiveWaveFlightFliesMissionAndTouchesDown) {
                                       [](const auto& t) { return t.live; });
     ASSERT_NE(live_it, tiers.end())
         << "no live aircraft after the initial wave window";
-    const std::uint32_t vu = live_it->vu;
+    // REPAIR-T5: follow the live flight with the SHORTEST remaining
+    // route — the gate is "a live wave flight flies its mission and
+    // touches down inside the window", and the first live tier can be a
+    // multi-hour ferry leg whose recovery no 150-min window contains
+    // (the T5 early-handoff retirement stopped shortening such routes:
+    // the observed-flight identity moved from the near-field transfer to
+    // whatever full route spawns first). The remaining distance is the
+    // polyline from the aircraft's current nav cursor to the route's
+    // end — a transfer standing at its recovery field measures ~0 and
+    // wins, exactly the flight the user's camera would park on.
+    std::uint32_t vu = live_it->vu;
+    {
+        double best_remaining = 1.0e18;
+        for (const auto& t : session->flight_tiers()) {
+            if (!t.live) continue;
+            for (const auto eid : session->sim().aircraft_entities()) {
+                f4::entities::EntityHandle h(eid, &session->sim().world());
+                const auto* org = h.get<CampaignOriginComponent>();
+                if (org == nullptr ||
+                    org->flight_vu != (t.vu & 0xFFFFu)) continue;
+                const auto* brain = h.get<f4::ai::BrainComponent>();
+                if (brain == nullptr) continue;
+                const auto& route = brain->mission_plan().route;
+                if (route.empty()) continue;
+                double remaining = 0.0;
+                const auto* tf = h.get<f4::entities::TransformComponent>();
+                double px = tf ? tf->position.x : 0.0;
+                double py = tf ? tf->position.y : 0.0;
+                for (std::size_t k = brain->navigation()
+                                         .current_waypoint_index();
+                     k < route.size(); ++k) {
+                    remaining += std::sqrt(
+                        (route[k].position.x - px) * (route[k].position.x - px)
+                      + (route[k].position.y - py) * (route[k].position.y - py));
+                    px = route[k].position.x;
+                    py = route[k].position.y;
+                }
+                if (remaining < best_remaining) {
+                    best_remaining = remaining;
+                    vu = t.vu;
+                }
+                break;
+            }
+        }
+        std::fprintf(stderr, "[follow] vu %u remaining %.0f ft\n",
+                     vu, best_remaining);
+    }
 
     // Keep the flight OBSERVED for its whole mission: the bubble rides
     // with it (the user's camera selection does the same), so the tier

@@ -29,6 +29,7 @@
 #include <f4/entities/types.hpp>
 #include <f4/flight/flight_model_component.hpp>
 #include <f4/flight/angle.hpp>
+#include <f4/data/table_accessors.hpp>
 #include <f4/ai/brain_component.hpp>
 #include <f4/campaign/mission_type.hpp>
 #include <f4/campaign/route_builder.hpp>   // kWpRefuel (EMPL-2 eligibility scan)
@@ -193,6 +194,42 @@ double heading_diff_deg(double a, double b) {
     constexpr double R2D = 57.29577951308232;
     const double d = std::abs(wrap_2pi(a * D2R) - wrap_2pi(b * D2R)) * R2D;
     return std::min(d, 360.0 - d);
+}
+
+// T5 — the air-spawn SPEED floor (the T1 altitude floor's other half).
+// The pose's absolute 100-fps minimum was a deep stall at any real
+// altitude: a 40,000-ft deaggregate spawned at ~205 fps (127 kts, far
+// below the ~290-fps stall TAS there), alpha pegged, and the jet FELL
+// into a stabilized −73° / −40,000-fpm dive — the "combat dive margin"
+// defect measured on the CommittedFighter rig and the T1-evidenced WVR
+// merge. The floor is aerodynamic: 1.3 × stall CAS (the Tranche-33
+// approach-speed shape: K_STALL × sqrt(W/S over CL at landing alpha,
+// W = empty + half internal) expressed as TAS at the ISA density ratio
+// of the spawn altitude (the troposphere estimate the navigation
+// module's own TAS math uses, altitude clamped to its 36,000-ft
+// validity). The aggregate's own pose speed stands when it is higher.
+double air_spawn_min_vt_fps(const f4::data::AircraftConfig& cfg,
+                            double alt_msl_ft) {
+    constexpr double SIGMA_EXP = 4.2561;
+    constexpr double FT_PER_KT = 1.68781;
+    const double alt = std::clamp(alt_msl_ft, 0.0, 36000.0);
+    const double sigma = std::pow(1.0 - alt / 145442.0, SIGMA_EXP);
+    const double dens_factor = std::max(0.30, std::sqrt(sigma));
+    double stall_cas_kts = 200.0;  // data-less fallback: a sane combat min
+    if (cfg.geometry.area.value() > 0.0 && !cfg.aero.clift.empty() &&
+        cfg.aux.landingAOA.value() > 0.0) {
+        const double W = cfg.geometry.emptyWeight.value()
+                       + 0.5 * cfg.geometry.internalFuel.value();
+        const double S = cfg.geometry.area.value();
+        const auto cl_table = f4::data::makeClTable(cfg.aero);
+        const double cl =
+            cl_table(0.0, f4::flight::to_degrees(cfg.aux.landingAOA));
+        if (W > 0.0 && S > 0.0 && std::fabs(cl) > 0.1) {
+            stall_cas_kts =
+                f4::flight::K_STALL * std::sqrt(W / S / std::fabs(cl));
+        }
+    }
+    return 1.3 * stall_cas_kts * FT_PER_KT / dens_factor;
 }
 
 } // namespace
@@ -682,7 +719,8 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
     fm.init(cfg,
             /*alt_ft=*/spawn_pos.z,
             /*vt_ftps=*/spawn_in_air
-                ? std::max(air_pose->vt_fps, 100.0)
+                ? std::max(air_pose->vt_fps,
+                           air_spawn_min_vt_fps(cfg, spawn_pos.z))
                 : 0.0,
             /*hdg_rad=*/hdg,
             /*inAir=*/spawn_in_air,
@@ -1719,7 +1757,8 @@ spawn_aircraft_for_intent(
     fm.init(cfg,
             /*alt_ft=*/spawn_pos.z,
             /*vt_ftps=*/spawn_in_air
-                ? std::max(air_pose->vt_fps, 100.0)
+                ? std::max(air_pose->vt_fps,
+                           air_spawn_min_vt_fps(cfg, spawn_pos.z))
                 : 0.0,
             /*hdg_rad=*/hdg,
             /*inAir=*/spawn_in_air,

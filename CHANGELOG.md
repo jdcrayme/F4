@@ -5,6 +5,60 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## REPAIR-T5 — the A/A seam: combat 31/31, the guns fight flies, the dive dies
+
+CAMPAIGN_REPAIR_PLAN.md's T5 tranche, landed as-built — and both named
+items traced to seams ABOVE the WVR band. The guns-merge pair: the
+CAMP-FAF early approach handoff (the T2-era 33,000-ft inbound tune)
+handed every tactical route that came within 5.4 nm of its endpoint to
+the landing module, and the combat ladder runs only while Enroute — the
+2.8-NM head-on merge was hijacked before the first tick and WVREngage
+was never reachable (the entry band was never the problem). The handoff
+is retired; the phase contract stands alone (T4b's FAF synthesis made
+the field-terminal geometry sane, which was the tune's original
+reason). The combat dive: the deagg air-spawn put a 40,000-ft aircraft
+at 127 kts (the pose's absolute 100-fps floor — deep stall, a −73° /
+−40,000-fpm fall), and the commit trigger was blind on the first pass
+(the combat pass builds its aggregate feed at the END of each advance,
+so a first advance covering the whole engagement window decided Trigger
+A against an empty feed). Three fixes: the air-spawn speed floor (1.3 ×
+stall CAS as TAS at the spawn altitude), the feed seeds at session
+create, and the GroundAvoid horizon now covers the arrest distance
+(GPWS practice). `CommittedFighter` — red since the plan's diagnosis
+baseline — is green.
+
+The stock gate's follow-through (the retirement changed the observed-
+flight identity; the harness now follows the shortest-remaining-route
+live flight) exposed and fixed four T4-legacy approach defects: the IAP
+leg is the course-line intercept law with a one-sided FAF clamp (the
+pursuit shape sequenced every intercept 3,800-10,400 ft wide with
+~4,600 ft of convergence room), the wrong-side leg pursues the fix at
+pattern altitude (the clamped law degenerated into an outbound line
+chase), the reciprocal-heading deadlock got a turn-commit bias (the
+±180-deg wrapped error flipped sign every wobble; phi weaved ±7° under
+a saturated roll command for hundreds of miles), and the flare is the
+direct VS servo from entry (the attitude/energy phase retired — the
+real 130-ft/−978 entry sank to −2,166 under a 0.157-stick trim and
+timed out; landing_only's certified 6-ft/−0 entry was a deck hover).
+The E64 flare-entry band re-tightened to 900 by measurement (three
+arrest generations bounced identically; the E64 doctrine holds — beyond
+the band the RIDE is the landing) and the flare-height window widened
+to the E55 overrun shape. The stock gate lands OnFinal → Rollout at the
+threshold, first attempt.
+
+Gates: `test_combat_integration` 31/31 (the T5 gate); the armed 0.3-h
+war books 19 honest A/A kills / 17 retires, all four C5 verdicts green
+(deterministic; the ledger MD5 re-pinned for the spawn-speed floor);
+fidelity combat 7/7; the stock-landing harness GREEN; BARCAP lands both
+flights full-stop; landing module suite 32/32 (the flare pins
+re-contracted to the servo law); GroundContact 5/5; brain 17/17;
+navigation 26/26; the scenario trio all book touchdowns; the digi
+suite's red set preserved at 2. Known red carried to T6's list:
+`CampaignWarHarness.RunsCertifiesAndIsDeterministic` — measured red at
+the plan's own diagnosis baseline (a never-measured Windows
+pre-existing red; the war certifies there, the compressed-horizon
+materialization assert is what's dead).
+
 ## REPAIR-T3 — the ground-spawned Enroute contract: one splice, honest launches
 
 CAMPAIGN_REPAIR_PLAN.md's T3 tranche, landed as-built. Disambiguated

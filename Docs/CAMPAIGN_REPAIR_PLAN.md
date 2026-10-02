@@ -479,13 +479,128 @@ Notes carried forward:
 - T3 remains open (the ground-spawned Enroute contract: the NAV-D1
   airborne check and the one-splice handoff).
 
-### T5 — the A/A seam
+### T5 — the A/A seam — **LANDED (2026-10-01)**
 
-- Bisect `d3a912b..HEAD` for the 15 combat-integration reds; if the
-  tree bisects clean, it is platform FP — widen the specific margins or
-  pin the FP contract and say so in the test.
-- **Gate**: `test_combat_integration` 31/31 on the dev machine;
-  `--war --aa-combat` books air kills on this machine.
+As-built, and the tranche's two named items both traced to seams ABOVE
+the WVR band:
+
+1. **The guns-merge pair — the CAMP-FAF early handoff was the whole
+   defect.** The instrumented merge showed the fusion EMPTY for the
+   whole fight with the brain in phase Approach from tick one: the
+   33,000-ft inbound handoff (the T2-era tune) handed every tactical
+   route that came within 5.4 nm of its endpoint to the landing module —
+   and the combat ladder runs ONLY while Enroute. The merge test's
+   single 8,500-ft MERGE waypoint (head-on at 2.8 NM) was hijacked
+   before the first tick; WVREngage was never reachable; the entry band
+   (3 NM, satisfied from spawn) was never the problem. RETIRED: the
+   early handoff is gone — the phase contract stands alone (the route's
+   last waypoint is the entry fix handed over WHEN THE NAVIGATION
+   COMPLETES), and T4b's FAF synthesis already made the field-terminal
+   geometry sane, which was the tune's original reason.
+2. **The combat dive — the deagg air-spawn spawned UNFLYABLE, and the
+   commit trigger was blind on the first pass.** Three fixes measured on
+   the CommittedFighter rig (the WVR merge dove 42,000 → 29,000 ft in 30
+   s in MissileDefeat):
+   - **The air-spawn SPEED floor** (the T1 altitude floor's other
+     half): the pose's absolute 100-fps minimum put a 40,000-ft
+     deaggregate at ~205 fps (127 kts — far below the ~290-fps stall
+     TAS there); alpha pegged at +22° and the jet FELL into a
+     stabilized −73° / −40,000-fpm dive. The bridge now floors the
+     air-spawn true airspeed at 1.3 × stall CAS expressed as TAS at the
+     spawn altitude's ISA density ratio (the Tranche-33 approach-speed
+     shape, the same formula the navigation module's own TAS math
+     uses).
+   - **The aggregate feed seeds at session create**: the combat pass
+     runs once per advance() (the AGG-1 catch-up design) and rebuilt
+     the feed at its END for the NEXT pass — a session whose first
+     advance covered the whole engagement window decided Trigger A
+     against an EMPTY feed (the brain committed inside the tick
+     stream; the trigger saw no aggregate VUs; the deagg never fired).
+   - **The GroundAvoid horizon covers the arrest**: the fixed 6-s
+     cruise lookahead only reached ~4,000 ft down a −40,000-fpm
+     terminal dive; the effective horizon is now the cruise lookahead
+     OR the time to arrest the current sink at a nominal 3-G escape
+     pull (+50% margin) — GPWS practice; climbs and cruises keep the
+     cruise horizon exactly.
+
+**Measured (Release, this machine):**
+
+- `test_combat_integration` **31/31** — the plan's T5 gate; the
+  guns-merge pair lands the full fight (detection ~5 s, WVREngage at
+  1.7 NM, the merge at 341 ft, the gun kill, the clean disengage).
+- `test_fidelity_combat` **7/7** — `CommittedFighter`, red since the
+  plan's diagnosis baseline, commits and pulls its contact out of the
+  aggregate (the pre-existing red retired).
+- The armed 0.3-h war: exit 0, all four C5 verdicts green
+  (deterministic), honest A/A kills booked.
+- **The stock-landing gate stays GREEN** — and T5's approach-chain
+  work (below) is what kept it green after the handoff retirement
+  changed the observed-flight identity.
+
+**The approach-chain discoveries the stock gate forced** (the handoff
+retirement changed which flight the harness follows — the first live
+tier became a full-route ferry; the harness now follows the live flight
+with the shortest remaining route — and the follow-through exposed four
+T4-legacy defects plus one deeper):
+
+3. **The IAP leg is the course-line intercept law with a one-sided FAF
+   clamp** (not a pursuit bearing to the fix): the pursuit shape
+   converged onto the FIX POINT while the turn-lead capture fires one
+   turn radius (~13,100 ft at 250 kts) before it — every intercept
+   sequenced 3,800-10,400 ft off the course line, needed ~12,700 ft of
+   convergence, had ~4,600. The clamp aims back at the fix ONLY past
+   the threshold (the wrong side — go-around climb-outs, RTBs from
+   beyond); an earlier full clamp bit the pattern mode's normal
+   inside-the-FAF intercept and cost a digi red (reverted to one-sided).
+4. **The ProceedToFix wrong-side leg pursues the fix at pattern
+   altitude** — the FAF-clamped law degenerates past the field (a
+   northbound line chase out of every capture window), and the far-side
+   beam is meaningless as an altitude target.
+5. **The reciprocal-heading deadlock**: an aircraft whose heading sits
+   exactly opposite the command (the overshoot ON the course line)
+   reads a ±180-deg wrapped error whose sign flips on every drift
+   wobble — the bank target alternated ±0.40 tick by tick (phi weaving
+   ±7 deg under a saturated ±1.000 roll command) and the aircraft flew
+   the line outbound for hundreds of miles. Any desired heading with an
+   error in the ambiguous band (>~150 deg) is biased ~30 deg toward the
+   course line; the turn commits.
+6. **The flare is the direct VS servo FROM ENTRY** (the T4 touchdown
+   servo, now the whole flare; the attitude/energy phase retired): the
+   real flare (130 ft / −978 measured; landing_only's certified 6-ft /
+   −0 entry was a deck hover) sank −978 → −2,166 under the energy
+   driver's 0.157-stick trim, ballooned off the late arrest, and timed
+   out every attempt. The servo owns the loop from entry; the ground
+   bounds it.
+7. **The E64 flare-entry band re-tightened (1,250 → 900)** and the
+   flare-height window widened to the E55 overrun shape (−missed −
+   overrun): the stock's catch-down crossed flare height at −978 —
+   inside the old band — and every arrest generation bounced bit-for-
+   bit; the E64 doctrine holds (beyond the arrestable band the RIDE is
+   the landing — the firm arrival the gear absorbs, the T4 fix-2
+   wheels-are-the-truth path). The stock gate's landing is exactly
+   that: OnFinal → Rollout at the threshold, first attempt.
+8. Telemetry: the [ptf] row carries vcas + the capture-window locals +
+   the module's own commanded outputs ([ptf-c]); the go-around entry
+   prints its reason ([ga-r]) — the missing reason was half of every
+   diagnosis above.
+
+Regression surface: the landing module suite 32/32 (the flare pins
+re-contracted to the servo law — the energy driver is retired); combat
+31/31; fidelity combat 7/7; GroundContact 5/5; brain 17/17; navigation
+26/26; landing_only + takeoff_only + digi_full_mission exit 0 (the digi
+scenario now books its touchdown); the digi suite's red set preserved
+at 2 (the surviving pair's reason moved from the long-touchdown metric
+to a 1.5-ft-over lateral gate — the same 2-test count as the
+documented Windows set).
+
+Known red carried forward: `CampaignWarHarness.
+RunsCertifiesAndIsDeterministic` (synthetic_spawned = 0 in the 40-s
+compressed rig) — measured RED at the plan's own diagnosis baseline
+bd4b2ee and at every HEAD since (a never-measured Windows pre-existing
+red, the §1 pattern); the war itself runs and certifies there (all four
+C5 verdict asserts green) — the dead assert is the compressed-horizon
+materialization expectation (CAMP-TOT-PACE territory). T6's known-red
+list owns it.
 
 ### T6 — the all-up verify (the process fix)
 

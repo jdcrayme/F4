@@ -54,11 +54,28 @@ AIControlOutput GroundAvoidModule::update(
     // Now: under the jet. Predicted: where the jet will be at the look-
     // ahead horizon if it keeps its current sink (climbs never hurt) over
     // the worst terrain in the forward cone.
+    //
+    // T5 — the horizon covers the ARREST, not just the cruise lookahead:
+    // the fixed 6-s cruise horizon only reaches ~4,000 ft down a
+    // −40,000-fpm terminal dive (the measured stall-fall: gamma −73°, vt
+    // 700 fps), so the trigger sat at ~5,000 ft — past the point a
+    // cruise-tuned recovery could arrest. The effective horizon is the
+    // cruise lookahead OR the time to arrest the current sink at a
+    // nominal 3-G escape pull (+50% margin), whichever is longer. GPWS
+    // practice; a climb or level cruise keeps the cruise horizon exactly.
     const double clearance_now = alt - picture.terrain_here_ft;
 
     const double sink_fpm = std::min(0.0, state->vertical_speed_fpm());
+    double lookahead_s = cfg_.lookahead_sec;
+    const double sink_fps = -sink_fpm / 60.0;
+    if (sink_fps > 1.0) {
+        constexpr double ESCAPE_G = 3.0;
+        constexpr double G_FPS2 = 32.174;
+        const double t_arrest_s = sink_fps / (ESCAPE_G * G_FPS2);
+        lookahead_s = std::max(lookahead_s, t_arrest_s * 1.5);
+    }
     const double pred_alt =
-        alt + (sink_fpm / 60.0) * cfg_.lookahead_sec;
+        alt + (sink_fpm / 60.0) * lookahead_s;
     const double clearance_pred = pred_alt - picture.terrain_ahead_ft;
 
     clearance_ft_ = std::min(clearance_now, clearance_pred);
