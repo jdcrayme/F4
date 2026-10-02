@@ -85,6 +85,8 @@ def clauses_for(archetype: str) -> list[dict]:
         clauses.append({"kind": "employment", "min_releases": 1})
     if archetype == "cap":
         clauses.append({"kind": "tot", "band_s": TOT_BAND_S})
+    clauses.append({"kind": "first_attempt", "allow_goaround": False})
+    clauses.append({"kind": "duration", "max_sortie_min": 120.0})
     clauses.append({"kind": "recovery"})
     return clauses
 
@@ -313,12 +315,57 @@ def eval_recovery(f: dict, clause: dict) -> tuple[str, str]:
                     + " — no recovery, no booked death")
 
 
+def eval_first_attempt(f: dict, clause: dict) -> tuple[str, str]:
+    """FIRST_ATTEMPT: a go-around is a deviation from the plan — FAIL,
+    unless the contract is deliberately testing go-arounds
+    (allow_goaround). Counted from the snapshot ai_state transitions
+    (the landing module's GoAround state persists minutes; the 6-s
+    decimation sampling cannot miss it)."""
+    if clause.get("allow_goaround"):
+        return "SKIP", "the contract tests go-arounds"
+    states = [s.get("ai_state", "") for s in f["snapshots"]]
+    n = sum(1 for i, st in enumerate(states)
+            if st == "GoAround" and (i == 0 or states[i - 1] != "GoAround"))
+    if n == 0:
+        return "PASS", "first attempt"
+    return "FAIL", f"{n} go-around(s) before recovery"
+
+
+def eval_duration(f: dict, clause: dict) -> tuple[str, str]:
+    """DURATION: wheels-up -> recovery inside the band. The saved wires'
+    own waypoint times are the ATO planner's multi-day horizon (the
+    aggregate-clock finding), so the honest expectation is a SORTIE
+    duration, not an absolute clock time."""
+    if not f["phases"] or f["phases"][-1] not in FLARE_PHASES:
+        return "SKIP", "no recovery to time"
+    # Wheels-up: the Enroute entry, or the first airborne snapshot.
+    t_up = None
+    for e in f["events"]:
+        if e["kind"] == "phase_changed" and e.get("to_phase") == "Enroute":
+            t_up = e["sim_time_s"]
+            break
+    if t_up is None:
+        airborne = next((s["sim_time_s"] for s in f["snapshots"]
+                         if not s.get("on_ground")), None)
+        t_up = airborne
+    if t_up is None:
+        return "SKIP", "never airborne"
+    duration_s = f["t_end"] - t_up
+    band = clause["max_sortie_min"] * 60.0
+    if duration_s > band:
+        return "FAIL", (f"sortie {duration_s / 60:.0f} min "
+                        f"(max {clause['max_sortie_min']:.0f})")
+    return "PASS", f"sortie {duration_s / 60:.0f} min (max {clause['max_sortie_min']:.0f})"
+
+
 EVALUATORS = {
     "timeline": eval_timeline,
     "path": eval_path,
     "station": eval_station,
     "tot": eval_tot,
     "employment": eval_employment,
+    "first_attempt": eval_first_attempt,
+    "duration": eval_duration,
     "recovery": eval_recovery,
 }
 

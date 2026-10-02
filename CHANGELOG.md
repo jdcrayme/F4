@@ -5,6 +5,21 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MC-3 — FIRST_ATTEMPT and DURATION clauses: the go-around rate is a card number
+
+The user's bar, made permanent: a go-around is a deviation — the
+FIRST_ATTEMPT clause FAILs any flight that went around before recovery
+unless the contract's allow_goaround flag deliberately tests it
+(counted from the snapshot ai_state transitions; the landing module's
+GoAround state persists minutes, so the 6-s decimation sampling cannot
+miss it). DURATION bands the sortie time wheels-up -> recovery (the
+honest landing-time expectation — the saved wires' own times are the
+ATO planner's multi-day horizon). Retro-proven on disk: the T4b-era
+BARCAP wingman's card reads `first_attempt FAIL 1 go-around(s)` while
+every current-build flight (the BARCAP pair, the strike isolation,
+landing_only) passes both — sortie 38 min. Every archetype's contract
+carries both clauses.
+
 ## MC-3 (opening) — the employment clause splits opportunity from execution
 
 MISSION_CONTRACT_PLAN.md's MC-3 opens with the clause its first

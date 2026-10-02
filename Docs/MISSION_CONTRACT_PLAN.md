@@ -229,7 +229,17 @@ with an owner.
   engagement awareness, ESCORT proximity (needs the package_id join),
   and TANKER AAR clauses are designed (§3) and land with their
   exercisable runs (the escort/tanker isolation needs the MC-4 tasked
-  mode or a tanker-carrying world).
+  mode or a tanker-carrying world). Also LANDED with the MC-3 opening
+  (2026-10-02): **FIRST_ATTEMPT** (a go-around is a deviation — FAIL
+  unless the contract's allow_goaround flag deliberately tests it;
+  counted from the snapshot ai_state transitions, which the 6-s
+  decimation cannot miss) and **DURATION** (sortie time wheels-up ->
+  recovery inside the band — the honest landing-time expectation, since
+  the saved wires' own times are the ATO planner's multi-day horizon).
+  Retro-proven: the T4b-era BARCAP wingman's card reads
+  `first_attempt FAIL 1 go-around(s)` while every current-build flight
+  on disk passes both clauses (the BARCAP pair, the strike isolation,
+  landing_only — sortie 38 min).
 - **MC-3 — the core archetype contracts**: BARCAP (station +
   engagement + recovery), STRIKE (path + TOT + employment +
   recovery), ESCORT (proximity), TANKER (AAR interaction), and the
