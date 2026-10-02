@@ -367,6 +367,55 @@ with an owner.
   gap — still the owner of the employment story), station SKIP/FAIL
   counts (the never-held population is the splice's anchor skip, not a
   horizon question).
+
+- **INIT-1 — the employment chain is LIVE (2026-10-02): 8 of 9
+  strike-family types deliver; exit-4 gates 9 → 1.** The arming
+  tranche's finding of record ("the generated save's delivery flights
+  carry NO target VU — a fixture data gap") was WRONG, and the [plan]
+  probe (build_mission_plan_from_flight, F4_LAND_DEBUG) disproved it:
+  the saved flights carry valid mission_targets, their STRIKE/17
+  waypoints sit on the routes with matching target_nums, the loader's
+  second pass resolves them, and the built plans carry the delivery
+  point with its target. The gates had THREE real mechanisms:
+  1. **The takeoff-handoff splice projected into the post-strike join
+     stack.** The strike routes carry the rendezvous (the refuel leg)
+     BEHIND the delivery point — strike, then rally — and the bridge's
+     join stack sits on that rendezvous a few miles from the home
+     field, so the global-nearest-leg scan landed the cursor inside the
+     stack (measured resumes 11/19, 8/21, 10/22), past the STRIKE
+     waypoint: the flight walked its waiting circle and went home
+     without employing. Fix: a ground launch always begins its route at
+     the beginning — the handoff resumes at route[1] (the projection's
+     own CAMP-GATE-ROLL reduction); the projection stays the NAV-D1
+     air-spawn site's tool, where an airborne materialization genuinely
+     is mid-route.
+  2. **WP_SAD (16) was missing from the engine's delivery-action set**
+     — the wire's shoot-the-target point the BAI/STRATBOMB/SAD
+     planners write, and route_builder.hpp's own delivery vocabulary
+     has always included it. The flights flew over their delivery
+     points without ever arming. Added to is_ag_delivery_action.
+  3. **Unit-targeted delivery points (BAI) had no resolvable target**
+     — the wire's target_num is a battalion VU that never spawns as a
+     sim entity. The delivery waypoint still has a POSITION (the
+     planner wrote it on the target box): the plan build now falls
+     back to the nearest objective entity (within 15 nm).
+  Measured (the 90-min horizon matrix, `qc/coverage_map_init1_final`):
+  employment 0 verdicts → 22 PASS / 6 FAIL / 3 SKIP, with 8 types
+  passing (INTSTRIKE/STRIKE/STSTRIKE/ONCALLCAS 16 releases each, BAI
+  11, DEEPSTRIKE/SAD/STRATBOMB 4); released flights' bombs are now
+  filtered from the cards (the recorder's own missile-track stamp) and
+  the verifier's combat-event kind names fixed to the recorder's
+  serialization (bomb_released/entity_killed — CamelCase never matched
+  anything). **OCASTRIKE is the one remaining exit-4** and a NEW,
+  cleanly-scoped finding: the plan, splice, and target are all correct
+  (the [plan] probe shows SEAD/19 with its resolved target; the flight
+  captured the waypoint at 4,011 ft), and the release trigger never
+  fired at ~1,900 ft / 402 kts. Owner: the strike
+  release-trigger/aimpoint tranche. Also newly honest: PATH FAILs rose
+  to 46 — the strike flights now fly their FULL 90-minute arcs
+  (delivery run, post-strike rally, the station orbit, egress), and
+  the windows' final quarters land on those excursions — the
+  route-holding lens applied to delivery geometry.
 - **MC-4 — tasked mode + the matrix wiring (the remainder)**: the
   tasked runs (ATM packages, the session path) as card sources; the
   verify smoke rotation.- **MC-5 — the coverage map + the viewer Mission Lab.** The truth

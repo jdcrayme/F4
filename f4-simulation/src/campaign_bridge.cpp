@@ -1582,6 +1582,33 @@ build_mission_plan_from_flight(
             if (target_id == 0) {
                 target_id = flight_target;
             }
+            // INIT-1: a unit-targeted delivery point (the BAI family —
+            // the wire's target_num is a battalion VU that never spawns
+            // as a sim entity in the isolation worlds) still has a
+            // POSITION: the planner wrote the waypoint ON the target
+            // box. Fall back to the nearest objective entity — the
+            // battalion's own parent objective in the save — so the
+            // trigger has something to arm on.
+            if (target_id == 0 && objective_id_map != nullptr &&
+                objective_id_map->size() < 20000) {
+                double best_d2 = 15.0 * 6076.12 * (15.0 * 6076.12);
+                const double wx = pos.x, wy = pos.y;
+                for (const auto& [vu, obj_id] : *objective_id_map) {
+                    if (!obj_id.valid()) continue;
+                    const auto* otf =
+                        EntityHandle(obj_id,
+                                     const_cast<EntityWorld*>(&world))
+                            .get<entities::TransformComponent>();
+                    if (otf == nullptr) continue;
+                    const double dx = otf->position.x - wx;
+                    const double dy = otf->position.y - wy;
+                    const double d2 = dx * dx + dy * dy;
+                    if (d2 < best_d2) {
+                        best_d2 = d2;
+                        target_id = obj_id.value;
+                    }
+                }
+            }
         }
 
         NavigationModule::Waypoint route_wp{name, pos,
@@ -1595,6 +1622,22 @@ build_mission_plan_from_flight(
         // indices — the brain consults it there.
         route_wp.aimpoint_feature = w.target_building;
         plan.route.push_back(std::move(route_wp));
+    }
+
+    // ROUTE-HOLD/INIT-1 telemetry — the F4_LAND_DEBUG pattern: the plan
+    // the flight will fly, one line, gated on the env var (the A-G
+    // employment autopsy needs the route's actions + resolved targets
+    // and the flight's own fallback target).
+    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        std::fprintf(stderr, "[plan] flight_target=%llu route:",
+                     static_cast<unsigned long long>(flight_target));
+        for (const auto& w : plan.route) {
+            std::fprintf(stderr, " %s/%u/t%llu",
+                         wp_action_text(w.action),
+                         static_cast<unsigned>(w.action),
+                         static_cast<unsigned long long>(w.target_id));
+        }
+        std::fprintf(stderr, "\n");
     }
 
     // EMPL (the saved-flight arming, the coverage map's finding of

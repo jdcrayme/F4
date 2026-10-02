@@ -5,6 +5,38 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## INIT-1 — the employment chain is live: 8 of 9 strike types deliver; exit-4 gates 9 -> 1
+
+The arming tranche's finding of record ("the save's delivery flights
+carry NO target VU — a fixture data gap") was wrong: the [plan] probe
+showed valid mission targets, STRIKE/17 waypoints with matching
+target_nums, resolved plans. Three real mechanisms behind the nine
+exit-4 gates. (1) The takeoff-handoff splice ran the route-path
+projection, and the strike routes carry the post-strike rendezvous
+BEHIND the delivery point — the join stack sits on that rendezvous a
+few miles from the home field, so the cursor landed inside the stack
+(measured resumes 11/19, 8/21, 10/22) and the flight walked its waiting
+circle home without employing. A ground launch now always begins its
+route at the beginning (resume_from(1) — the projection's own
+CAMP-GATE-ROLL reduction); the projection stays the air-spawn site's
+tool. (2) WP_SAD (16) was missing from the engine's delivery-action set
+though route_builder's own vocabulary always had it — BAI/STRATBOMB/SAD
+flew over their delivery points without arming. (3) Unit-targeted
+delivery points (BAI's battalion VUs never spawn as sim entities) now
+fall back to the nearest objective entity to the waypoint's position.
+Plus two verifier repairs the first releasing matrix exposed: released
+bombs were carded as flights (filtered on the recorder's own
+missile-track stamp) and the combat-event kind names never matched the
+recorder's serialization (bomb_released/entity_killed, not CamelCase).
+Measured: employment 0 verdicts -> 22 PASS / 6 FAIL across 8 types
+(INTSTRIKE/STRIKE/STSTRIKE/ONCALLCAS 16 releases each, BAI 11);
+OCASTRIKE is the one remaining exit-4 — plan, splice, and target all
+correct, the release trigger never fired at ~1,900 ft / 402 kts (owner:
+the release-trigger/aimpoint tranche). PATH FAILs rose to 46 honestly:
+the strike flights now fly their full 90-minute arcs and the windows'
+final quarters land on the delivery-run and near-field-stack
+excursions.
+
 ## ROUTE-HOLD follow-up — horizons come from the mission's own profile; recovery FAILs 38 -> 8
 
 The recovery clause was measuring the horizon, not the behavior: 38 of

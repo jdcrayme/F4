@@ -515,17 +515,23 @@ public:
         if (phase_ == Phase::Ground && takeoff_.is_complete()) {
             if (!plan_.route.empty()) {
                 nav_.set_route(plan_.route);
-                // T3 — the ONE splice decision (see route_resume_index).
-                // The old pair — the unconditional resume_from(1)
-                // (CAMP-GATE-ROLL) plus the nearest-WAYPOINT override
-                // (the FID-4 splice, Enroute-start only) — was two rules
-                // that disagreed wherever the route revisits its
-                // departure field. The projection reduces to
-                // resume_from(1) for a launch at its own base (the
-                // projection distance to leg 0 is zero and leg 0 is
-                // scanned first) and to the route's end for a deagg
-                // materialized at the recovery field.
-                nav_.resume_from(route_resume_index());
+                // T3/CAMP-GATE-ROLL — a ground launch always begins its
+                // route AT THE BEGINNING: resume_from(1), the projection's
+                // own reduction for a launch at its base (the base IS
+                // route[0]). ROUTE-HOLD/INIT-1: the handoff used to run
+                // the full route-path projection here, and for the strike
+                // family that scan was poison — their saved routes carry
+                // the post-strike rendezvous (the refuel leg) BEHIND the
+                // delivery point, and the bridge's join stack sits on
+                // that rendezvous a few miles from the home field, so
+                // the global-nearest-leg scan landed the cursor INSIDE
+                // the stack (measured resumes 11/19, 8/21, 10/22), past
+                // the STRIKE/17 waypoint — the flight walked its waiting
+                // circle and went home without employing: the strike
+                // family's nine exit-4 gates. The projection stays the
+                // NAV-D1 air-spawn site's tool (an airborne materialization
+                // genuinely is mid-route); a departure is not.
+                nav_.resume_from(1);
                 if (std::getenv("F4_LAND_DEBUG") != nullptr) {
                     const auto* st =
                         owner_.get_interface<flight::IAircraftState>();

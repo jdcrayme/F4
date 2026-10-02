@@ -50,12 +50,17 @@
 namespace f4::ai::modules {
 
 /// True when a route waypoint's WP_ACTION is an A/G ordnance delivery
-/// action (FreeFalcon campwp.h): 14 GNDSTRIKE, 15 NAVSTRIKE, 17 STRIKE,
-/// 18 BOMB, 19 SEAD. The brain arms the StrikeModule only on these.
+/// action (FreeFalcon campwp.h): 14 GNDSTRIKE, 15 NAVSTRIKE, 16 SAD,
+/// 17 STRIKE, 18 BOMB, 19 SEAD. The brain arms the StrikeModule only on
+/// these. (INIT-1: 16 was missing — the wire's shoot-the-target point
+/// the BAI/STRATBOMB/SAD planners write, and route_builder.hpp's own
+/// delivery vocabulary has always included it — so those flights flew
+/// over their delivery points without ever arming: exit 4, released 0.)
 [[nodiscard]] constexpr bool is_ag_delivery_action(std::uint8_t action) noexcept {
     switch (action) {
         case 14:  // WP_GNDSTRIKE
         case 15:  // WP_NAVSTRIKE
+        case 16:  // WP_SAD
         case 17:  // WP_STRIKE
         case 18:  // WP_BOMB
         case 19:  // WP_SEAD

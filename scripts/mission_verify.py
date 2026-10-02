@@ -128,6 +128,16 @@ def flights_from_trace(trace: dict) -> dict:
     for e in trace.get("mission_events", []):
         slot(e["entity_id"])["events"].append(e)
 
+    # INIT-1 follow-up: released ordnance are simulated entities too —
+    # the moment flights actually deliver, each bomb's snapshots enter
+    # the trace and get carded as a "flight" that never phases, never
+    # recovers (16 MK-82 FAIL rows on the first releasing matrix). The
+    # recorder already stamps its weapon tracks (snap.missile — the
+    # replay discriminator), so an entity carrying that stamp anywhere
+    # is ordnance, not a flight.
+    flights = {eid: f for eid, f in flights.items()
+               if not any(s.get("missile") for s in f["snapshots"])}
+
     for f in flights.values():
         f["archetype"] = archetype_for(f["mission"])
         f["clauses"] = clauses_for(f["archetype"])
@@ -283,12 +293,12 @@ def eval_employment(f: dict, clause: dict) -> tuple[str, str]:
     """
     releases = 0
     for e in f.get("combat_events", []):
-        if e.get("kind") == "BombReleased" and e.get("subject_id") == f["entity_id"]:
+        if e.get("kind") == "bomb_released" and e.get("subject_id") == f["entity_id"]:
             releases += 1
     opportunities = [e for e in f["events"]
                      if e["kind"] == "waypoint_captured"
                      and e.get("wp_action") in DELIVERY_ACTIONS]
-    died = any(e.get("kind") == "AircraftKilled" and e.get("subject_id") == f["entity_id"]
+    died = any(e.get("kind") == "entity_killed" and e.get("subject_id") == f["entity_id"]
                for e in f.get("combat_events", []))
     if releases >= clause["min_releases"]:
         return "PASS", f"{releases} release(s)"
@@ -446,6 +456,7 @@ def selftest() -> int:
     def snap(t, **kw):
         s = {"entity_id": 1, "sim_time_s": t, "tick": int(t * 60),
              "callsign": "T1", "mission": kw.pop("mission", ""),
+             "ai_mode": "NavigationMode",
              "on_ground": kw.pop("on_ground", False), "vcas_kts": 300,
              "fuel_lbs": 5000, "cross_track_error_ft": 120.0}
         s.update(kw)
