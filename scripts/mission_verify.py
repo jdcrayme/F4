@@ -295,6 +295,20 @@ def eval_employment(f: dict, clause: dict) -> tuple[str, str]:
     if died:
         return "SKIP", "shot down before employment (0 releases)"
     if not opportunities:
+        # A receiver route (WP_REFUEL waypoints — the AAR stack rides the
+        # plan) legitimately never delivers: the flight is the package's
+        # refueling client, not a shooter. Measured: the single-mission
+        # STRIKE isolation drew exactly such a flight (a save package's
+        # receiver — its route: ingress, the refuel anchor, the STK1-3
+        # racetrack, the recovery tail), held the stack, and recovered
+        # when no tanker answered. Correct degraded AAR, not a defect.
+        refuel_legs = sum(1 for e in f["events"]
+                          if e["kind"] == "waypoint_captured"
+                          and e.get("wp_action") == 4)
+        if refuel_legs:
+            return "SKIP", (f"receiver route (no delivery opportunity; "
+                            f"{refuel_legs} refuel leg(s) flown — AAR "
+                            f"package client)")
         return "SKIP", ("no delivery waypoint on the route (no employment "
                         "opportunity — the route arming/tasking concern)")
     return "FAIL", (f"{releases} releases across {len(opportunities)} "
