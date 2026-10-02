@@ -5,6 +5,27 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MC-4 (opening) — the matrix wires the cards: the coverage map exists
+
+`qc_missions.py --record` now runs the contract verifier on every
+per-type run's trace — the `cards` column (pass/total per type, failed
+clauses per flight in qc_matrix.json), `--no-verify` to opt out; card
+FAILs surface but do not gate the matrix exit (the owned findings are
+card data until their tranches land). The first full run — TestCamp,
+22 mission types, 86 flights carded, 51 s wall — IS the coverage map,
+and its headline: **52 of 86 flights fail the PATH clause** —
+steady-state leg cross-track above 2,000 ft on their SAVED routes. Not
+a clause artifact (saved routes are turn-sparse: 0.07 captures/min
+median vs the 0.5/min calibration flight), and it cascades: 20
+first-attempt fails (off-leg arrivals make unstable approaches), 30
+recovery fails that are the 30-min horizon cutting missions mid-flight
+(a horizon artifact — per-category horizons are the fix). The strike
+family's 8 types all gate-fail on the saved-flight arming gap (the
+EMPL finding); ESCORT and OTHER book 0 airborne (the plain-path
+ground-ops crawl); the CAP/support/logistics families fly and recover.
+The dominant behavioral tranche is named: route holding on saved
+flights.
+
 ## MC-3 — FIRST_ATTEMPT and DURATION clauses: the go-around rate is a card number
 
 The user's bar, made permanent: a go-around is a deviation — the

@@ -236,6 +236,7 @@ def run_one(tool: Path, world_json: Path, byte: int, name: str, args,
             }
             _absorb_summary(row, prior)
             row["verdict"] = verdict_for(row, args)
+            card_column(row, out_dir, args)
             return row
 
     cmd = [
@@ -277,7 +278,49 @@ def run_one(tool: Path, world_json: Path, byte: int, name: str, args,
                                       encoding="ascii")
 
     row["verdict"] = verdict_for(row, args)
+    card_column(row, out_dir, args)
     return row
+
+
+def card_column(row: dict, out_dir: Path, args) -> None:
+    """MC-4 - the contract cards: run mission_verify on the run's
+    trace (when --record kept one) and absorb the per-flight card
+    verdicts. Card FAILs SURFACE in the matrix (the coverage map
+    reads them) but do not gate the matrix exit - the owned findings
+    (the splice transient, the transfer stub) are card data until
+    their tranches land; gating them would hide the coverage behind
+    the known reds."""
+    if not getattr(args, "verify", False):
+        return
+    trace = out_dir / "trace.json"
+    if not trace.exists():
+        row["card"] = {"status": "SKIP", "detail": "no trace (--record? )"}
+        return
+    verifier = Path(__file__).resolve().parent / "mission_verify.py"
+    proc = subprocess.run(
+        [sys.executable, str(verifier), str(trace),
+         "--out", str(out_dir / "cards")],
+        capture_output=True, text=True)
+    report = out_dir / "cards" / "mission_report.json"
+    if not report.exists():
+        row["card"] = {"status": "ERROR",
+                       "detail": (proc.stderr or proc.stdout)[-200:]}
+        return
+    rep = json.loads(report.read_text(encoding="utf-8"))
+    flights = rep.get("flights", [])
+    passed = sum(1 for c in flights if c.get("overall") == "PASS")
+    failed = [c for c in flights if c.get("overall") != "PASS"]
+    row["card"] = {
+        "status": "PASS" if not failed else "FAIL",
+        "flights": len(flights),
+        "passed": passed,
+        "failed": len(failed),
+        "failed_detail": [
+            {"callsign": c.get("callsign"), "mission": c.get("mission"),
+             "clauses": [cl for cl in c.get("clauses", [])
+                         if cl.get("verdict") == "FAIL"]}
+            for c in failed],
+    }
 
 
 def verdict_for(row: dict, args) -> tuple[str, str]:
@@ -348,18 +391,21 @@ def write_markdown(rows: list[dict], args, path: Path) -> None:
         f"(cycle {args.tasking_cycle} s)",
         "",
         "| mission | cat | in world | spawned | routes | airborne | "
-        "armed | released | exit | verdict |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "armed | released | exit | verdict | cards |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         s = r.get("summary", {})
         status, detail = r["verdict"]
+        c = r.get("card", {})
+        cards = (f"{c.get('passed', '-')}/{c.get('flights', '-')}"
+                 if isinstance(c, dict) and 'status' in c else "-")
         lines.append(
             f"| {r['mission']} | {r['category']} | {r['flights_in_world']} "
             f"| {s.get('spawned', '-')} | {s.get('routes', '-')} "
             f"| {s.get('airborne', '-')}/{s.get('aircraft', '-')} "
             f"| {s.get('armed', '-')} | {s.get('released', '-')} "
-            f"| {r['exit']} | **{status}** — {detail} |")
+            f"| {r['exit']} | **{status}** — {detail} | {cards} |")
     lines += [
         "",
         "Row dirs carry each run's artifacts; `trace.json` (with "
@@ -399,6 +445,9 @@ def main() -> int:
     p.add_argument("--reuse", action="store_true",
                    help="skip a run whose campaign_qc_summary.json "
                         "already exists (resume an interrupted matrix)")
+    p.add_argument("--no-verify", action="store_true",
+                   help="skip the MC-2 contract cards (mission_verify.py) "
+                        "on each run's trace")
     p.add_argument("--out-root", type=Path, default=None)
     args = p.parse_args()
 
@@ -428,6 +477,7 @@ def main() -> int:
                          time.strftime("%Y%m%d-%H%M%S"))
     args.out_root = args.out_root.resolve()
     args.out_root.mkdir(parents=True, exist_ok=True)
+    args.verify = not args.no_verify
 
     def work(item: tuple[int, str]) -> dict:
         b, n = item
@@ -455,11 +505,14 @@ def main() -> int:
         status, detail = r["verdict"]
         if status == "FAIL":
             any_fail = True
+        c = r.get("card", {})
+        cmark = (f"{c['status']}/{c.get('flights', 0)}"
+                 if isinstance(c, dict) and 'status' in c else "-")
         print(f"{r['mission']:<17}{r['category']:<10}"
               f"{r['flights_in_world']:>4}{s.get('spawned', 0):>4}"
               f"{s.get('routes', 0):>4}{s.get('airborne', 0):>5}"
               f"{s.get('armed', 0):>5}{s.get('released', 0):>5}"
-              f"{r['exit']:>6}  {status}: {detail}")
+              f"{r['exit']:>6}  {status}: {detail}  [cards {cmark}]")
 
     (args.out_root / "qc_matrix.json").write_text(
         json.dumps({

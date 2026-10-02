@@ -255,10 +255,36 @@ with an owner.
   coverage map names it — likely AIRLIFT, the logistics family whose
   ground-side consumer, DOM-2 supply, already exists; there is no
   paradrop anywhere in the stock wire we converted).
-- **MC-4 — tasked mode + the matrix wiring**: qc_missions.py drives
-  the verifier; verify.cmd gains the smoke rotation + the opt-in
-  matrix stage.
-- **MC-5 — the coverage map + the viewer Mission Lab.** The truth
+- **MC-4 — the matrix wiring — OPENING LANDED (2026-10-02).**
+  `qc_missions.py --record` now runs the contract verifier on every
+  run's trace (the `cards` column + per-flight failed-clause details in
+  `qc_matrix.json`; `--no-verify` opts out; card FAILs surface but do
+  not gate the matrix exit — the owned findings are card data until
+  their tranches land). **The coverage map exists** (the TestCamp run:
+  22 types, 86 flights carded, 51 s wall) — and its headline finding:
+
+  **ROUTE HOLDING ON SAVED FLIGHTS (the dominant behavioral finding).**
+  52 of 86 carded flights FAIL the PATH clause — steady-state leg
+  cross-track above the 2,000-ft band on the SAVED routes (the strike
+  isolation's flight never got under 17,409 ft). Not a clause artifact:
+  saved routes are turn-SPARSE (0.07 captures/min median vs the 0.5/min
+  calibration flight), so the p90 is genuine steady-state deviation.
+  Downstream: 20 first-attempt FAILs (arrive off-leg -> unstable
+  approach -> go-around) and 30 recovery FAILs that are the 30-min
+  matrix horizon cutting missions mid-flight (a horizon artifact, not a
+  defect — per-category horizons are the fix). Owner: a nav/flight-
+  control route-holding tranche. Until it lands, the cards say what
+  Falcon's campaign would have said: the flights go where the route
+  points them only roughly.
+
+  The rest of the map: the strike family's 8 types all gate-fail
+  (exit 4 — the saved-flight arming gap, the EMPL finding); ESCORT and
+  OTHER book 0 airborne (the plain-path ground-ops crawl); the CAP/
+  support/logistics families fly and recover. TANKER: no flights in
+  this world (the known TestCamp gap).
+- **MC-4 — tasked mode + the matrix wiring (the remainder)**: the
+  tasked runs (ATM packages, the session path) as card sources; the
+  verify smoke rotation.- **MC-5 — the coverage map + the viewer Mission Lab.** The truth
   table over all 41 types; the interactive door.
  Flight
   identity on the trace snapshots (mission name, flight VU, TOT,
