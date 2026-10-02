@@ -43,6 +43,14 @@
 #   python3 scripts/qc_missions.py world.json --tasking 35 --tasking-cycle 300
 #   python3 scripts/qc_missions.py world.json --jobs 4 --record --minutes 30
 #
+# Horizons: --minutes is the FLOOR (and the flat fallback with
+# --flat-minutes). By default each run's horizon comes from the mission's
+# own MissionProfiles.json max_time (Falcon's planned sortie window),
+# clamped to [--minutes, --max-horizon]: a 30-min horizon was cutting
+# missions mid-flight (38 recovery FAILs were the horizon, not behavior)
+# and could never hold a 45-min station contract. The per-run horizon is
+# recorded on each row ("minutes") and in every verdict string.
+#
 # Exit codes: 0 all rows PASS / SKIPPED-absent; 1 any FAIL.
 #
 # Stdlib only. Python 3.10+.
@@ -148,6 +156,30 @@ def world_mission_histogram(world_json: Path) -> tuple[Counter, int]:
     return hist, tasked
 
 
+def mission_horizons(profiles_json: Path, floor_min: int,
+                     cap_min: int) -> dict[str, int]:
+    """Per-mission sim horizons from Falcon's own sortie windows: the
+    profile's max_time (minutes — the planner's planned duration) is the
+    honest prior for "how long until this mission's arc can complete",
+    clamped to [floor_min, cap_min]. A 30-min horizon was cutting missions
+    mid-flight (the recovery clause was measuring the horizon, not the
+    behavior) and could never hold the bridge's 45-min station contracts.
+    Missing/zero max_time falls back to the floor."""
+    try:
+        with profiles_json.open("r", encoding="utf-8") as f:
+            profs = json.load(f).get("profiles") or []
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"note: no per-profile horizons ({e}); flat {floor_min} min")
+        return {}
+    out: dict[str, int] = {}
+    for p in profs:
+        name = p.get("name")
+        if not name:
+            continue
+        out[name] = max(floor_min, min(int(p.get("max_time") or 0), cap_min))
+    return out
+
+
 def resolve_mission_spec(spec: str, hist: Counter) -> list[tuple[int, str]]:
     """'AMIS_INTSTRIKE' | 'Strike' | 'auto' | comma list -> [(byte, name)].
     Category names expand to the family bytes PRESENT in the world;
@@ -194,6 +226,13 @@ def _absorb_summary(row: dict, summary_path: Path) -> None:
             "routes": s.get("b3_loop", {}).get("routes_attached", 0),
             "airborne": s.get("sim_run", {}).get("airborne_at_end", 0),
             "aircraft": s.get("sim_run", {}).get("aircraft", 0),
+            # Complete-phase aircraft at run end — the recovery counter
+            # the airborne gate needs once horizons outlive the sorties
+            # (everything landed is SUCCESS, not ground ops stalled; the
+            # C++ exit-3 gate carries the same two conditions).
+            "complete": sum(1 for e in (s.get("sim_run", {})
+                                        .get("aircraft_end") or [])
+                            if e.get("phase") == "Complete"),
             "armed": s.get("ordnance", {}).get("strike_flights_armed", 0),
             "released": s.get("ordnance", {}).get("bombs_released", 0),
             "impacts": s.get("ordnance", {}).get("bombs_impacted", 0),
@@ -216,6 +255,10 @@ def run_one(tool: Path, world_json: Path, byte: int, name: str, args,
             out_dir: Path) -> dict:
     """One campaign_qc invocation for one mission byte + verdict parsing."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    # ROUTE-HOLD follow-up: the per-mission horizon (profile max_time,
+    # clamped) — recorded on the row and embedded in the run itself.
+    minutes = (args._horizons.get(name, args.minutes)
+               if not args.flat_minutes else args.minutes)
 
     # --reuse: an existing summary + exit sidecar means this run already
     # finished (resume an interrupted matrix without re-paying runs).
@@ -228,6 +271,7 @@ def run_one(tool: Path, world_json: Path, byte: int, name: str, args,
                 "byte": byte,
                 "category": BYTE_TO_CATEGORY.get(byte, "Other"),
                 "flights_in_world": args._hist.get(byte, 0),
+                "minutes": minutes,
                 "exit": int(prior_exit.read_text(encoding="ascii").strip()),
                 "wall_sec": 0.0,
                 "out_dir": str(out_dir),
@@ -242,7 +286,7 @@ def run_one(tool: Path, world_json: Path, byte: int, name: str, args,
     cmd = [
         str(tool), str(world_json),
         "--mission", name,
-        "--minutes", str(args.minutes),
+        "--minutes", str(minutes),
         "--max-flights", str(args.max_flights),
         "--class-table", str(args.class_table),
         "--config", str(args.config),
@@ -265,6 +309,7 @@ def run_one(tool: Path, world_json: Path, byte: int, name: str, args,
         "byte": byte,
         "category": BYTE_TO_CATEGORY.get(byte, "Other"),
         "flights_in_world": args._hist.get(byte, 0),
+        "minutes": minutes,
         "exit": proc.returncode,
         "wall_sec": round(wall, 1),
         "out_dir": str(out_dir),
@@ -342,26 +387,34 @@ def verdict_for(row: dict, args) -> tuple[str, str]:
         return ("FAIL", "no campaign_qc_summary.json parsed")
 
     cat = row["category"]
+    minutes = row.get("minutes", args.minutes)
     notes: list[str] = []
 
     if s["routes"] != s["spawned"]:
         return ("FAIL",
                 f"routes {s['routes']} != spawned {s['spawned']} "
                 "(saved plan did not attach)")
-    if s["airborne"] < 1:
+    # 0 airborne at end is a stall only when NOTHING recovered — the
+    # same two conditions the C++ exit-3 gate carries. A horizon past
+    # the sorties' length lands every flight Complete on the deck, and
+    # that is the system working.
+    if s["airborne"] < 1 and s.get("complete", 0) == 0:
         return ("FAIL",
-                f"0 airborne at end ({s['aircraft']} spawned, "
-                f"{args.minutes} min horizon)")
+                f"0 airborne at end and none recovered "
+                f"({s['aircraft']} spawned, {minutes} min horizon) — "
+                "ground ops stalled")
     if s["airborne"] < s["aircraft"]:
         notes.append(f"{s['aircraft'] - s['airborne']} not airborne at end "
-                     "(recovered or still taxiing)")
+                     f"({s.get('complete', 0)} recovered)")
+    elif s.get("complete", 0) == s["aircraft"]:
+        notes.append(f"all {s['aircraft']} recovered by {minutes} min")
 
     if cat in ORDNANCE_CATEGORIES:
         if s["armed"] > 0 and s["released"] == 0:
             return ("FAIL",
                     "EMPLOYMENT: armed %d, released 0 after %d min — no "
                     "ground target ever set? autopsy: trace.json ai_state "
-                    "+ target_description" % (s["armed"], args.minutes))
+                    "+ target_description" % (s["armed"], minutes))
         if s["armed"] == 0 and s["released"] == 0:
             # strike_flights_armed counts live Bomb stations POST-run, so
             # a flight that released its whole stick ends at 0 — that is
@@ -376,23 +429,26 @@ def verdict_for(row: dict, args) -> tuple[str, str]:
 
     return ("PASS", "; ".join(notes) if notes else
             f"spawned {s['spawned']}, airborne {s['airborne']}/"
-            f"{s['aircraft']} at {args.minutes} min")
+            f"{s['aircraft']} at {minutes} min")
 
 
 # ---------------------------------------------------------------------------
 def write_markdown(rows: list[dict], args, path: Path) -> None:
+    hz = ("per-profile max_time, floor "
+          f"{args.minutes} / cap {args.max_horizon}"
+          if getattr(args, "_horizons", None) else f"flat {args.minutes}")
     lines = [
         "# qc_missions — the per-mission-type QC matrix",
         "",
         f"world: `{args.world_json}`  ",
-        f"horizon: {args.minutes} min sim · cap: {args.max_flights} "
+        f"horizon: {hz} · cap: {args.max_flights} "
         f"flights/type · record: {'on' if args.record else 'off'} · "
         f"tasking: {args.tasking or 'off'} min "
         f"(cycle {args.tasking_cycle} s)",
         "",
-        "| mission | cat | in world | spawned | routes | airborne | "
-        "armed | released | exit | verdict | cards |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| mission | cat | in world | horizon | spawned | routes | "
+        "airborne | armed | released | exit | verdict | cards |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         s = r.get("summary", {})
@@ -402,6 +458,7 @@ def write_markdown(rows: list[dict], args, path: Path) -> None:
                  if isinstance(c, dict) and 'status' in c else "-")
         lines.append(
             f"| {r['mission']} | {r['category']} | {r['flights_in_world']} "
+            f"| {r.get('minutes', args.minutes)} min "
             f"| {s.get('spawned', '-')} | {s.get('routes', '-')} "
             f"| {s.get('airborne', '-')}/{s.get('aircraft', '-')} "
             f"| {s.get('armed', '-')} | {s.get('released', '-')} "
@@ -433,7 +490,16 @@ def main() -> int:
                    help="comma list of AMIS names and/or categories, "
                         "or 'auto' (one representative per category)")
     p.add_argument("--minutes", type=int, default=30,
-                   help="sim horizon per run (default 30)")
+                   help="sim horizon FLOOR per run (default 30); the "
+                        "per-mission horizon comes from the profile's "
+                        "max_time clamped to [--minutes, --max-horizon]")
+    p.add_argument("--max-horizon", type=int, default=90,
+                   help="per-mission horizon cap, minutes (default 90 — "
+                        "covers the bridge's 45-min station contracts "
+                        "plus transit and recovery)")
+    p.add_argument("--flat-minutes", action="store_true",
+                   help="run every type at --minutes (the pre-profile "
+                        "flat-horizon behavior; for A/B comparisons)")
     p.add_argument("--max-flights", type=int, default=4,
                    help="spawn cap per run (default 4)")
     p.add_argument("--record", action="store_true",
@@ -462,8 +528,13 @@ def main() -> int:
 
     hist, tasked = world_mission_histogram(args.world_json)
     args._hist = hist
+    args._horizons = ({} if args.flat_minutes else
+                      mission_horizons(args.profiles, args.minutes,
+                                       args.max_horizon))
+    hz = (f"per-profile (floor {args.minutes}, cap {args.max_horizon})"
+          if args._horizons else f"flat {args.minutes}")
     print(f"world: {args.world_json.name}  flights(tasked)={tasked}  "
-          f"distinct mission bytes={len(hist)}")
+          f"distinct mission bytes={len(hist)}  horizon: {hz}")
 
     targets = resolve_mission_spec(args.missions, hist)
     if not targets:
@@ -495,7 +566,7 @@ def main() -> int:
 
     # ---- the matrix -----------------------------------------------------
     print()
-    hdr = (f"{'mission':<17}{'cat':<10}{'n':>4}{'sp':>4}{'rt':>4}"
+    hdr = (f"{'mission':<17}{'cat':<10}{'n':>4}{'min':>5}{'sp':>4}{'rt':>4}"
            f"{'air':>5}{'arm':>5}{'rel':>5}{'exit':>6}  verdict")
     print(hdr)
     print("-" * len(hdr))
@@ -509,7 +580,8 @@ def main() -> int:
         cmark = (f"{c['status']}/{c.get('flights', 0)}"
                  if isinstance(c, dict) and 'status' in c else "-")
         print(f"{r['mission']:<17}{r['category']:<10}"
-              f"{r['flights_in_world']:>4}{s.get('spawned', 0):>4}"
+              f"{r['flights_in_world']:>4}{r.get('minutes', args.minutes):>5}"
+              f"{s.get('spawned', 0):>4}"
               f"{s.get('routes', 0):>4}{s.get('airborne', 0):>5}"
               f"{s.get('armed', 0):>5}{s.get('released', 0):>5}"
               f"{r['exit']:>6}  {status}: {detail}  [cards {cmark}]")
@@ -518,6 +590,9 @@ def main() -> int:
         json.dumps({
             "world": str(args.world_json),
             "minutes": args.minutes,
+            "max_horizon": args.max_horizon,
+            "horizons": "flat" if args.flat_minutes else
+                        "per-profile max_time (floor/cap clamped)",
             "max_flights": args.max_flights,
             "tasking": args.tasking,
             "tasking_cycle": args.tasking_cycle,

@@ -334,6 +334,39 @@ with an owner.
   the flight settles left of the line). Owner of the remainder: the
   departure-procedure tranche (turn during the climb at a lower gate)
   and the per-category horizons.
+
+- **MC-4 — the per-profile horizons — LANDED (2026-10-02).** The
+  recovery clause was measuring the horizon, not the behavior: 38 of 76
+  carded flights "failed to recover" only because the flat 30-minute
+  matrix horizon cut them mid-flight — and a 45-minute station contract
+  could never complete inside it. `qc_missions.py` now derives each
+  run's horizon from the mission's own MissionProfiles.json `max_time`
+  (Falcon's planned sortie window), clamped to [--minutes, --max-horizon]
+  (30/90; `--flat-minutes` restores the flat behavior), records the
+  horizon per row, and re-scopes the 0-airborne verdict to the C++ exit-3
+  gate's own two conditions (0 airborne AND none recovered — a horizon
+  past the sorties' length lands every flight Complete on the deck, and
+  that is the system working). Same 22 types
+  (`qc/coverage_map_horizons`): **recovery FAILs 38 → 8**, duration
+  SKIPs 14 → 0 (completed sorties now judged; all under the 120-min
+  band). The longer windows made previously-hidden findings VISIBLE —
+  the map's job:
+  - **6 recovery FAILs are the new dominant finding: the approach
+    chain stalls in ProceedToFix.** The AIRLIFT flight flies a clean
+    88-minute arc (transit, the full 45-min station, egress — PATH p90
+    354 ft) then spends its last 18 minutes chasing the approach entry
+    fix without capturing it (arriving from the orbit-exit geometry).
+    Owner: the approach/landing tranche.
+  - 4 newly-visible first_attempt FAILs: one go-around each (ECM ×2,
+    JSTAR, SWEEP) before a recovery — the horizon used to cut the
+    approach before the attempt counted.
+  - 2 newly-visible PATH FAILs: STRIKE CS002-4 and TANK CS145-3 fly
+    long enough now that a late-route excursion lands in the final
+    quarter (their 30-minute windows ended clean).
+  Unchanged: the 9 strike-family exit-4 gates (the fixture target-VU
+  gap — still the owner of the employment story), station SKIP/FAIL
+  counts (the never-held population is the splice's anchor skip, not a
+  horizon question).
 - **MC-4 — tasked mode + the matrix wiring (the remainder)**: the
   tasked runs (ATM packages, the session path) as card sources; the
   verify smoke rotation.- **MC-5 — the coverage map + the viewer Mission Lab.** The truth

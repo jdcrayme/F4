@@ -5,6 +5,29 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## ROUTE-HOLD follow-up — horizons come from the mission's own profile; recovery FAILs 38 -> 8
+
+The recovery clause was measuring the horizon, not the behavior: 38 of
+76 carded flights "failed to recover" only because the flat 30-minute
+matrix horizon cut them mid-flight, and a 45-minute station contract
+could never complete inside it. qc_missions.py now derives each run's
+horizon from the mission's own MissionProfiles.json max_time (Falcon's
+planned sortie window) clamped to [--minutes, --max-horizon] (30/90;
+--flat-minutes restores the flat behavior), records the horizon per row,
+and re-scopes the 0-airborne verdict to the C++ exit-3 gate's own two
+conditions (0 airborne AND none recovered — a horizon past the sorties'
+length lands every flight Complete on the deck, and that is the system
+working). Same 22 types: recovery FAILs 38 -> 8, duration SKIPs 14 -> 0.
+The longer windows made previously-hidden findings visible — the map's
+job: 6 recovery FAILs are the new dominant finding (the approach chain
+stalls in ProceedToFix after an otherwise-clean 88-minute arc — the
+AIRLIFT flight holds its station, egresses, then spends 18 minutes
+chasing the entry fix without capturing it; owner: the approach/landing
+tranche), 4 newly-visible first_attempt go-arounds (ECM x2, JSTAR,
+SWEEP), and 2 newly-visible late-route PATH excursions (STRIKE CS002-4,
+TANK CS145-3). The 9 strike-family exit-4 gates are unchanged (the
+fixture target-VU gap still owns the employment story).
+
 ## ROUTE-HOLD — flights hold their saved legs: PATH fails 52 -> 13
 
 The coverage map's dominant finding, root-caused on its own traces and
