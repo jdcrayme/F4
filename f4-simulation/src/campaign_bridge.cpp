@@ -1609,6 +1609,34 @@ build_mission_plan_from_flight(
                     }
                 }
             }
+            // INIT-1b: a delivery waypoint whose resolved target sits
+            // far from the waypoint itself CO-LOCATES with the target.
+            // The planner's marker is a steer point; the target is what
+            // the stick is for — and the two can be whole provinces
+            // apart (the measured OCASTRIKE flight: the SEAD marker at
+            // grid (428,496), its target battalion at (398,236) —
+            // 266,000 ft). The EMPL-1a attack run and the capture are
+            // keyed on the waypoint, while the StrikeModule's release
+            // gate is keyed on the target: the flight flew its SEAD
+            // point at 4,011 ft and went home with the stick unfallen.
+            // The waypoint becomes the target's position; the delivery
+            // altitude floor already applied above.
+            if (target_id != 0) {
+                const auto* ttf =
+                    EntityHandle(entities::EntityId{target_id},
+                                 const_cast<EntityWorld*>(&world))
+                        .get<entities::TransformComponent>();
+                if (ttf != nullptr) {
+                    const double ddx = ttf->position.x - pos.x;
+                    const double ddy = ttf->position.y - pos.y;
+                    constexpr double kCoLocateThresholdFt = 30000.0;
+                    if (ddx * ddx + ddy * ddy >
+                        kCoLocateThresholdFt * kCoLocateThresholdFt) {
+                        pos.x = ttf->position.x;
+                        pos.y = ttf->position.y;
+                    }
+                }
+            }
         }
 
         NavigationModule::Waypoint route_wp{name, pos,
@@ -1632,10 +1660,11 @@ build_mission_plan_from_flight(
         std::fprintf(stderr, "[plan] flight_target=%llu route:",
                      static_cast<unsigned long long>(flight_target));
         for (const auto& w : plan.route) {
-            std::fprintf(stderr, " %s/%u/t%llu",
+            std::fprintf(stderr, " %s/%u/t%llu(%.0f,%.0f)",
                          wp_action_text(w.action),
                          static_cast<unsigned>(w.action),
-                         static_cast<unsigned long long>(w.target_id));
+                         static_cast<unsigned long long>(w.target_id),
+                         w.position.x, w.position.y);
         }
         std::fprintf(stderr, "\n");
     }

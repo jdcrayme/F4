@@ -406,16 +406,30 @@ with an owner.
   filtered from the cards (the recorder's own missile-track stamp) and
   the verifier's combat-event kind names fixed to the recorder's
   serialization (bomb_released/entity_killed — CamelCase never matched
-  anything). **OCASTRIKE is the one remaining exit-4** and a NEW,
-  cleanly-scoped finding: the plan, splice, and target are all correct
-  (the [plan] probe shows SEAD/19 with its resolved target; the flight
-  captured the waypoint at 4,011 ft), and the release trigger never
-  fired at ~1,900 ft / 402 kts. Owner: the strike
-  release-trigger/aimpoint tranche. Also newly honest: PATH FAILs rose
-  to 46 — the strike flights now fly their FULL 90-minute arcs
-  (delivery run, post-strike rally, the station orbit, egress), and
-  the windows' final quarters land on those excursions — the
-  route-holding lens applied to delivery geometry.
+  anything). Also newly honest: PATH FAILs rose to 46 — the strike
+  flights now fly their FULL 90-minute arcs (delivery run, post-strike
+  rally, the station orbit, egress), and the windows' final quarters
+  land on those excursions — the route-holding lens applied to delivery
+  geometry.
+
+- **INIT-1b — OCASTRIKE solved; ZERO matrix gate fails (2026-10-02).**
+  The [strike] probe (brain_component's strike block, F4_LAND_DEBUG)
+  caught the last gate's mechanism: the flight sat at its SEAD waypoint
+  with the module armed and the aim VALID — 227,000 ft away and
+  receding. The planner's delivery marker is a steer point, and its
+  target (a battalion) was a whole province from it: the SEAD marker at
+  grid (428,496), the target at (398,236) — 266,000 ft. The nav flies
+  to the marker (EMPL-1a's attack run and the capture are keyed on it)
+  while the release gate is keyed on the target — the flight flew its
+  point at 4,011 ft and went home with the stick unfallen, the target
+  never approached. Fix: a delivery waypoint whose resolved target sits
+  more than 30,000 ft away CO-LOCATES with it at plan build (the
+  delivery altitude floor still applies). Measured: OCASTRIKE exit 0,
+  16 releases / 16 impacts; **the full 22-type matrix runs with ZERO
+  gate fails for the first time**, employment 26 PASS / 2 FAIL. The
+  card residuals (PATH 45 on the long arcs, recovery 20, first_attempt
+  9 go-arounds) are the delivery-geometry route-holding work and the
+  approach chain — behavioral, no longer gate-level.
 - **MC-4 — tasked mode + the matrix wiring (the remainder)**: the
   tasked runs (ATM packages, the session path) as card sources; the
   verify smoke rotation.- **MC-5 — the coverage map + the viewer Mission Lab.** The truth

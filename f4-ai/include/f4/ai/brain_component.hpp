@@ -1092,6 +1092,43 @@ public:
                 }
                 strike_.set_target(aim_target_id);
                 strike_.update(dt, state, aim, aim_valid);
+                // ROUTE-HOLD/INIT-1 telemetry — the F4_LAND_DEBUG pattern
+                // (1 Hz while a delivery waypoint is armed): the aim the
+                // module was given and the geometry it computed, so a
+                // no-release run autopsies itself (the OCASTRIKE exit-4:
+                // the plan, splice, and target were all correct and the
+                // stick still never fell).
+                if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+                    static int dbg_strike = 0;
+                    if (++dbg_strike % 60 == 1) {
+                        const double sdx = aim.x - state->position_east_ft();
+                        const double sdy =
+                            aim.y - state->position_north_ft();
+                        std::fprintf(stderr,
+                                     "[strike] id %llu wp %zu tgt %llu"
+                                     " aim_valid %d"
+                                     " dist %.0f rng %.0f miss %.0f"
+                                     " alt %.0f gs %.0f vs %.0f\n",
+                                     static_cast<unsigned long long>(
+                                         owner_.id().value),
+                                     wp_index,
+                                     static_cast<unsigned long long>(
+                                         aim_target_id),
+                                     aim_valid ? 1 : 0,
+                                     std::sqrt(sdx * sdx + sdy * sdy),
+                                     strike_.computed_release_range_ft(),
+                                     strike_.predicted_miss_ft(),
+                                     state != nullptr
+                                         ? state->altitude_msl_ft()
+                                         : -1.0,
+                                     state != nullptr
+                                         ? state->ground_speed_fps()
+                                         : -1.0,
+                                     state != nullptr
+                                         ? state->vertical_speed_fpm()
+                                         : -1.0);
+                    }
+                }
                 combat_intent_.bomb_release =
                     strike_.release_pulse() && !hold_fire_;
                 combat_intent_.bomb_target_id =

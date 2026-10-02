@@ -37,6 +37,24 @@ the strike flights now fly their full 90-minute arcs and the windows'
 final quarters land on the delivery-run and near-field-stack
 excursions.
 
+## INIT-1b — OCASTRIKE solved; the coverage matrix runs with ZERO gate fails
+
+The [strike] probe caught the last exit-4's mechanism: the OCASTRIKE
+flight sat at its SEAD waypoint, module armed, aim VALID — 227,000 ft
+away and receding. The planner's delivery marker is a steer point and
+its target (a battalion) was a whole province from it (SEAD marker at
+grid (428,496), target at (398,236) — 266,000 ft): the nav flies to the
+marker (the attack run and the capture are keyed on it) while the
+release gate is keyed on the target — the flight flew its point at
+4,011 ft and went home with the stick unfallen. Fix: a delivery
+waypoint whose resolved target sits more than 30,000 ft away
+co-locates with it at plan build (the delivery altitude floor still
+applies). Measured: OCASTRIKE exit 0, 16 releases / 16 impacts; the
+full 22-type matrix runs with ZERO gate fails for the first time;
+employment 26 PASS / 2 FAIL. Card residuals (PATH 45 on the long arcs,
+recovery 20, first_attempt 9) are behavioral — the delivery-geometry
+route-holding work and the approach chain's ProceedToFix stall.
+
 ## ROUTE-HOLD follow-up — horizons come from the mission's own profile; recovery FAILs 38 -> 8
 
 The recovery clause was measuring the horizon, not the behavior: 38 of
