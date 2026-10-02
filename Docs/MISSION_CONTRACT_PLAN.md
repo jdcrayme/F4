@@ -201,19 +201,27 @@ with an owner.
   pipeline (prioritize/deconflict/package/escorts/TOT slot); a team
   that cannot field the profile lands in the ATM's own unfilled
   counter. **First findings** (the generator immediately paid for
-  itself): (a) the ATM-composed strike flew waypoints STK1-3 with NO
-  target and NO TOT on the intent (plan.target_objective_id == 0,
-  tot_s == 0 — the release trigger never armed; the card's EMPLOYMENT
-  FAIL + the identity join's tgt/tot columns point straight at it;
-  owner: the employment tranche — the ATM package's target/TOT must
-  reach the intent); (b) TANKER cannot isolate on TestCamp — no tanker
-  unit resolves (the coverage map's first row); (c) ATM-composed spawns
+  itself): (a) TANKER cannot isolate on TestCamp — no tanker unit
+  resolves (the coverage map's first row); (b) ATM-composed spawns
   of some squadrons hit unknown-flight-id in the PLAIN qc path (the C5
   war's session path spawns them — the synthetic=48 certificate — so
   the seam is the plain path's unit map; owner: the coverage/MC-4
-  tranche).
+  tranche). **RETRACTED (MC-3, the honesty rule)**: the original (a) —
+  "the ATM strike flew STK1-3 with no target/TOT" — was a MISREAD: the
+  isolation drew a save-package RECEIVER (its route carries WP_REFUEL —
+  TestCamp's 158 receiver flights) and the STK1-3 aims are the EMPL-2
+  AAR racetrack stack (refuel action, 45-min hold), not strike points;
+  the flight held the stack and recovered when no tanker answered
+  (TestCamp fields none) — correct degraded AAR, and the EMPLOYMENT
+  clause now says so (`SKIP receiver route`). The genuine open
+  employment question — a saved STRIKE flight with a delivery-action
+  waypoint + target to isolate — waits for the tasked mode (MC-4) or a
+  different world; the ATM's own strike route DOES stamp delivery
+  waypoints (the RouteBuilder's C3 arming rule).
   `--mission-spec` (the full spec file: loadouts, the supporting cast,
-  opposition) rides with MC-3's archetype contracts.- **MC-3 — the core archetype contracts — OPEN; the employment
+  opposition) rides with MC-3's archetype contracts.
+
+- **MC-3 — the core archetype contracts — OPEN; the employment
   semantics LANDED (2026-10-02).** The EMPLOYMENT clause now splits
   OPPORTUNITY from EXECUTION: the route's delivery-action waypoints
   (wp_action 14-19 on the capture events) are the opportunity; the
