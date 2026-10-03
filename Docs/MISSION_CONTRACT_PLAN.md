@@ -501,7 +501,24 @@ with an owner.
   448-717-ft stick residual is therefore NOT the drag factor: it is the
   pipper model vs the bomb sim at the release (the CCIP accuracy
   chain's own tranche), plus the second-pass overflight sticks
-  (10-12k) whose release geometry needs the second-pass analysis.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
+  (10-12k) whose release geometry needs the second-pass analysis.- **INIT-1i follow-up — the per-flight armed arcs measured (2026-10-03,
+  the [strike] probe, qc/init2).** The OCASTRIKE run's four attack runs,
+  separated by id: three converge well (the pipper minima 426 / 1,978 /
+  3,990; the sticks 316-450 / 448-717 ft) and one — the delivery-first
+  flight 4294971682 — never converges: the pipper minimum 30,035, the
+  dist bottoming at 34,931 ft then receding, the stick falling only via
+  the holdover (10-12k wide). Its route resumes AT the co-located
+  delivery point (INIT-1d's resume-0), the attack leg anchors at the
+  spawn, and the approach geometry (the spawn heading vs the
+  assembly-to-aim line) defeats the leg's cross-track convergence — the
+  aircraft oscillated wide and receded without ever pointing at the
+  aim. Owner: the CCIP accuracy chain's approach-geometry tranche (the
+  delivery-first attack runs need the arrival heading handled — the
+  resume-0 flight's attack leg anchors at the SPAWN, so the approach
+  heading is the spawn heading). The other three flights + all the
+  measured improvements hold: 16 releases / 16 impacts / 0 features on
+  OCASTRIKE with the wide sticks from this flight; INTSTRIKE 15
+  features, STRIKE 5.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
   (2026-10-03).** The INIT-1f measurement (the turn excursions at their
   geometric floor) drove the metric semantics to match its own
   documented doctrine: PATH = STEADY-STATE leg tracking. eval_path now
