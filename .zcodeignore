@@ -1,0 +1,111 @@
+Build/
+build/
+build*/
+cmake-build-*/
+.vs/
+*.user
+*.suo
+
+# CMake in-tree generation artifacts (should not exist, but guard against
+# accidental in-source configure polluting the source tree)
+CTestTestfile.cmake
+cmake_install.cmake
+*_discovery.cmake
+*_include.cmake
+CMakeFiles/
+
+# ── Runtime / local state (STEP-0) ──────────────────────────────────────────
+# Dear ImGui window layout: rewritten by every viewer run, never shared.
+imgui.ini
+
+# CTest run artifacts (Testing/Temporary/* written when ctest runs from the
+# source root instead of the build dir).
+Testing/
+
+# temp/ is a scratch dir for reference dumps, screenshots, and validation
+# output. Nothing in it is tracked: the KoreaObj binary model archive left
+# the repo with the Tranche 0d glTF rewire — the runtime consumes
+# Data/Models/koreaobj/*.gltf + textures/*.png (produced by `f4import
+# models` / `f4import textures`, Tranche 0c; exported into Data/ per the
+# 0e.1 step of NO_BINARY_RUNTIME_PLAN.md). No new junk in temp/.
+
+# Asset pipeline target tree (ASSET_PIPELINE_SPEC.md §4).
+# Tranche 0a (NO_BINARY_RUNTIME_PLAN.md): the JSON subset of Data/ IS committed
+# (world, terrain, class table, aircraft, simdata) so the runtime + tests run
+# anywhere without F4_INSTALL. The binary-derived subsets (Models/koreaobj/
+# glTF+PNG, 0c producers) stay gitignored — export them locally with
+# `f4import models/textures --install <root> --data Data --all` (0e.1).
+# NOTE: the ignore must be `Data/**` (not `Data/`): git cannot re-include
+# a path inside a directory that is itself excluded, so `Data/` + `!Data/…`
+# negations never matched. `Data/**` ignores everything INSIDE Data/ while
+# leaving the directory traversable; `!Data/**/` keeps directories visible
+# so the subtree negations below can match their files.
+Data/**
+!Data/**/
+!Data/manifest.json
+!Data/World/**
+!Data/Theater/**
+!Data/Aircraft/**
+!Data/SimData/**
+!Data/Classes/**
+!Data/Weapons/**
+# Weapons/ (the wcd2json Falcon4.WCD export) is committed when present:
+# it was previously ABSENT from this whitelist while generate_manifest.py
+# fingerprinted it in from a local export — the manifest then referenced a
+# file no fresh clone could have, and Sha256.Reproduces… failed everywhere.
+# A fresh clone without the export still passes: regenerate the manifest
+# from the committed tree (scripts/generate_manifest.py) and the entry
+# simply does not exist until a real Weapons/falcon4.wcd.json is committed.
+# Models/ stays fully ignored (glTF + PNG land in Tranche 0c/0d) — no
+# !Data/Models/** negation on purpose.
+# Data/Temp/ (on-demand conversions from a personal install, written by
+# the viewer's pipeline_io) stays fully ignored too — it is per-machine
+# scratch and must never shadow the committed Data/ exports.
+
+# Generated from TestCamp.cam by cam2json (regenerable on demand)
+/TestCamp.world.json
+/testcamp.world.json
+
+# campaign_qc --out-dir artifacts (traces, summaries — regenerable)
+qc/
+build*.log
+
+# Agent session artifacts (never tracked)
+.zcode/
+
+# Tier 1 speedup: repo-local FetchContent cache
+.fetchcache/
+
+# Python byte-cache (the qc/analysis scripts' incidental imports)
+__pycache__/
+*.pyc
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

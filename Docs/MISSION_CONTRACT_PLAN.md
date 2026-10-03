@@ -542,7 +542,36 @@ with an owner.
   PATH tails), recovery 68/8 holds, gate fails zero. The landing
   suite 32/32; the scenario trio exits 0; verify.cmd GREEN. The
   decay-k tuning (0.020-0.035 measured flyable) is the approach-
-  quality tranche's own knob.- **INIT-1i follow-up — the measured-range model; the kill threshold
+  quality tranche's own knob.- **INIT-2a — the battalion-target retarget: the feature-kill chain
+  closes for the last objective-defended types (2026-10-03).** The
+  feature-hp/warhead balance question DISSOLVED into a target-
+  resolution finding: the OCASTRIKE/SAD/STRATBOMB delivery waypoints'
+  target_nums resolve through the G2 UNIT map to battalion entities —
+  transforms yes, FeatureSetComponent no (the runtime [plan] probe:
+  NO FeatureSet on all four targets, in both the tool's and the sim's
+  worlds; the [populate] probe: 2659 feature sets on the objective
+  entities, ruling out the loader). The planner meant the objective
+  the battalion defends: its feature grid (+/-375 ft, 250-ft spacing)
+  sat all around the aimed battalion center, and every burst landed
+  BETWEEN features — bombs on battalions book the (empty, elements: 0)
+  unit-damage ledger, so nothing registered. Fix: when the resolved
+  target carries no FeatureSet, the plan build retargets the delivery
+  to the nearest feature-bearing objective within 15 NM and aims at
+  its alive feature (the same resolve_feature_aim rule). Measured
+  (qc/featkill/*2c + qc/coverage_map_init2b): OCASTRIKE 0 -> 5
+  features, INTSTRIKE 16, STRIKE 2, STRATBOMB 1 — the matrix totals
+  **features 49 -> 55**, gate fails zero, employment 31/0, recovery
+  68/8, PATH 21. The two-point measured-range refinement (the linear
+  interpolation between dz-1000/6000 probes) measured WORSE on kills
+  (16 vs 23 across the five types — the release geometry is chaotic
+  w.r.t. small range shifts) and was reverted to the single-point
+  sqrt scaling with the evidence in the header. The [populate] probe
+  stays (the world-shape instrumentation). The scoped remainder: SAD's
+  stick geometry still lands 563-846 ft from the aimed feature (the
+  pipper convergence on those approach geometries — the
+  release-accuracy chain's honest tail), and the unit-damage ledger
+  (elements: 0 in the fixture) is the fixture-generator tranche's.
+- **INIT-1i follow-up — the measured-range model; the kill threshold
   reached (2026-10-03).** The measured-range model's first scaling
   (the analytic-fall ratio) double-counted the drag and killed nothing
   (every stick short); the corrected pure-ballistic scaling

@@ -2714,6 +2714,16 @@ void Simulation::spawn_from_campaign_flights() {
     //    along: the objective map resolves the saved waypoints' strike
     //    targets into entities (the A-G tranche's route arming).
     auto populated = f4::world::populate_world(world_, ws);
+    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        std::fprintf(stderr,
+                     "[populate] objectives=%zu feature_sets=%zu\n",
+                     world_.with_tag(f4::entities::tags::ROLE,
+                                     f4::entities::TagValue::from(
+                                         std::string("objective")))
+                         .size(),
+                     world_.with_component<f4::entities::FeatureSetComponent>()
+                         .size());
+    }
 
     // 3. Airfield: initialize() normally pre-derived it into
     //    scenario_.airfield (B.3 fix — BEFORE wire_atc). The local

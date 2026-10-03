@@ -1412,35 +1412,40 @@ StrikeArmament arm_flight_strike(
         strike.config.drag_factor =
             bomb_drag_factor_for(table, droppable_handle,
                                  kMinDeliveryWaypointAltFt);
-        // INIT-1h — the MEASURED fall time: fly the bomb sim once at the
-        // delivery geometry and time the fall. The analytic vacuum fall
-        // was 1.63x short of the bomb sim's drag-limited descent (the
-        // measured OCASTRIKE stick: 2,251 ft in 19.7 s), the computed
-        // range fired the release ~12,000 ft late, and the stick glided
-        // past the aim (the impacts 12,161 ft wide with the cross-track
-        // at 47 ft — the lateral was perfect, the ALONG was the range).
+        // INIT-1h/2b — the MEASURED release solution: fly the bomb sim at
+        // TWO reference dz and measure the fall time + ground range. The
+        // analytic vacuum model was 1.63x short on the fall (the bomb's
+        // drag limits it to terminal velocity: the measured OCASTRIKE
+        // stick fell 2,251 ft in 19.7 s vs the vacuum 12.1 s — the
+        // release fired ~12,000 ft late and the stick glided past the
+        // aim), and the single-point sqrt scaling overestimated at dz
+        // above the reference (the drag makes the range curve SUB-sqrt:
+        // the sticks landed 362-529 ft long, outside the 300-ft lethal
+        // radius). The two-point table linearly interpolates the drag-
+        // curved truth over the delivery envelope.
         {
             const auto* probe_rec = table.get(droppable_handle);
             if (probe_rec == nullptr) return out;
-            weapons::Bomb probe;
-            probe.release(weapons::BombConfig::from_record(*probe_rec),
-                          f4::geo::WorldPosition{
-                              0.0, 0.0, kMinDeliveryWaypointAltFt},
-                          f4::math::Vec3<double>{675.0, 0.0, 0.0}, 0.0);
-            double t = 0.0;
-            while (!probe.terminal() && t < 120.0) {
-                probe.tick(0.1);
-                t += 0.1;
-            }
-            if (probe.status() == weapons::BombStatus::Impact) {
-                strike.config.measured_fall_time_s = probe.flight_time_s();
+            auto fly_probe = [&](double dz_ft) -> double {
+                weapons::Bomb probe;
+                probe.release(
+                    weapons::BombConfig::from_record(*probe_rec),
+                    f4::geo::WorldPosition{0.0, 0.0, dz_ft},
+                    f4::math::Vec3<double>{675.0, 0.0, 0.0}, 0.0);
+                double t = 0.0;
+                while (!probe.terminal() && t < 120.0) {
+                    probe.tick(0.1);
+                    t += 0.1;
+                }
+                return (probe.status() == weapons::BombStatus::Impact)
+                           ? probe.ground_range_ft()
+                           : 0.0;
+            };
+            strike.config.measured_range_lo_ft =
+                fly_probe(strike.config.measured_range_lo_dz_ft);
+            if (strike.config.measured_range_lo_ft > 0.0) {
                 strike.config.measured_fall_ref_dz_ft =
-                    kMinDeliveryWaypointAltFt;
-                // The ACTUAL range at the delivery geometry: the dragged
-                // bomb's own ground travel — the pipper's range model
-                // calibrated to the bomb sim instead of the linear
-                // gs x fall estimate.
-                strike.config.measured_range_ft = probe.ground_range_ft();
+                    strike.config.measured_range_lo_dz_ft;
             }
         }
         strike.config.salvo_max = std::min(out.droppable_rounds,
@@ -1691,6 +1696,68 @@ build_mission_plan_from_flight(
                             *fs, w.target_building, ttf->position);
                         pos.x = aimed.x;
                         pos.y = aimed.y;
+                    } else {
+                        // INIT-2a — the target resolved but carries no
+                        // feature set: a BATTALION (the G2 unit map's
+                        // entity — the CAS/BAI/OCASTRIKE waypoint target
+                        // nums hit the unit map when the planner wrote a
+                        // unit VU). The bombs on it book the battalion's
+                        // unit-damage ledger — but the planner MEANT the
+                        // objective the battalion defends: the measured
+                        // OCASTRIKE stick aimed at the battalion center
+                        // while the parent objective's feature grid
+                        // (±375 ft, 250-ft spacing) sat all around it —
+                        // every burst landed between features and
+                        // registered nothing. Retarget the delivery to
+                        // the nearest feature-BEARING objective and aim
+                        // at its alive feature: the impacts land ON the
+                        // feature grid and the feature damage registers.
+                        f4::entities::EntityId best_obj{};
+                        double best_d2 = 15.0 * 6076.12 * (15.0 * 6076.12);
+                        if (objective_id_map != nullptr) {
+                            for (const auto& [vu, obj_id] :
+                                 *objective_id_map) {
+                                if (!obj_id.valid()) continue;
+                                const auto* ofs =
+                                    EntityHandle(
+                                        obj_id,
+                                        const_cast<EntityWorld*>(&world))
+                                        .get<entities::FeatureSetComponent>();
+                                if (ofs == nullptr || ofs->features.empty()) {
+                                    continue;
+                                }
+                                const auto* otf =
+                                    EntityHandle(
+                                        obj_id,
+                                        const_cast<EntityWorld*>(&world))
+                                        .get<entities::TransformComponent>();
+                                if (otf == nullptr) continue;
+                                const double ddx = otf->position.x - pos.x;
+                                const double ddy = otf->position.y - pos.y;
+                                const double d2 = ddx * ddx + ddy * ddy;
+                                if (d2 < best_d2) {
+                                    best_d2 = d2;
+                                    best_obj = obj_id;
+                                }
+                            }
+                        }
+                        if (best_obj.valid()) {
+                            target_id = best_obj.value;
+                            const auto* bfs =
+                                EntityHandle(best_obj,
+                                             const_cast<EntityWorld*>(&world))
+                                    .get<entities::FeatureSetComponent>();
+                            const auto* btf =
+                                EntityHandle(best_obj,
+                                             const_cast<EntityWorld*>(&world))
+                                    .get<entities::TransformComponent>();
+                            if (bfs != nullptr && btf != nullptr) {
+                                const auto aimed = f4::ai::resolve_feature_aim(
+                                    *bfs, w.target_building, btf->position);
+                                pos.x = aimed.x;
+                                pos.y = aimed.y;
+                            }
+                        }
                     }
                 }
             }

@@ -70,6 +70,29 @@ do NOT decelerate horizontally (the travel = gs x the fall exactly) —
 the drag acts on the fall only; the bomb_drag_factor_for ratio
 (dragged/vacuum = 1.63 at dz 2,251, clamped to 1.0) documents it.
 
+## INIT-2a — the battalion-target retarget; the matrix features 49 -> 55
+
+The feature-hp/warhead balance question dissolved into a target-
+resolution finding: the OCASTRIKE/SAD/STRATBOMB delivery waypoints'
+target_nums resolve through the G2 UNIT map to battalion entities —
+transforms yes, FeatureSetComponent no (the runtime [plan] probe: NO
+FeatureSet on all four targets in both worlds; the [populate] probe:
+2659 feature sets on the objective entities, ruling out the loader).
+The planner meant the objective the battalion defends: its feature
+grid (+/-375 ft, 250-ft spacing) sat all around the aimed battalion
+center, and every burst landed BETWEEN features — bombs on battalions
+book the (empty) unit-damage ledger, so nothing registered. Fix: when
+the resolved target carries no FeatureSet, the plan build retargets
+the delivery to the nearest feature-bearing objective within 15 NM
+and aims at its alive feature. Measured: OCASTRIKE 0 -> 5 features,
+INTSTRIKE 16, STRATBOMB 1, STRIKE 2 — the matrix totals features
+49 -> 55, gate fails zero, employment 31/0, recovery 68/8, PATH 21.
+The two-point measured-range refinement measured worse (16 vs 23
+features — the release geometry is chaotic w.r.t. small range shifts)
+and was reverted to the single-point sqrt scaling with the evidence
+in the header. SAD's 563-846-ft stick residual and the unit-damage
+ledger (elements: 0 in the fixture) remain scoped.
+
 ## INIT-2 — the exponential-decay localizer intercept; the go-arounds 13 -> 2 on the characterized population
 
 The go-around characterization's fix landed: the far-field localizer

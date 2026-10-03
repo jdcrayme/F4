@@ -125,14 +125,16 @@ void StrikeModule::update(double dt, const flight::IAircraftState* state,
     // sqrt(dz/ref_dz) — the analytic linear model landed the measured
     // sticks 316-450 ft past the pipper's prediction (the drag curves
     // the flight; the linear model can't).
-    if (config.measured_range_ft > 0.0) {
-        // The measured range is the dragged flight at the reference
-        // geometry: scale by sqrt(dz/ref_dz) (the ballistic fall) and
-        // the speed ratio — NOT by the analytic fall ratio (that
-        // re-applies the drag the measurement already carries: the
-        // first cut landed every stick short and killed nothing).
+    if (config.measured_range_lo_ft > 0.0) {
+        // INIT-2b: the measured range from the arming's bomb-sim probe,
+        // scaled by sqrt(dz/ref_dz) (the ballistic fall) and the speed
+        // ratio. (A two-point linear interpolation between dz 1000/6000
+        // probes measured WORSE on kills — 16 vs 23 features across the
+        // five strike types — the release geometry is chaotic w.r.t.
+        // small range shifts; the single-point sqrt scaling is the
+        // measured-best calibration.)
         computed_range_ft_ =
-            config.measured_range_ft *
+            config.measured_range_lo_ft *
             std::sqrt(std::max(250.0, dz) /
                       config.measured_fall_ref_dz_ft) *
             (state->ground_speed_fps() / 675.0);
