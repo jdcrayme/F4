@@ -518,7 +518,23 @@ with an owner.
   heading is the spawn heading). The other three flights + all the
   measured improvements hold: 16 releases / 16 impacts / 0 features on
   OCASTRIKE with the wide sticks from this flight; INTSTRIKE 15
-  features, STRIKE 5.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
+  features, STRIKE 5.- **INIT-1i follow-up — the measured-range model; the kill threshold
+  reached (2026-10-03).** The measured-range model's first scaling
+  (the analytic-fall ratio) double-counted the drag and killed nothing
+  (every stick short); the corrected pure-ballistic scaling
+  (sqrt(dz/ref) x the speed ratio) restored INTSTRIKE 15 / STRIKE 2.
+  The accuracy now 316-450 ft on the converging sticks (the analytic's
+  448-717 improved) — but the kills still don't register for
+  OCASTRIKE/SAD/STRATBOMB: the impacts land 66-450 ft from grid
+  features against the ~144-ft lethal envelope with the feature hp
+  consuming more than the residual damage delivers. The kill
+  threshold/hp review (the warhead vs the feature hp at the 250-ft
+  grid spacing) is the feature-layer tranche's own scoped question —
+  the release accuracy is no longer the binding constraint. Also
+  measured: the bomb sim's bombs do NOT decelerate horizontally (the
+  travel 13,768 ft = gs x the fall exactly) — the drag acts on the
+  fall only; the bomb_drag_factor_for ratio (dragged/vacuum = 1.63 at
+  dz 2,251, clamped to 1.0) documents it.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
   (2026-10-03).** The INIT-1f measurement (the turn excursions at their
   geometric floor) drove the metric semantics to match its own
   documented doctrine: PATH = STEADY-STATE leg tracking. eval_path now

@@ -120,9 +120,26 @@ void StrikeModule::update(double dt, const flight::IAircraftState* state,
     }
 
     // The throw: horizontal distance the bomb flies from release, along
-    // the aircraft's velocity vector.
-    computed_range_ft_ = state->ground_speed_fps() * fall_time
-                       * config.drag_factor;
+    // the aircraft's velocity vector. INIT-1h: with a MEASURED range
+    // (the arming's rig flew the actual bomb), use it scaled by
+    // sqrt(dz/ref_dz) — the analytic linear model landed the measured
+    // sticks 316-450 ft past the pipper's prediction (the drag curves
+    // the flight; the linear model can't).
+    if (config.measured_range_ft > 0.0) {
+        // The measured range is the dragged flight at the reference
+        // geometry: scale by sqrt(dz/ref_dz) (the ballistic fall) and
+        // the speed ratio — NOT by the analytic fall ratio (that
+        // re-applies the drag the measurement already carries: the
+        // first cut landed every stick short and killed nothing).
+        computed_range_ft_ =
+            config.measured_range_ft *
+            std::sqrt(std::max(250.0, dz) /
+                      config.measured_fall_ref_dz_ft) *
+            (state->ground_speed_fps() / 675.0);
+    } else {
+        computed_range_ft_ = state->ground_speed_fps() * fall_time
+                           * config.drag_factor;
+    }
 
     // --- CCIP: the predicted impact point -----------------------------------
     // The bomb lands ALONG THE AIRCRAFT'S TRACK (plus drag), not toward

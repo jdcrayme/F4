@@ -142,6 +142,13 @@ public:
         double measured_fall_time_s{0.0};
         /// The dz the measured fall time was taken at.
         double measured_fall_ref_dz_ft{1500.0};
+        /// INIT-1h — the MEASURED ground range (ft) at the same reference
+        /// rig (the dragged bomb's actual horizontal travel at the
+        /// delivery dz/speed). The analytic range (gs x fall x drag) is a
+        /// linear model over a drag-curving flight: the measured stick
+        /// landed 316-450 ft past the pipper's prediction — the model's
+        /// own residual. 0 = the analytic range (the tests).
+        double measured_range_ft{0.0};
         /// Stick spacing (seconds between releases).
         double salvo_interval_s{0.25};
         /// Stick size (bombs per target). The host's store may run dry

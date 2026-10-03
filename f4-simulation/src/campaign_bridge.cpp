@@ -1436,6 +1436,11 @@ StrikeArmament arm_flight_strike(
                 strike.config.measured_fall_time_s = probe.flight_time_s();
                 strike.config.measured_fall_ref_dz_ft =
                     kMinDeliveryWaypointAltFt;
+                // The ACTUAL range at the delivery geometry: the dragged
+                // bomb's own ground travel — the pipper's range model
+                // calibrated to the bomb sim instead of the linear
+                // gs x fall estimate.
+                strike.config.measured_range_ft = probe.ground_range_ft();
             }
         }
         strike.config.salvo_max = std::min(out.droppable_rounds,

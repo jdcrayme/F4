@@ -56,6 +56,20 @@ the strike flights now fly their full 90-minute arcs and the windows'
 final quarters land on the delivery-run and near-field-stack
 excursions.
 
+Follow-up: the measured-range model's first scaling (the analytic-
+fall ratio) double-counted the drag and killed nothing; the corrected
+pure-ballistic scaling (sqrt(dz/ref) x the speed ratio) restored
+INTSTRIKE 15 / STRIKE 2. The accuracy now 316-450 ft on the converging
+sticks — but the kills still don't register for OCASTRIKE/SAD/
+STRATBOMB: the impacts land 66-450 ft from grid features against the
+~144-ft lethal envelope with the feature hp consuming more than the
+residual damage delivers. The kill threshold/hp review is the
+feature-layer tranche's own scoped question — the release accuracy is
+no longer the binding constraint. Also measured: the bomb sim's bombs
+do NOT decelerate horizontally (the travel = gs x the fall exactly) —
+the drag acts on the fall only; the bomb_drag_factor_for ratio
+(dragged/vacuum = 1.63 at dz 2,251, clamped to 1.0) documents it.
+
 ## INIT-1i — the MEASURED fall time: OCASTRIKE's converging sticks 12,161 -> 316-450 ft
 
 The CCIP accuracy tranche's decomposition (the along/cross split of
