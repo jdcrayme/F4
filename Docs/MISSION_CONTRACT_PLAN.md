@@ -407,7 +407,32 @@ with an owner.
   gate fails zero, **PATH 45 → 43** (the support families' corner
   excursions gone; the remainder is the delivery-arc route-holding and
   the departure-turn families). The predicate lives at the single
-  source of truth (mission_type.hpp: mission_is_ag_delivery).- **MC-4 — the ProceedToFix "stall" re-attributed; horizon margin
+  source of truth (mission_type.hpp: mission_is_ag_delivery).- **INIT-1f — the pre-turn slowdown; the PATH tail measured to its
+  geometric floor (2026-10-03).** The PATH 43 characterization (the
+  excursion intervals + the leg context per failing flight) split the
+  population: the big-p90 flights (12-31k) all peak ON A TURN — the
+  measured BARCAP2 recovery turn was flown at 402 kts (R ~30,000 ft,
+  the excursion 30,700 ft). Root cause: the turn-slow gate fires on the
+  heading error, which spikes only WHEN the turn starts — a jet at
+  400+ kts cannot decelerate inside it. Fix: the turn's size is
+  knowable on approach (the course change from the incoming leg to the
+  outgoing one), so controls_for_waypoint commands the corner speed
+  (250 kts) within the 60,000-ft deceleration gate. Measured: the peaks
+  fell 35-55% (AWACS 28,030 -> 12,704; BARCAP2 29,072 -> 16,271;
+  SWEEP 29,647 -> 19,133/8,272). The deeper measurement closes the
+  family honestly: **the remaining excursion is the geometric floor** —
+  a 120-deg course change at the slowest legal enroute speed (250 kts,
+  R ~12,000 ft) deviates ~R from the new line by construction (the
+  tangent arc's mid-turn deviation is R-scale); the 2,000-ft band is
+  unreachable mid-turn. The turn-window semantics (the metric judging
+  steady-state legs, not turns) is a metric-doctrine question for the
+  maintainers; the teardrop/holding-entry refinement would shorten the
+  chase but not the arc's R-scale deviation. Measured
+  (qc/coverage_map_init1f): recovery 68/8 (the best yet — the slower
+  corner turns also recover cleaner), employment 31/0, gate fails
+  zero, wall ~660 s. PATH sits 33 PASS / 43 FAIL with the FAILs at
+  their geometric floor pending the metric-doctrine decision.
+- **MC-4 — the ProceedToFix "stall" re-attributed; horizon margin
   +20 — LANDED (2026-10-02).** The horizons tranche's dominant finding
   (AIRLIFT flights spending 18 minutes in ProceedToFix without
   sequencing) was instrumented (a [fix] probe in check_fix_reached

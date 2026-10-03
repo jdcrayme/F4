@@ -488,6 +488,40 @@ AIControlOutput NavigationModule::controls_for_waypoint() const
         speed = std::min(speed, std::max(turn_speed_kts, ENROUTE_SPEED_FLOOR_KTS));
     }
 
+    // INIT-1f: slow for the turn AT this waypoint while still approaching
+    // it. The hdg_err gate above only fires once the turn has started,
+    // and a jet at 400+ kts cannot decelerate inside the turn: the
+    // measured BARCAP2 recovery turn was flown at 402 kts (R ~30,000 ft,
+    // the excursion 30,700 ft, the window's final quarter caught the
+    // recovery). The turn's size is knowable on approach — the course
+    // change from the incoming leg (the anchor's bearing) to the outgoing
+    // one — so command the corner speed within the deceleration distance
+    // (60,000 ft; measured: the peaks fell 35-55% — AWACS 28,030 ->
+    // 12,704, BARCAP2 29,072 -> 16,271). A 120k gate measured the same
+    // or slightly worse (the aircraft slows below the deceleration need
+    // and burns arc time). The remaining excursion is the GEOMETRIC
+    // floor: a 120-deg course change at the slowest legal enroute speed
+    // (250 kts, R ~12,000 ft) deviates ~R from the new line by
+    // construction — the 2,000-ft band is unreachable mid-turn; the
+    // turn-window semantics belong to the metric doctrine.
+    if (wp_index_ + 1 < route_.size() && wp_index_ > 0) {
+        const double in_crs = AirSteering::bearing_to(leg_from_, wp.position);
+        const double out_crs =
+            AirSteering::bearing_to(wp.position,
+                                    route_[wp_index_ + 1].position);
+        const double dtheta = std::abs(AirSteering::heading_error(out_crs,
+                                                                  in_crs));
+        if (dtheta > turn_slow_hdg_rad) {
+            const double dx = wp.position.x - current_position_.x;
+            const double dy = wp.position.y - current_position_.y;
+            if (dx * dx + dy * dy < 60000.0 * 60000.0) {
+                speed = std::min(speed,
+                                 std::max(turn_speed_kts,
+                                          ENROUTE_SPEED_FLOOR_KTS));
+            }
+        }
+    }
+
     // Tranche 39: lowered from 3000 to 500. The old 3000 ft MSL floor
     // overrode the 1500 ft pattern altitude of the radar pattern's downwind
     // leg — the aircraft never descended below 3000 ft during enroute, arriving

@@ -56,6 +56,29 @@ the strike flights now fly their full 90-minute arcs and the windows'
 final quarters land on the delivery-run and near-field-stack
 excursions.
 
+## INIT-1f — the pre-turn slowdown; the PATH tail measured to its geometric floor
+
+The PATH 43 characterization split the population: the big-p90 flights
+(12-31k) all peak ON A TURN — the measured BARCAP2 recovery turn was
+flown at 402 kts (R ~30,000 ft, the excursion 30,700 ft). Root cause:
+the turn-slow gate fires on the heading error, which spikes only WHEN
+the turn starts — a jet at 400+ kts cannot decelerate inside it. Fix:
+the turn's size is knowable on approach (the course change from the
+incoming leg to the outgoing one), so controls_for_waypoint commands
+the corner speed (250 kts) within the 60,000-ft deceleration gate.
+Measured: the peaks fell 35-55% (AWACS 28,030 -> 12,704; BARCAP2
+29,072 -> 16,271; SWEEP 29,647 -> 19,133/8,272). The deeper measurement
+closes the family honestly: the remaining excursion is the GEOMETRIC
+floor — a 120-deg course change at the slowest legal enroute speed
+(250 kts, R ~12,000 ft) deviates ~R from the new line by construction;
+the 2,000-ft band is unreachable mid-turn. The turn-window semantics
+is a metric-doctrine question for the maintainers; the teardrop/
+holding-entry refinement would shorten the chase but not the arc's
+R-scale deviation. Measured (qc/coverage_map_init1f): recovery 68/8
+(the best yet), employment 31/0, gate fails zero, wall ~660 s. PATH
+sits 33 PASS / 43 FAIL at the geometric floor pending the metric-
+doctrine decision.
+
 ## INIT-1e — the WP_SAD vocabulary collision gated; AWACS recovers 4/4; PATH 45 -> 43
 
 The PATH characterization exposed the support families' regression: the
