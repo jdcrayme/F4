@@ -5,6 +5,30 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## INIT-2b — the delivery pass stands the terrain pull-up down: sticks 10-12k long -> the pipper crossing; features 55 -> 57
+
+The OCASTRIKE wide-stick autopsy: two sticks released clean at the
+pipper crossing while two released at a +11,500-fpm climb with the
+pipper at 6,947 ft and landed 10,000-12,400 ft long. Owner: the
+ground-avoid module — the bridge's 1,500-ft delivery floor rides
+EXACTLY at MIN_ALTT over the flat z=0 world, so any pass that reached
+the floor with sink tripped the escape, the recovery inflated the
+computed release range (4,500 -> 8,500 ft) and opened the holdover
+fallback mid-pull-up. Fix: set_delivery_stand_down while a delivery
+waypoint with a live target is current and the stick is unfallen
+(the EMPL-2b planned-proximity doctrine; the release gate keeps its
+own 500-ft AGL floor); delivery waypoints also ride the aim's
+elevation (kDeliveryAltAboveAimFt; the synthesized wp's +300 stopgap
+retired). Measured: all four OCASTRIKE sticks level at 1,497 ft at
+the crossing, pipper 65-751 (one bomb gated at 65 — the 150-ft gate
+fires), impacts 66-758; matrix features 55 -> 57 (BAI 6 -> 10),
+releases/impacts 123/123 hold. The employment 31 -> 28 delta is the
+TOT push-wait gap exposed: three flights now correctly hold their
+TIMING stations for beyond-the-run appointments instead of being
+balloon-knocked into accidental zero-feature deliveries. GA suite
+14/14 (new DeliveryPassStandDownNeverPulls); the seven contract
+suites green; verify.cmd GREEN.
+
 ## MC-4 — ProceedToFix re-attributed (pursuit transit, not a deadlock); horizon margin +20; recovery 56 -> 65 PASS
 
 The horizons tranche's dominant finding instrumented and

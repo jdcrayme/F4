@@ -721,6 +721,34 @@ double NavigationModule::cross_track_ft() const
          + (current_position_.y - leg_from_.y) * right_y;
 }
 
+NavigationModule::AttackLegDebug NavigationModule::attack_leg_debug() const
+{
+    AttackLegDebug d;
+    if (!attack_engaged_ || wp_index_ >= route_.size() ||
+        !is_ag_delivery_action(route_[wp_index_].action)) {
+        return d;
+    }
+    const auto& wp = route_[wp_index_];
+    const double adx = wp.position.x - attack_from_.x;
+    const double ady = wp.position.y - attack_from_.y;
+    d.length_ft = std::sqrt(adx * adx + ady * ady);
+    d.engaged = d.length_ft >= attack_min_virtual_leg_ft;
+    d.course_rad = AirSteering::bearing_to(attack_from_, wp.position);
+    d.wp_z_ft = wp.position.z;
+    const auto& dbg = air_steering.last_debug();
+    d.vs_target_fpm = dbg.vs_target_fpm;
+    d.gamma_ff_deg = dbg.gamma_ff_rad * 57.2957795;
+    d.alt_err_ft = dbg.alt_err_ft;
+    d.theta_target_deg = dbg.theta_target_rad * 57.2957795;
+    d.speed_err_kt = dbg.speed_err_kt;
+    const double inv = 1.0 / std::max(1.0, d.length_ft);
+    d.along_ft = ((current_position_.x - attack_from_.x) * adx
+                + (current_position_.y - attack_from_.y) * ady) * inv;
+    d.xte_ft = ((current_position_.x - attack_from_.x) * (ady * inv)
+              + (current_position_.y - attack_from_.y) * (-adx * inv));
+    return d;
+}
+
 AirSteering::Input NavigationModule::steering_input() const noexcept
 {
     AirSteering::Input in;

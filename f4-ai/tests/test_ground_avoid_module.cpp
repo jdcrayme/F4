@@ -229,6 +229,34 @@ TEST(GroundAvoid, DisabledConfigNeverPulls) {
     EXPECT_FALSE(ga.pulling_up());
 }
 
+TEST(GroundAvoid, DeliveryPassStandDownNeverPulls) {
+    // INIT-2b: the committed delivery pass rides AT the MIN_ALTT line —
+    // the bridge's 1,500-ft delivery floor over the flat campaign world.
+    // At 1,450 ft with sink the predicted clearance trips the escape and
+    // the recovery inflated the release range (the measured OCASTRIKE
+    // balloons threw sticks 10,000-12,400 ft long). The brain stands the
+    // rung down while the pass is live; the stand-down also cancels a
+    // recovery already in flight.
+    GroundAvoidModule ga;
+    MockState s;
+    s.alt_msl_ft = 1450.0;
+    s.alt_agl_ft_ = 1450.0;
+    s.vs_fpm_ = -800.0;
+    ga.update(kDt, &s, flat_sea());
+    ASSERT_TRUE(ga.pulling_up());   // the trip itself is real
+    ga.reset();
+    ga.set_delivery_stand_down(true);
+    const auto out = ga.update(kDt, &s, flat_sea());
+    EXPECT_FALSE(ga.pulling_up());
+    EXPECT_FALSE(out.has_override);
+    ga.set_delivery_stand_down(false);
+    ga.update(kDt, &s, flat_sea());
+    ASSERT_TRUE(ga.pulling_up());
+    ga.set_delivery_stand_down(true);
+    ga.update(kDt, &s, flat_sea());
+    EXPECT_FALSE(ga.pulling_up());
+}
+
 TEST(GroundAvoid, NullStateIdles) {
     GroundAvoidModule ga;
     const auto out = ga.update(kDt, nullptr, flat_sea());

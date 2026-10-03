@@ -1298,6 +1298,22 @@ constexpr int kDoctrineSalvoMax = 4;
 /// on where the bomb lands.
 constexpr double kMinDeliveryWaypointAltFt = 1500.0;
 
+/// INIT-2b — the delivery waypoint rides the AIM's elevation: the run-in's
+/// altitude profile terminates kDeliveryAltAboveAimFt above the aimed
+/// feature, not at a sea-level-referenced floor. The measured OCASTRIKE
+/// balloons: the feature aims sit at z 1,533-1,950 ft (objective z +
+/// feature offset) while the MSL floor held the profile at 1,500 — the
+/// aircraft descended BELOW its own aim, dz went to zero then negative,
+/// and the strike module's min_release_agl_ft (500 above the aim) skipped
+/// every trigger. The FCS's catch of the floor ballooned +11,500 fpm back
+/// into the release band, the climb inflated the computed range
+/// (4,500 -> 8,500 ft), the holdover fallback opened, and the stick
+/// released at a 6,947-ft pipper — 10,000-12,400 ft long, zero features.
+/// 1,500 ft above the aim is the measured-range model's own calibration
+/// family (measured_fall_ref_dz_ft 1,500) and leaves the whole 500-ft
+/// min-release band untouched on the release pass.
+constexpr double kDeliveryAltAboveAimFt = 1500.0;
+
 double bomb_drag_factor_for(const weapons::WeaponClassTable& table,
                             std::uint32_t bomb_handle, double dz_ft) {
     const auto* rec = table.get(bomb_handle);
@@ -1696,6 +1712,12 @@ build_mission_plan_from_flight(
                             *fs, w.target_building, ttf->position);
                         pos.x = aimed.x;
                         pos.y = aimed.y;
+                        // INIT-2b: the profile ends 1,500 ft above the
+                        // aim (see kDeliveryAltAboveAimFt) — the MSL
+                        // floor below sat UNDER the feature elevations
+                        // and the run-in dove past its own aim.
+                        pos.z = std::max(pos.z, aimed.z +
+                                                     kDeliveryAltAboveAimFt);
                     } else {
                         // INIT-2a — the target resolved but carries no
                         // feature set: a BATTALION (the G2 unit map's
@@ -1756,6 +1778,11 @@ build_mission_plan_from_flight(
                                     *bfs, w.target_building, btf->position);
                                 pos.x = aimed.x;
                                 pos.y = aimed.y;
+                                // INIT-2b: the retargeted aim rides the
+                                // same above-aim profile.
+                                pos.z = std::max(pos.z,
+                                                 aimed.z +
+                                                     kDeliveryAltAboveAimFt);
                             }
                         }
                     }
@@ -1784,11 +1811,11 @@ build_mission_plan_from_flight(
         std::fprintf(stderr, "[plan] flight_target=%llu route:",
                      static_cast<unsigned long long>(flight_target));
         for (const auto& w : plan.route) {
-            std::fprintf(stderr, " %s/%u/t%llu(%.0f,%.0f)",
+            std::fprintf(stderr, " %s/%u/t%llu(%.0f,%.0f,z%.0f)",
                          wp_action_text(w.action),
                          static_cast<unsigned>(w.action),
                          static_cast<unsigned long long>(w.target_id),
-                         w.position.x, w.position.y);
+                         w.position.x, w.position.y, w.position.z);
         }
         std::fprintf(stderr, "\n");
     }
@@ -1834,7 +1861,10 @@ build_mission_plan_from_flight(
                         .get<TransformComponent>();
                 if (tgt_tf != nullptr) {
                     geo::WorldPosition pos = tgt_tf->position;
-                    pos.z = std::max(pos.z + 300.0,
+                    // INIT-2b: the synthesized delivery rides the aim's
+                    // elevation like the routed ones (the +300 stopgap
+                    // left the profile under the feature elevations).
+                    pos.z = std::max(pos.z + kDeliveryAltAboveAimFt,
                                      kMinDeliveryWaypointAltFt);
                     char sname[40];
                     std::snprintf(sname, sizeof(sname), "WP%d:%s",

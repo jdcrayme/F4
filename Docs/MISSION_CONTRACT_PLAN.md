@@ -571,6 +571,58 @@ with an owner.
   pipper convergence on those approach geometries — the
   release-accuracy chain's honest tail), and the unit-damage ledger
   (elements: 0 in the fixture) is the fixture-generator tranche's.
+- **INIT-2b — the ground-avoid stand-down for the committed delivery
+  pass: the balloons stop throwing sticks 10-12k long (2026-10-03).**
+  The delivery-first approach-geometry tranche opened on flight
+  4294971682 (pipper minimum 30,035 ft) and closed on a DIFFERENT
+  owner: the terrain-avoidance pull-up. The instrumented [strike]
+  probe (now per-instance, carrying the virtual leg's course/xte/
+  along, the flown wp z, and the steering cascade's vs_target/gamma/
+  alt_err/theta_target) autopsied the OCASTRIKE releases: two sticks
+  released CLEAN at the pipper crossing (dist ~5,000, pipper 440-729,
+  impacts 313-453, features) while two released at a +11,500-fpm
+  CLIMB with the pipper at 6,947 ft and landed 10,000-12,400 ft long,
+  zero features. The chain: the bridge's 1,500-ft delivery floor rides
+  EXACTLY at the ground-avoid module's MIN_ALTT (1,500 ft clearance)
+  over the flat z=0 campaign world — at 1,593 ft with -820 fpm of sink
+  the predicted clearance read 1,511 - 82 < 1,500 and the escape
+  fired, preempting the nav (ground avoid preempts everything); the
+  recovery's dz inflation grew the computed release range
+  (4,500 -> 8,500 ft), the holdover fallback opened, and the stick
+  fell during the pull-up. The two clean sticks released before
+  reaching the floor and never tripped it (pred clearance 1,993 /
+  1,649). The pipper itself never gated a release on ANY pass: it is
+  the release-point error (dist - rng, mostly along-track) and it only
+  crosses when the pass stays level at the floor — the holdover was
+  the de-facto release authority. Fix: the committed delivery pass
+  STANDS THE TERRAIN PULL-UP DOWN (set_delivery_stand_down, set while
+  a delivery waypoint with a live target is current and the stick is
+  unfallen — the EMPL-2b refuel doctrine: the pass is planned low
+  flight; the release gate keeps its own 500-ft AGL floor). The
+  delivery waypoints also now ride the AIM's elevation
+  (kDeliveryAltAboveAimFt 1,500 — a no-op on the flat world, the right
+  vocabulary for elevated aims; the synthesized delivery wp's +300
+  stopgap retired). Measured (qc/init2b_geo/ocas8, deterministic):
+  ALL FOUR OCASTRIKE sticks release level at 1,497-1,499 ft at the
+  crossing (dist ~4,080 = rng 4,380), pipper 65-751 ft, impacts
+  66-758 ft, 4 features; one first bomb gated at pipper 65 ft — the
+  150-ft gate FIRES on the clean pass. Matrix (qc/coverage_map_init2b2
+  vs init2b): **features 55 -> 57** (BAI 6 -> 10; INTSTRIKE -1,
+  OCASTRIKE -1 on different targets), all rows PASS, releases/
+  impacts hold at 123/123. The employment 31 -> 28 PASS delta is the
+  TOT push-wait gap EXPOSED, not a regression: three flights (SAD
+  x2, BAI x1) hold their TIMING stations for ATO appointments 409-
+  2,755 h beyond the run and now correctly never employ — the
+  balloons used to knock them off their timing holds into accidental
+  zero-feature deliveries (their tot clauses already SKIPped
+  "beyond the run"; the push-wait model stays the fixture-generator
+  tranche's). The GA suite grows DeliveryPassStandDownNeverPulls
+  (14/14); the seven contract suites green (29+17+31+32+5+7+22);
+  verify.cmd GREEN. The scoped remainder: the delivery-hold flights'
+  PATH verdicts (the orbit vs the 2,000-ft band — the metric-doctrine
+  decision), SAD's stick residual (unchanged), and the second-pass
+  geometry is OBSOLETE (the clean passes release first pass; the
+  10-12k "second-pass" sticks were the balloons).
 - **INIT-1i follow-up — the measured-range model; the kill threshold
   reached (2026-10-03).** The measured-range model's first scaling
   (the analytic-fall ratio) double-counted the drag and killed nothing

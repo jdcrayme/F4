@@ -134,6 +134,24 @@ public:
     /// Reset (disengage + clean steering state).
     void reset();
 
+    /// INIT-2b — the committed A-G delivery pass stands the pull-up
+    /// down (the brain sets it while a delivery waypoint with a live
+    /// aim is current and the stick is unfallen). The delivery profile
+    /// (the bridge's 1,500-ft floor over the flat campaign world) rides
+    /// EXACTLY at MIN_ALTT: at 1,593 ft with −820 fpm of sink the
+    /// predicted clearance reads 1,511 − 82 < 1,500 and the escape fires
+    /// — a +11,500-fpm recovery the pass never sees coming — and the
+    /// recovery's dz inflation grew the computed release range
+    /// (4,500 -> 8,500 ft), opened the holdover fallback, and the stick
+    /// released at a 6,947-ft pipper, landing 10,000-12,400 ft long.
+    /// The delivery pass IS planned low flight (the EMPL-2b refuel
+    /// doctrine: the boom is planned proximity); the release gate keeps
+    /// its own min_release_agl_ft floor. A dead pass (no target, stick
+    /// spent) re-arms the rung.
+    void set_delivery_stand_down(bool on) noexcept {
+        delivery_stand_down_ = on;
+    }
+
     /// The shared AirSteering instance (public fields — the recovery tune).
     [[nodiscard]] AirSteering& air_steering() noexcept { return air_; }
 
@@ -147,6 +165,7 @@ private:
     bool   pulling_{false};
     double hold_timer_{0.0};
     double clearance_ft_{1.0e6};
+    bool   delivery_stand_down_{false};
 };
 
 } // namespace f4::ai::modules

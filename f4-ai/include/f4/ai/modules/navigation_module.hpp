@@ -220,6 +220,29 @@ public:
     /// (+ = right of course). Exposed for the establishment gate and tests.
     [[nodiscard]] double cross_track_ft() const;
 
+    /// INIT-2b telemetry: the virtual attack leg's geometry for the
+    /// CURRENT delivery waypoint — course, signed cross-track, along-
+    /// track position, and leg length. engaged=false when no attack run
+    /// is live (the probe prints the degenerate-pursuit state instead).
+    struct AttackLegDebug {
+        bool   engaged = false;
+        double course_rad = 0.0;
+        double xte_ft = 0.0;
+        double along_ft = 0.0;
+        double length_ft = 0.0;
+        double wp_z_ft = 0.0;
+        /// INIT-2b: the altitude cascade's own last word — what the
+        /// steering COMMANDED vs what the airframe did (the +11.5k-fpm
+        /// release balloon exceeded max_vs_fpm 1,500, so the command
+        /// chain, not the cap, owns the geometry).
+        double vs_target_fpm = 0.0;
+        double gamma_ff_deg = 0.0;
+        double alt_err_ft = 0.0;
+        double theta_target_deg = 0.0;
+        double speed_err_kt = 0.0;
+    };
+    [[nodiscard]] AttackLegDebug attack_leg_debug() const;
+
     // --- Configuration ---
     double capture_radius_ft{3000.0};  ///< waypoint capture radius (last wp).
                                        ///< Tranche 37: also used as a floor for

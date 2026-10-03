@@ -42,8 +42,10 @@ AIControlOutput GroundAvoidModule::update(
     // No ownship state, on the ground, module disarmed, or no picture:
     // idle. An aircraft without a terrain picture (a host that never
     // pushed one) flies exactly as it did before this module existed.
+    // INIT-2b: a committed delivery pass stands the rung down entirely —
+    // see set_delivery_stand_down.
     if (state == nullptr || state->on_ground() || !cfg_.enabled ||
-        !picture.valid) {
+        !picture.valid || delivery_stand_down_) {
         if (pulling_) reset();
         return out;
     }

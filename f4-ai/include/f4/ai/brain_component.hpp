@@ -773,6 +773,25 @@ public:
         }
 
         if (phase_ == Phase::Enroute) {
+            // INIT-2b — the committed delivery pass stands the terrain
+            // pull-up down (see set_delivery_stand_down): the bridge's
+            // 1,500-ft delivery floor rides at MIN_ALTT over the flat
+            // world and the sink predictor tripped the escape on every
+            // pass that reached the floor (the measured OCASTRIKE
+            // balloons: the +11,500-fpm recovery inflated the release
+            // range 4,500 -> 8,500 ft and the holdover threw the stick
+            // 10,000-12,400 ft long). The pass's own min_release_agl_ft
+            // keeps the floor under the trigger.
+            {
+                const auto wi = nav_.current_waypoint_index();
+                const bool delivery_pass =
+                    plan_.ag_delivery_mission && !strike_.delivered() &&
+                    wi < plan_.route.size() &&
+                    modules::is_ag_delivery_action(
+                        plan_.route[wi].action) &&
+                    plan_.route[wi].target_id != 0;
+                ground_avoid_.set_delivery_stand_down(delivery_pass);
+            }
             const auto ga_out = ground_avoid_.update(dt, state,
                                                      terrain_picture_);
             if (ground_avoid_.pulling_up()) {
@@ -1133,17 +1152,28 @@ public:
                 // no-release run autopsies itself (the OCASTRIKE exit-4:
                 // the plan, splice, and target were all correct and the
                 // stick still never fell).
+                // INIT-2b: the sample counter is PER-INSTANCE now — the
+                // shared static gave each flight a slice of one global
+                // 1-Hz budget and the per-flight traces lied about both
+                // cadence and closing rate. The virtual leg's course,
+                // cross-track, and along-track ride along so a slow
+                // closure autopsies as geometry (the flat-clamped
+                // intercept) instead of inference from dist deltas.
                 if (std::getenv("F4_LAND_DEBUG") != nullptr) {
-                    static int dbg_strike = 0;
-                    if (++dbg_strike % 60 == 1) {
+                    if (++strike_probe_phase_ % 60 == 1) {
                         const double sdx = aim.x - state->position_east_ft();
                         const double sdy =
                             aim.y - state->position_north_ft();
+                        const auto leg = nav_.attack_leg_debug();
                         std::fprintf(stderr,
                                      "[strike] id %llu wp %zu tgt %llu"
                                      " aim_valid %d"
                                      " dist %.0f rng %.0f miss %.0f"
-                                     " alt %.0f gs %.0f vs %.0f\n",
+                                     " alt %.0f gs %.0f vs %.0f"
+                                     " leg %.1f hdg %.1f xte %.0f"
+                                     " along %.0f/%.0f wpz %.0f"
+                                     " vst %.0f gff %.1f aerr %.0f"
+                                     " tgt %.1f sperr %.0f\n",
                                      static_cast<unsigned long long>(
                                          owner_.id().value),
                                      wp_index,
@@ -1161,11 +1191,49 @@ public:
                                          : -1.0,
                                      state != nullptr
                                          ? state->vertical_speed_fpm()
-                                         : -1.0);
+                                         : -1.0,
+                                     leg.engaged
+                                         ? leg.course_rad * 57.2957795
+                                         : -999.0,
+                                     state != nullptr
+                                         ? state->heading_rad() * 57.2957795
+                                         : -999.0,
+                                     leg.engaged ? leg.xte_ft : -1.0,
+                                     leg.engaged ? leg.along_ft : -1.0,
+                                     leg.engaged ? leg.length_ft : -1.0,
+                                     leg.engaged ? leg.wp_z_ft : -1.0,
+                                     leg.vs_target_fpm,
+                                     leg.gamma_ff_deg,
+                                     leg.alt_err_ft,
+                                     leg.theta_target_deg,
+                                     leg.speed_err_kt);
                     }
                 }
                 combat_intent_.bomb_release =
                     strike_.release_pulse() && !hold_fire_;
+                // INIT-2b: the 10-12k-wide release autopsy — what the
+                // gate SAW at the pulse (the impact ledger only knows
+                // where the bomb landed; the pipper's claim at the
+                // release tick is the other half of that story).
+                if (combat_intent_.bomb_release &&
+                    std::getenv("F4_LAND_DEBUG") != nullptr) {
+                    const double sdx = aim.x - state->position_east_ft();
+                    const double sdy = aim.y - state->position_north_ft();
+                    std::fprintf(stderr,
+                                 "[release] id %llu tgt %llu"
+                                 " dist %.0f rng %.0f miss %.0f"
+                                 " alt %.0f gs %.0f vs %.0f\n",
+                                 static_cast<unsigned long long>(
+                                     owner_.id().value),
+                                 static_cast<unsigned long long>(
+                                     aim_target_id),
+                                 std::sqrt(sdx * sdx + sdy * sdy),
+                                 strike_.computed_release_range_ft(),
+                                 strike_.predicted_miss_ft(),
+                                 state->altitude_msl_ft(),
+                                 state->ground_speed_fps(),
+                                 state->vertical_speed_fpm());
+                }
                 combat_intent_.bomb_target_id =
                     strike_.release_target_id();
                 combat_intent_.bomb_aim_valid = strike_.last_aim_valid();
@@ -1390,6 +1458,9 @@ private:
     }
     /// The one-shot guard for the FlyOut-entry seed above.
     bool departure_course_seeded_{false};
+    /// INIT-2b telemetry phase: per-instance [strike] probe cadence — the
+    /// shared static budgeted one 1-Hz slice across every brain.
+    std::uint32_t strike_probe_phase_{0};
 
 public:
 
