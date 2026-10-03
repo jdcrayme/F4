@@ -5,6 +5,28 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## INIT-2c — the cruise small-error bank drive: the pipper gate fires at 27 ft; features 57 -> 63
+
+SAD's 563-846-ft stick residual decomposed with the [release] probe's
+new miss vector: the impact landed +311 along / -290 CROSS of the
+track — the 1-Hz leg trace showed a constant +0.8-deg right-of-course
+with a 2.7-deg intercept COMMANDED. Owner: the steering's sub-5-deg
+heading deadband (the landing beam's wings-level decoupling) froze
+every cruise leg's residual cross-track at the roll-out offset; the
+attack leg's intercept law never flew. Fix: AirSteering gains
+small_error_bank_cap_rad (0 = legacy deadband; the landing, combat,
+and refuel modules keep it) — the NAV module sets 0.10 rad. Two
+companions: the committed delivery pass stands the FORMATION rung
+down (delivery_pass_live, shared with the ground-avoid stand-down),
+and the measured range model gains its calibration ceiling
+(max_delivery_dz_ft 6,000 — the sub-sqrt drag error is ~25% at dz
+10,475; above the band the trigger disarms and the FCS descends into
+it across the re-flown pattern). Measured: the wingman stick
+released at the crossing — first bomb pipper 27, impact 31, feature
+killed; the high pass descended into the band and killed 1. Matrix
+features 57 -> 63 (STRATBOMB 1 -> 6, STRIKE 2 -> 8, SAD 0 -> 2);
+other clause totals hold. Nine suites green; verify.cmd GREEN.
+
 ## INIT-2b — the delivery pass stands the terrain pull-up down: sticks 10-12k long -> the pipper crossing; features 55 -> 57
 
 The OCASTRIKE wide-stick autopsy: two sticks released clean at the

@@ -78,6 +78,23 @@ AIControlOutput AirSteering::steer(double desired_heading_rad,
         out.roll_cmd = std::clamp(taper * (roll_gain * bank_err)
                                   - roll_damp * in.roll_rate_radps,
                                   -1.0, 1.0);
+    } else if (small_error_bank_cap_rad > 0.0) {
+        // INIT-2c: the cruise small-error drive — the same bank cascade
+        // as the intercept branch, with the bank target capped small so
+        // the altitude coupling stays inside the beam-ride tolerance.
+        // Without this the heading command below the threshold is
+        // unactioned (wings-level + zero pedal) and the leg's
+        // cross-track error freezes at whatever the roll-out left.
+        bank_target = std::clamp(bank_gain * hdg_err,
+                                 -small_error_bank_cap_rad,
+                                 small_error_bank_cap_rad);
+        const double bank_err = bank_target - in.roll_rad;
+        const double phi_to_target = std::fabs(bank_err);
+        const double taper_window = 0.20;  // rad, as in the intercept branch
+        const double taper = std::clamp(phi_to_target / taper_window, 0.0, 1.0);
+        out.roll_cmd = std::clamp(taper * (roll_gain * bank_err)
+                                  - roll_damp * in.roll_rate_radps,
+                                  -1.0, 1.0);
     } else {
         // Small heading error (beam ride): wings-level damping only. No
         // bank command — the rudder handles the lateral, the wings stay

@@ -623,6 +623,47 @@ with an owner.
   decision), SAD's stick residual (unchanged), and the second-pass
   geometry is OBSOLETE (the clean passes release first pass; the
   10-12k "second-pass" sticks were the balloons).
+- **INIT-2c — the cruise small-error bank drive: the pipper gate
+  fires; SAD 0 -> 2, the matrix features 57 -> 63 (2026-10-03).**
+  SAD's 563-846-ft stick residual decomposed with the [release]
+  probe's new miss vector (the predicted impact and the track vector
+  it rode in on): the impact landed +311 along / -290 CROSS of the
+  track — the aircraft's track passed ~350 ft left of the aim and
+  every bomb inherited it, the 150-ft pipper gate unreachable, the
+  holdover landing 425-723 ft wide. The 1-Hz leg trace showed the
+  constant +0.8-deg right-of-course with a 2.7-deg intercept
+  COMMANDED: the steering's sub-5-deg heading deadband (the landing
+  beam's wings-level decoupling — approach_aileron_threshold_rad
+  0.087 commands wings-level + zero pedal below it) froze every
+  cruise leg's residual cross-track at the roll-out offset; the
+  attack leg's intercept law never flew. Fix: AirSteering gains
+  small_error_bank_cap_rad (0 = the legacy deadband; the landing,
+  combat, and refuel modules own separate instances and keep it) —
+  the NAV module sets 0.10 rad (5.7 deg, ~0.4 deg/s at 450 kts): the
+  same bank cascade as the intercept branch, capped so the altitude
+  coupling stays inside the beam-ride tolerance. Two companions: the
+  committed delivery pass also stands the FORMATION rung down
+  (delivery_pass_live shared with the ground-avoid stand-down — a
+  wingman forming through its own attack run flies the LEAD's track
+  into its release), and the measured range model gains its
+  calibration ceiling (max_delivery_dz_ft 6,000: the drag makes the
+  true range sub-sqrt — ~5% at dz 6,000 but ~25% at dz 10,475 where
+  the SAD air-spawn pass released 4,700 ft early; above the band the
+  trigger disarms and the FCS descends into it across the re-flown
+  pattern). Measured (qc/init2b_geo/sad5, deterministic): the wingman
+  stick released at the crossing — first bomb pipper 27 ft, impact
+  31 ft, FEATURE KILLED, the leg's xte converged 232 -> 49; the
+  high pass descended 12,000 -> 3,994 ft into the band, impacts
+  117-494, 1 feature. Matrix (qc/coverage_map_init2c vs init2b2):
+  **features 57 -> 63** (STRATBOMB 1 -> 6, STRIKE 2 -> 8, SAD 0 -> 2,
+  OCASTRIKE 4 -> 5, BAI 10 -> 11; INTSTRIKE 15 -> 11 and ONCALLCAS
+  12 -> 7 gave some back on different target geometry — the
+  documented release-point chaos), all other clause totals hold
+  (first_attempt 23 -> 25 FAILs: two ONCALLCAS single honest
+  go-arounds on the changed approach geometry; PATH one flip each
+  way). The nine suites green (29+12+17+31+32+5+7+22+14); verify.cmd
+  GREEN. The scoped remainder: the go-around population's decay-k
+  sweep, the TOT push-wait model, the unit-damage ledger.
 - **INIT-1i follow-up — the measured-range model; the kill threshold
   reached (2026-10-03).** The measured-range model's first scaling
   (the analytic-fall ratio) double-counted the drag and killed nothing

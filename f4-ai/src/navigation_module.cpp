@@ -56,6 +56,17 @@ NavigationModule::NavigationModule()
     air_steering.vs_gain = 2.5;
     air_steering.max_vs_fpm = 1500.0;
     air_steering.roll_gain = 4.0;
+    // INIT-2c: the cruise small-error bank drive. The steering's
+    // sub-5-deg heading deadband (the landing beam's wings-level
+    // decoupling, kept there) froze every enroute leg's residual
+    // cross-track at the roll-out offset — the measured SAD attack run
+    // flew a constant +0.8 deg right of its leg with a 2.7-deg intercept
+    // commanded, the track passed 290 ft off the aim, and the bombs
+    // inherited it (the pipper's cross term, zero features). The cap
+    // 0.10 rad = 5.7 deg: a ~0.4 deg/s heading rate at 450 kts — gentle
+    // enough to leave the altitude hold uncoupled, decisive enough to
+    // converge a 250-ft offset inside a 10,000-ft window.
+    air_steering.small_error_bank_cap_rad = 0.10;
     // NAV-E: disable the STAB-E46 anti-balloon energy damper enroute. It
     // was tuned for approach balloons (chop throttle + full board when
     // vs overshoots +1,200 fpm); on the 250-kt square legs the phugoid's

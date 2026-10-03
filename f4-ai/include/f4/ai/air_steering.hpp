@@ -378,6 +378,20 @@ public:
                                           ///<  mode (keep wings level without
                                           ///<  banking for small corrections)
 
+    /// INIT-2c: the cruise small-error BANK drive (rad, cap on
+    /// bank_gain*hdg_err inside the aileron threshold; 0 = the legacy
+    /// wings-level deadband). The deadband is the landing beam's
+    /// decoupling (a banked beam ride degrades the altitude hold), but
+    /// as a side effect every CRUISE heading correction under ~5 deg is
+    /// unactioned: the aircraft holds whatever heading it rolled out on
+    /// and the leg's cross-track freezes (the measured SAD attack run:
+    /// the commanded 2.7-deg intercept never flew, the track passed
+    /// 290 ft off the aim, and every bomb inherited it — the pipper's
+    /// cross term). Callers that fly NAV LEGS (not beams) set this to
+    /// enable a capped bank cascade below the threshold; the landing
+    /// module keeps the deadband.
+    double small_error_bank_cap_rad{0.0};
+
     // --- Rudder (NAV-A) ---
     // There are no rudder gains here on purpose: the AI commands
     // yaw_cmd = 0 in sustained flight and the FCS yaw damper (fcs.cpp

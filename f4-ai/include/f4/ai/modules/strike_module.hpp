@@ -157,6 +157,14 @@ public:
         /// clearance floor for the delivery pass; the trigger is skipped
         /// below it and re-arms if the aircraft climbs back).
         double min_release_agl_ft{500.0};
+        /// INIT-2c: the measured model's calibration ceiling — the dz
+        /// beyond which the sqrt-scaled measured range is known-bad (the
+        /// drag makes the true range sub-sqrt: ~5% at dz 6,000, ~25% at
+        /// dz 10,475). Above it the trigger disarms and the aircraft
+        /// keeps flying the pass until inside the band. Applies ONLY to
+        /// the measured branch (the analytic solve is exact-ish at any
+        /// dz); 0 = unlimited.
+        double max_delivery_dz_ft{6000.0};
         /// Impact-point acceptance distance (ft): the predicted impact
         /// must sit well inside the blast footprint to start a stick on
         /// a STRAIGHT-IN delivery (the harness's geometry). The host sets
@@ -285,6 +293,21 @@ public:
         return predicted_miss_ft_;
     }
 
+    // INIT-2c — the release-autopsy accessors: WHERE the module predicts
+    // the impact and WHICH track vector it rode in on. The [release]
+    // probe decomposes the miss offline into the along-range term (the
+    // range model's error) and the cross term (the track direction's
+    // error) instead of one scalar; a 400-750-ft residual that defeats
+    // the pipper gate autopsies as one or the other.
+    [[nodiscard]] double debug_predicted_impact_x() const noexcept {
+        return predicted_ip_x_;
+    }
+    [[nodiscard]] double debug_predicted_impact_y() const noexcept {
+        return predicted_ip_y_;
+    }
+    [[nodiscard]] double debug_track_x() const noexcept { return track_x_; }
+    [[nodiscard]] double debug_track_y() const noexcept { return track_y_; }
+
     Config config;
 
 private:
@@ -298,6 +321,8 @@ private:
     double since_release_s = -1.0;   // <0 = not in a stick
     double computed_range_ft_ = 0.0;
     double predicted_miss_ft_ = 0.0;
+    double predicted_ip_x_ = 0.0;    // INIT-2c autopsy accessors
+    double predicted_ip_y_ = 0.0;
 
     // EMPL-1: the throw direction comes from the aircraft's TRACK
     // (velocity over ground), not its nose. The bomb inherits the

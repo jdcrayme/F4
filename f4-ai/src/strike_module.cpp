@@ -97,6 +97,25 @@ void StrikeModule::update(double dt, const flight::IAircraftState* state,
         predicted_miss_ft_ = dist;
         return;
     }
+    // INIT-2c: the measured model's CALIBRATION gate. The measured range
+    // is probed at measured_range_lo_dz_ft and sqrt-scaled; the bomb's
+    // drag makes the true range curve SUB-sqrt, so the extrapolation
+    // error grows with dz — measured ~4-6% at dz 6,000 (362-529 ft, the
+    // two-point experiment's data) but ~25% at dz 10,475 (the SAD
+    // air-spawn pass: rng 19,212 computed vs ~14,500 true, the holdover
+    // fired 4,700 ft early and the stick landed 4,705 short). Above the
+    // calibration band the trigger disarms — the aircraft keeps flying
+    // the pass (the FCS chases the delivery altitude; the past-aim
+    // reversal re-flies it) and delivers once INSIDE the band. 0 =
+    // unlimited (the analytic-branch unit tests; the analytic solve has
+    // no calibration band).
+    if (config.measured_range_lo_ft > 0.0 &&
+        config.max_delivery_dz_ft > 0.0 &&
+        dz > config.max_delivery_dz_ft) {
+        computed_range_ft_ = 0.0;   // out of calibration — the trigger disarms
+        predicted_miss_ft_ = dist;
+        return;
+    }
     const double w = std::max(0.0, -state->vertical_speed_fpm() / 60.0);
     // 0.5*g*t^2 + w*t - dz = 0  =>  t = (-w + sqrt(w^2 + 2*g*dz)) / g
     // (the -w: an initial downward velocity SHORTENS the fall).
@@ -163,6 +182,8 @@ void StrikeModule::update(double dt, const flight::IAircraftState* state,
     const double ip_miss_y = ip_y - aim.y;
     predicted_miss_ft_ = std::sqrt(ip_miss_x * ip_miss_x +
                                    ip_miss_y * ip_miss_y);
+    predicted_ip_x_ = ip_x;   // INIT-2c autopsy accessors
+    predicted_ip_y_ = ip_y;
 
     // The release gate. The FIRST bomb of a stick needs the target in
     // the envelope; the rest of the stick is COMMITTED — real doctrine

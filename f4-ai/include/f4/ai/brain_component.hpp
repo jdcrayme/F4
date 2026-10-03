@@ -666,6 +666,24 @@ public:
         // ground phases have no decisions left to gate.
         update_fuel_state();
 
+        // INIT-2b/2c — the committed delivery pass predicate, shared by
+        // the rung stand-downs below: a delivery waypoint with a live
+        // target is current and the stick is unfallen. BOTH the terrain
+        // pull-up and the formation rung stand down for it (the pass is
+        // planned low flight, and a wingman forming on the lead through
+        // its own attack run flies the LEAD's track into its release —
+        // the measured SAD wingman: the pipper's cross term 290 ft, the
+        // impacts 425-723 ft off, zero features; the formation rung sits
+        // above the mission modules so the attack leg's cross correction
+        // was never flown). After the stick completes the predicate
+        // drops and the rungs resume (the wingman rejoins on its own).
+        const bool delivery_pass_live =
+            plan_.ag_delivery_mission && !strike_.delivered() &&
+            nav_.current_waypoint_index() < plan_.route.size() &&
+            modules::is_ag_delivery_action(
+                plan_.route[nav_.current_waypoint_index()].action) &&
+            plan_.route[nav_.current_waypoint_index()].target_id != 0;
+
         // =================================================================
         // Flight command (Step 14, flitlead.cpp + wingradio v1): the LEAD
         // half and the wingman half's radio responses, both gated on the
@@ -774,24 +792,9 @@ public:
 
         if (phase_ == Phase::Enroute) {
             // INIT-2b — the committed delivery pass stands the terrain
-            // pull-up down (see set_delivery_stand_down): the bridge's
-            // 1,500-ft delivery floor rides at MIN_ALTT over the flat
-            // world and the sink predictor tripped the escape on every
-            // pass that reached the floor (the measured OCASTRIKE
-            // balloons: the +11,500-fpm recovery inflated the release
-            // range 4,500 -> 8,500 ft and the holdover threw the stick
-            // 10,000-12,400 ft long). The pass's own min_release_agl_ft
-            // keeps the floor under the trigger.
-            {
-                const auto wi = nav_.current_waypoint_index();
-                const bool delivery_pass =
-                    plan_.ag_delivery_mission && !strike_.delivered() &&
-                    wi < plan_.route.size() &&
-                    modules::is_ag_delivery_action(
-                        plan_.route[wi].action) &&
-                    plan_.route[wi].target_id != 0;
-                ground_avoid_.set_delivery_stand_down(delivery_pass);
-            }
+            // pull-up down (see set_delivery_stand_down and the
+            // delivery_pass_live predicate above).
+            ground_avoid_.set_delivery_stand_down(delivery_pass_live);
             const auto ga_out = ground_avoid_.update(dt, state,
                                                      terrain_picture_);
             if (ground_avoid_.pulling_up()) {
@@ -1219,10 +1222,19 @@ public:
                     std::getenv("F4_LAND_DEBUG") != nullptr) {
                     const double sdx = aim.x - state->position_east_ft();
                     const double sdy = aim.y - state->position_north_ft();
+                    // INIT-2c: the miss DECOMPOSITION — the predicted
+                    // impact point and the track vector it rode in on,
+                    // so the release-time miss splits offline into the
+                    // along-range term (the range model) and the cross
+                    // term (the track direction) instead of one scalar.
+                    const auto leg = nav_.attack_leg_debug();
                     std::fprintf(stderr,
                                  "[release] id %llu tgt %llu"
                                  " dist %.0f rng %.0f miss %.0f"
-                                 " alt %.0f gs %.0f vs %.0f\n",
+                                 " alt %.0f gs %.0f vs %.0f"
+                                 " aim (%.0f,%.0f) pos (%.0f,%.0f)"
+                                 " ip (%.0f,%.0f) trk (%.3f,%.3f)"
+                                 " xte %.0f\n",
                                  static_cast<unsigned long long>(
                                      owner_.id().value),
                                  static_cast<unsigned long long>(
@@ -1232,7 +1244,15 @@ public:
                                  strike_.predicted_miss_ft(),
                                  state->altitude_msl_ft(),
                                  state->ground_speed_fps(),
-                                 state->vertical_speed_fpm());
+                                 state->vertical_speed_fpm(),
+                                 aim.x, aim.y,
+                                 state->position_east_ft(),
+                                 state->position_north_ft(),
+                                 strike_.debug_predicted_impact_x(),
+                                 strike_.debug_predicted_impact_y(),
+                                 strike_.debug_track_x(),
+                                 strike_.debug_track_y(),
+                                 leg.engaged ? leg.xte_ft : -1.0);
                 }
                 combat_intent_.bomb_target_id =
                     strike_.release_target_id();
@@ -1263,6 +1283,16 @@ public:
         if (safety_mode_ == SafetyMode::None &&
             combat_mode_ == CombatMode::None && is_wingman_ &&
             phase_ == Phase::Enroute && wingman_.has_live_picture() &&
+            // INIT-2c: the committed delivery pass stands the formation
+            // rung down (see delivery_pass_live above) — the wingman
+            // flies its own attack leg, then rejoins when the stick
+            // completes. The measured SAD wingman held a constant
+            // +0.7-deg right-of-course formation trim straight through
+            // its attack run: its track passed 290 ft off the aim and
+            // every bomb inherited it (the pipper's cross term — the
+            // 150-ft gate unreachable, the holdover landing 425-723 ft
+            // wide, zero features).
+            !delivery_pass_live &&
             // WingyMode (the archetype's formation row — armed in every
             // shipped .brn archetype; a data file that disarms it turns
             // the wingman into a single-ship mission jet).
