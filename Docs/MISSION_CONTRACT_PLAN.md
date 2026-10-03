@@ -549,7 +549,20 @@ with an owner.
   for the pipper's convergence window to pass (the pipper-first
   ordering with the holdover as the receding-pass last resort), not
   just the range crossing. The release-accuracy tranche owns it with
-  the probes in place.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
+  the probes in place.- **INIT-1j — the receding-pass holdover gate: measured, reverted
+  (2026-10-03).** The feature-kill mechanism's first fix attempt: the
+  holdover gated on the aim sitting BEHIND the aircraft's track (the
+  receding pass — the pipper had its chance, the geometry never
+  converged). Measured: INTSTRIKE's pipper kills returned (11
+  features) but SAD and OCASTRIKE regressed to armed-no-release
+  (exit 4) — their parallel-offset attack passes never put the aim
+  behind the track, so the holdover never fired and the flights
+  recovered armed. Reverted: the releases matter more than the
+  last-resort accuracy (employment 31/0 holds). The feature-layer
+  tranche's real lever is the release-solution accuracy (the pipper's
+  ~316-450 ft residual vs the 144-ft lethal envelope) and the
+  feature-hp/kill-threshold review — not the holdover's firing
+  order.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
   (2026-10-03).** The INIT-1f measurement (the turn excursions at their
   geometric floor) drove the metric semantics to match its own
   documented doctrine: PATH = STEADY-STATE leg tracking. eval_path now
