@@ -549,7 +549,25 @@ with an owner.
   for the pipper's convergence window to pass (the pipper-first
   ordering with the holdover as the receding-pass last resort), not
   just the range crossing. The release-accuracy tranche owns it with
-  the probes in place.- **INIT-1j — the receding-pass holdover gate: measured, reverted
+  the probes in place.- **INIT-1k — the go-around characterization: the IAP intercept's
+  far-field oscillation (2026-10-03).** The 13 first-attempt FAILs
+  instrumented (the [fix] probe in check_fix_reached + the [ptf]/
+  [land-dbg] telemetry on the recorded BAI run). The measured
+  CS146-4-style arc: the entry fix captures 3,399 ft wide of the
+  centerline, the ProceedToFix delivers the aircraft to the fix area
+  but 8-9.8k ft off the course laterally, and the IAP course intercept
+  (the far-field localizer law) oscillates +/-5-12k ft around the
+  course — the establish gate (250 ft lat, the settle/beam/hdg
+  companions) unreachable through the oscillation. The one pass that
+  crossed clean established, flew the final ON the glideslope (the
+  [final] telemetry: err -18..-93, the beam 46-884, cleared 1
+  throughout), touched down at along +620 / agl 28 — the landing works
+  when the intercept settles. The 13 FAILs are the flights whose
+  oscillation never crossed clean within the approach. Owner: the
+  localizer-intercept tuning tranche (the STAB-E20 lead scaling at the
+  large offsets: the measured cut ~25 deg, the convergence 200-220
+  ft/s, the crossing overshoot ~the turn radius — the damping review).
+  The [fix] probe stays as the approach-autopsy instrumentation.- **INIT-1j — the receding-pass holdover gate: measured, reverted
   (2026-10-03).** The feature-kill mechanism's first fix attempt: the
   holdover gated on the aim sitting BEHIND the aircraft's track (the
   receding pass — the pipper had its chance, the geometry never
