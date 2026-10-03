@@ -432,7 +432,48 @@ with an owner.
   corner turns also recover cleaner), employment 31/0, gate fails
   zero, wall ~660 s. PATH sits 33 PASS / 43 FAIL with the FAILs at
   their geometric floor pending the metric-doctrine decision.
-- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
+- **INIT-1g — the release-accuracy tranche: the pipper gate restored,
+  the two-stage release, the feature-aim co-location (2026-10-03).**
+  The feature-kill gap (impacts with 0 features destroyed) traced to
+  the release accuracy: the measured sticks landed 287-2,680 ft from
+  the aimed feature against a ~144-ft single-hit envelope. Three
+  layers landed:
+  1. **The CCIP pipper gate restored** (impact_tolerance_ft 150 in the
+     release condition): EMPL-1 parked it because the old LNAV/homing
+     run-ins could not hold sub-0.9 deg — but the virtual attack leg
+     (EMPL-1a) converges the release geometry in both axes
+     exponentially into the aim, and the armed-stick hold (INIT-1d)
+     flies the run into the target. The converged sticks now release
+     at a 287-ft pipper and the gate fires on the converged pass.
+  2. **The two-stage release** (release_holdover_ft): the pipper-first
+     accuracy with the bounded cone-edge fallback — the approaches
+     whose pipper never tightens release holdover-short instead of
+     arming-no-release (the SAD/STRATBOMB/OCASTRIKE approaches hold
+     ~1-2.5k; the 1,200-ft holdover measured the preemption problem —
+     it fired before the pipper's own pass and wiped INTSTRIKE's 13
+     kills; 300 keeps the pipper's pass first).
+  3. **The feature-aim co-location**: the co-located delivery waypoint
+     aims at the FEATURE the strike wiring aims at (the same
+     resolve_feature_aim rule) — the nav's attack run, the release
+     pipper, and the feature damage converge on the same ~150-ft point.
+     Measured: INTSTRIKE features 7 -> 15, STRIKE 0 -> 5.
+  The mid-turn release hold (the heading-rate bound, 4 deg/s) landed
+  with it: the pipper's track estimate lags the true velocity mid-turn,
+  and a turn-time release landed where the STALE track pointed (the
+  measured OCASTRIKE stick: released on a turn-dip pipper, 12,161 ft
+  wide). Measured (qc/coverage_map_init1g-era runs): INTSTRIKE 15
+  features, STRIKE 5, releases hold on all types; OCASTRIKE/SAD/
+  STRATBOMB still show 0-2 features — the scoped remainder:
+  OCASTRIKE's converging sticks land 448-717 ft from the aimed feature
+  (the release-solution residual vs the 144-ft envelope; the card's
+  drag model vs the bomb sim at the 1,500-ft delivery — the
+  drag-factor default is inert, arm_flight_strike overrides it), and
+  the SAD/STRATBOMB targets are BATTALIONS (unit entities with no
+  FeatureSet — their damage ledger is unit damage, not objective
+  features; the nearest-objective fallback aims the stick at the
+  battalion's parent objective but the impact books on the unit).
+  Owner: the unit-damage ledger tranche + the release-accuracy
+  refinement.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
   (2026-10-03).** The INIT-1f measurement (the turn excursions at their
   geometric floor) drove the metric semantics to match its own
   documented doctrine: PATH = STEADY-STATE leg tracking. eval_path now

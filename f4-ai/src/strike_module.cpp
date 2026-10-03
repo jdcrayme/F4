@@ -34,6 +34,20 @@ void StrikeModule::update(double dt, const flight::IAircraftState* state,
                 has_track_ = true;
             }
         }
+        // INIT-1g — the smoothed heading rate: the release gate's
+        // mid-turn hold needs to know the aircraft is turning (the
+        // pipper's track estimate lags the true velocity mid-turn, so a
+        // turn-time release lands where the STALE track pointed — the
+        // measured OCASTRIKE stick: 12,161 ft wide of the aim).
+        const double hdg = state->heading_rad();
+        if (has_prev_hdg_) {
+            double dr = hdg - prev_hdg_;
+            while (dr > 3.14159265358979) dr -= 6.28318530717959;
+            while (dr < -3.14159265358979) dr += 6.28318530717959;
+            heading_rate_radps_ = 0.5 * heading_rate_radps_ + 0.5 * (dr / dt);
+        }
+        prev_hdg_ = hdg;
+        has_prev_hdg_ = true;
         prev_east_ft_ = e;
         prev_north_ft_ = n;
         has_prev_pos_ = true;
@@ -145,7 +159,39 @@ void StrikeModule::update(double dt, const flight::IAircraftState* state,
         }
         const bool aligned = cos_cone >= std::cos(config.release_cone_rad);
         const bool in_range = aim_dist <= computed_range_ft_;
-        if (!aligned || !in_range || config.hold_fire) return;
+        // INIT-1c/1d: the pipper gate is BACK. impact_tolerance_ft was
+        // unsatisfiable under the old LNAV/homing run-ins; the virtual
+        // attack leg (EMPL-1a) converges the release geometry in both
+        // axes exponentially into the aim, and the armed-stick hold flies
+        // the run into the target — the measured SAD stick released at a
+        // 287-ft pipper on the cone gate alone. The 150-ft gate fires on
+        // the converged pass, and the stick lands ON the aimed feature
+        // (the ~144-ft single-hit envelope) instead of 287-2,680 ft wide
+        // of it — the measured SAD/STRATBOMB/OCASTRIKE sticks: releases
+        // and impacts with ZERO features destroyed.
+        const bool on_pipper =
+            predicted_miss_ft_ <= config.impact_tolerance_ft;
+        // INIT-1f: the two-stage release — the pipper first (the
+        // converged attack run), the bounded cone-edge fallback for the
+        // approaches whose pipper never tightens (the aircraft past the
+        // ideal release point by the holdover: the bombs land holdover
+        // short, which beats the armed-no-release exit 4).
+        const bool past_holdover =
+            aim_dist < computed_range_ft_ - config.release_holdover_ft;
+        // INIT-1g: the mid-turn hold — a release fired while the
+        // aircraft is turning lands where the STALE track pointed (the
+        // pipper's track estimate lags the true velocity): the measured
+        // OCASTRIKE stick released on a turn-dip pipper and landed
+        // 12,161 ft wide. The attack leg rolls the aircraft out inbound
+        // and the pipper converges on the straight.
+        const bool turning =
+            std::abs(heading_rate_radps_) >
+            config.max_release_heading_rate_radps;
+        if (!aligned || !in_range || turning ||
+            (!on_pipper && !past_holdover) ||
+            config.hold_fire) {
+            return;
+        }
     }
 
     pulse_ = true;

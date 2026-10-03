@@ -1635,6 +1635,24 @@ build_mission_plan_from_flight(
                         pos.x = ttf->position.x;
                         pos.y = ttf->position.y;
                     }
+                    // INIT-1g: aim the co-located waypoint at the FEATURE
+                    // the strike wiring will aim at (the save's aimpoint
+                    // element, else the first alive) — the same
+                    // resolve_feature_aim rule the brain runs. The nav's
+                    // attack run, the release gate's pipper, and the
+                    // feature damage all converge on the same ~150-ft
+                    // point; aiming at the objective CENTER while the
+                    // pipper demands the feature left a 156-375-ft
+                    // lateral floor the 150-ft gate could never meet.
+                    if (auto* fs =
+                            EntityHandle(entities::EntityId{target_id},
+                                         const_cast<EntityWorld*>(&world))
+                                .get<entities::FeatureSetComponent>()) {
+                        const auto aimed = f4::ai::resolve_feature_aim(
+                            *fs, w.target_building, ttf->position);
+                        pos.x = aimed.x;
+                        pos.y = aimed.y;
+                    }
                 }
             }
         }

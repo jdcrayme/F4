@@ -56,6 +56,35 @@ the strike flights now fly their full 90-minute arcs and the windows'
 final quarters land on the delivery-run and near-field-stack
 excursions.
 
+## INIT-1g — the release-accuracy tranche: the pipper gate restored; INTSTRIKE 15 features, STRIKE 5; the mid-turn release hold
+
+The feature-kill gap (impacts with 0 features destroyed) traced to the
+release accuracy: the sticks landed 287-2,680 ft from the aimed
+feature against a ~144-ft envelope. Three layers. (1) The CCIP pipper
+gate restored (impact_tolerance_ft 150 in the release condition):
+EMPL-1 parked it because the old run-ins could not hold sub-0.9 deg —
+but the virtual attack leg converges the release geometry in both axes
+exponentially, and the armed-stick hold flies the run into the target.
+(2) The two-stage release (release_holdover_ft 300): the pipper-first
+accuracy with the bounded cone-edge fallback for the approaches whose
+pipper never tightens (the 1,200-ft holdover measured the preemption
+problem — it fired before the pipper's own pass and wiped INTSTRIKE's
+13 kills; 300 keeps the pipper's pass first). (3) The feature-aim
+co-location: the co-located delivery waypoint aims at the FEATURE the
+strike wiring aims at (the same resolve_feature_aim rule) — the attack
+run, the release pipper, and the feature damage converge on the same
+~150-ft point. The mid-turn release hold landed with it (the heading-
+rate bound 4 deg/s): the pipper's track estimate lags the true
+velocity mid-turn, and a turn-time release landed where the STALE
+track pointed (the measured OCASTRIKE stick: released on a turn-dip
+pipper, 12,161 ft wide). Measured: INTSTRIKE 15 features, STRIKE 5,
+releases hold on all types. The scoped remainder: OCASTRIKE's
+converging sticks land 448-717 ft from the aimed feature (the
+release-solution residual vs the 144-ft envelope; the drag-factor
+default is inert — arm_flight_strike overrides it from the card), and
+the SAD/STRATBOMB targets are BATTALIONS with no FeatureSet (their
+damage ledger is unit damage — the unit-damage ledger tranche).
+
 ## MC-4 — the PATH turn-window semantics; steady-state measured honestly; PATH 43 -> 23
 
 The INIT-1f measurement (the turn excursions at their geometric floor)

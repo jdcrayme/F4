@@ -120,6 +120,13 @@ public:
         /// landed systematically long. The host's computed factor
         /// overrides this anyway; 1.0 is the physically honest default
         /// (hosts set < 1.0 for draggy shapes).
+        /// (INIT-1g measured: retuning this default does not reach the
+        /// campaign flights — arm_flight_strike overrides it from the
+        /// weapon card per delivery altitude (bomb_drag_factor_for). The
+        /// coverage-matrix impacts measured 7-10% long of the vacuum
+        /// solution at the 1,500-ft co-located delivery: the residual is
+        /// the card model vs the bomb sim at that geometry — owner: the
+        /// release-accuracy tranche, with the measured stick walks.)
         double drag_factor{1.0};
         /// Stick spacing (seconds between releases).
         double salvo_interval_s{0.25};
@@ -136,13 +143,40 @@ public:
         /// it from the weapon's lethal radius (~half). EMPL-1: the
         /// campaign gate no longer reads this field — at the flat-world
         /// campaign delivery geometry (dz ~3,000 ft -> throw ~9,500 ft)
-        /// a 150-ft pipper demands sub-0.9-deg alignment, which no
-        /// dynamic approach holds (the "armed, no release" exit 4); the
-        /// gate is range + release_cone_rad instead. Kept settable for
-        /// host compatibility and as the recorded diagnostic threshold;
-        /// a per-mission-mode gate (pipper for aligned run-ins, cone for
-        /// campaign passes) is the named refinement.
+        /// a 150-ft pipper demanded sub-0.9-deg alignment, which the old
+        /// LNAV/homing run-ins could not hold (the "armed, no release"
+        /// exit 4) — so EMPL-1 gated on range + release_cone_rad instead.
+        /// INIT-1d restored the pipper gate: the virtual attack leg
+        /// (EMPL-1a) converges the release geometry in BOTH axes
+        /// exponentially into the aim, and the armed-stick hold flies it
+        /// into the target — the measured SAD stick released at a 287-ft
+        /// pipper on the cone gate alone; the 150-ft gate now fires
+        /// seconds later, on the converged pass. The cone stays as the
+        /// gross mid-turn protection.
         double impact_tolerance_ft{150.0};
+        /// INIT-1f — the pipper's fallback bound: an approach whose
+        /// pipper never converges to impact_tolerance_ft (the measured
+        /// SAD/STRATBOMB/OCASTRIKE approaches hold ~1-2.5k ft) releases
+        /// anyway once the aircraft is this far PAST the ideal release
+        /// point — the bombs land holdover short of the aim, which beats
+        /// the armed-no-release exit 4 (the cone still gates the gross
+        /// pointing). The pipper-first population keeps the accuracy.
+        double release_holdover_ft{300.0};
+        /// (INIT-1g measured: at 1,200 the holdover PREEMPTED the pipper —
+        /// the release fired 1,200 short before the pipper converged to
+        /// its 150-ft pass, and every stick landed holdover-wide: SAD/
+        /// STRATBOMB/OCASTRIKE features 0. At 300 the pipper's pass
+        /// [rng-150, rng+150] comes first; the holdover only catches the
+        /// passes that never converge.)
+        /// INIT-1g — the release heading-rate bound (rad/s): the pipper's
+        /// track estimate is POSITION-DIFFERENCED and lags the true
+        /// velocity during a turn — the measured OCASTRIKE stick released
+        /// on a turn-dip pipper (2,188 ft minimum, the 1-Hz samples
+        /// missing the dip) and landed 12,161 ft wide of the aim. Hold
+        /// the release while the aircraft's heading rate exceeds ~4 deg/s
+        /// (a standard-rate turn); the attack leg rolls the aircraft out
+        /// inbound and the pipper converges on the straight.
+        double max_release_heading_rate_radps{0.07};
         /// EMPL-1: forward alignment cone (radians) — the aim must sit
         /// inside this cone off the release track for the trigger to
         /// arm. This is the mid-turn protection (a 60-deg-off aircraft
@@ -262,6 +296,15 @@ private:
     double prev_north_ft_ = 0.0;
     double track_x_ = 0.0;          // unit track vector, ENU
     double track_y_ = 0.0;
+    /// INIT-1g — the smoothed heading rate (rad/s, signed), for the
+    /// release gate's mid-turn hold: the pipper's track estimate is
+    /// position-differenced and lags the true velocity during a turn,
+    /// so a release fired mid-turn lands where the STALE track pointed
+    /// (the measured OCASTRIKE stick: released on a turn-dip pipper,
+    /// 12,161 ft wide of the aim).
+    double heading_rate_radps_ = 0.0;
+    double prev_hdg_ = 0.0;
+    bool   has_prev_hdg_ = false;
 };
 
 } // namespace f4::ai::modules
