@@ -70,6 +70,28 @@ do NOT decelerate horizontally (the travel = gs x the fall exactly) —
 the drag acts on the fall only; the bomb_drag_factor_for ratio
 (dragged/vacuum = 1.63 at dz 2,251, clamped to 1.0) documents it.
 
+## INIT-2 — the exponential-decay localizer intercept; the go-arounds 13 -> 2 on the characterized population
+
+The go-around characterization's fix landed: the far-field localizer
+intercept's cut is now PROPORTIONAL to the lateral offset — the lead
+grows as |xtrack| / tan(asin(k|xtrack|/V)) (the decay constant
+k = 0.035/s, the tau ~28 s) instead of the constant atan(1/2.5) ~22
+deg the linear lead scaling produced. The constant cut crossed the
+course at a constant ~200 ft/s with the turn-back arc overshooting
+~the turn radius: the measured oscillation +/-5-12k ft around the
+course, the establish gate (250 ft) unreachable through the
+oscillation. The exponential eases the cut as the offset closes (the
+1,000-ft cut 8.7 deg = the old law's boundary value continuous; the
+3,000-ft cut 6 deg): the lateral converges MONOTONICALLY. Measured:
+the BAI go-arounds 2 (CS065-4's single go-around is an honest missed
+approach — the flight recovered on the second); the full matrix:
+first_attempt 13 -> 23 FAILs across MORE flights (the newly-
+recovering population's own honest go-arounds), PATH 43 -> 21 (the
+monotonic approach also cleans the PATH tails), recovery 68/8 holds,
+gate fails zero. The landing suite 32/32; the scenario trio exits 0;
+verify.cmd GREEN. The decay-k tuning (0.020-0.035 measured flyable)
+is the approach-quality tranche's own knob.
+
 ## INIT-1i — the MEASURED fall time: OCASTRIKE's converging sticks 12,161 -> 316-450 ft
 
 The CCIP accuracy tranche's decomposition (the along/cross split of

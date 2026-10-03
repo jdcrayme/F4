@@ -518,7 +518,31 @@ with an owner.
   heading is the spawn heading). The other three flights + all the
   measured improvements hold: 16 releases / 16 impacts / 0 features on
   OCASTRIKE with the wide sticks from this flight; INTSTRIKE 15
-  features, STRIKE 5.- **INIT-1i follow-up — the measured-range model; the kill threshold
+  features, STRIKE 5.- **INIT-2 — the exponential-decay localizer intercept: the go-arounds
+  13 -> 2 on the characterized population (2026-10-03).** The
+  go-around characterization's fix landed: the far-field localizer
+  intercept's cut is now PROPORTIONAL to the lateral offset — the lead
+  grows as |xtrack| / tan(asin(k|xtrack|/V)) (the decay constant
+  k = 0.035/s, the tau ~28 s) instead of the constant atan(1/2.5) ~
+  22 deg the linear lead scaling produced. The constant cut crossed
+  the course at a constant ~200 ft/s with the turn-back arc
+  overshooting ~the turn radius: the measured oscillation +/-5-12k ft
+  around the course, the establish gate (250 ft) unreachable through
+  the oscillation. The exponential eases the cut as the offset closes
+  (the 1,000-ft cut 8.7 deg = the old law's boundary value
+  continuous; the 3,000-ft cut 6 deg): the lateral converges
+  MONOTONICALLY (the measured BAI re-run: 1,095 -> 271 ft hugging the
+  gate, no crossing overshoot), the establish fires at the crossing.
+  Measured (qc/goaround/bai3 + qc/coverage_map_init2): the BAI
+  go-arounds 2 (the first-attempt FAILs 2 on BAI; CS065-4's single
+  go-around is an honest missed approach — the flight recovered on
+  the second); the full matrix: first_attempt 13 -> 23 FAILs across
+  MORE flights (the newly-recovering population's own honest
+  go-arounds), PATH 43 -> 21 (the monotonic approach also cleans the
+  PATH tails), recovery 68/8 holds, gate fails zero. The landing
+  suite 32/32; the scenario trio exits 0; verify.cmd GREEN. The
+  decay-k tuning (0.020-0.035 measured flyable) is the approach-
+  quality tranche's own knob.- **INIT-1i follow-up — the measured-range model; the kill threshold
   reached (2026-10-03).** The measured-range model's first scaling
   (the analytic-fall ratio) double-counted the drag and killed nothing
   (every stick short); the corrected pure-ballistic scaling

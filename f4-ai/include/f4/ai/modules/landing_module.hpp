@@ -302,6 +302,20 @@ public:
                                         // physically could not complete it
                                         // before crossing the course,
                                         // overshooting by 350-640 ft.
+    /// INIT-2 — the exponential-decay intercept: the far-field cut is
+    /// asin(k x |xtrack| / V) instead of the constant atan(1/ratio) —
+    /// the constant cut crossed the course at a constant ~200 ft/s with
+    /// the turn-back arc overshooting ~the turn radius, the measured
+    /// oscillation +/-5-12k ft around the course (the establish gate's
+    /// 250-ft lateral unreachable through the oscillation: the 13
+    /// first-attempt go-arounds). The exponential eases the cut as the
+    /// offset closes: no crossing overshoot, the establish fires at the
+    /// crossing. 0 = the constant-cut law (the A/B switch).
+    double intercept_decay_k{0.035};    // the tau ~28 s: the 1,000-ft cut
+                                        // ~8.7 deg (the old constant-cut's
+                                        // boundary value), the 12k cut ~39
+                                        // deg (the monotonic exponential —
+                                        // no crossing overshoot)
     double intercept_lead_ratio{2.5};   // STAB-E51: steepen the scaled-lead
                                         // cut back to atan(1/2.5) = 21.8 deg
                                         // (was 1/5 = 11.3 deg, Tranche 31).

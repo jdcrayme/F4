@@ -890,6 +890,19 @@ double LandingModule::localizer_heading_rad() const {
             (entry_fix_.y - threshold_position_.y) * fy;
         double lead = std::max(intercept_lead_ft,
                                intercept_lead_ratio * std::abs(xtrack));
+        // INIT-2: the exponential-decay cut — the lead grows as
+        // |xtrack| / tan(asin(k|xtrack|/V)) so the intercept ANGLE is
+        // proportional to the offset: the lateral closes first-order
+        // (no line-crossing overshoot) instead of the constant-cut's
+        // turn-radius oscillation.
+        if (intercept_decay_k > 0.0) {
+            const double v_fps_est =
+                std::max(200.0, current_vcas_kts_ * 1.68781);
+            const double cut = std::asin(std::clamp(
+                intercept_decay_k * std::abs(xtrack) / v_fps_est, 0.0, 0.85));
+            const double decay_lead = std::abs(xtrack) / std::tan(cut);
+            lead = std::max(lead, decay_lead);
+        }
         if (proj_along > 0.0) {
             lead = along_fix - proj_along;  // negative: aim BACK at the fix
         }
