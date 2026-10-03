@@ -387,7 +387,27 @@ with an owner.
   feature-layer concern — OCASTRIKE/STRATBOMB impacts with 0 feature
   kills — is visible per type). The card residuals stand: PATH 45 on
   the long arcs, first_attempt 13 go-arounds, recovery 11
-  world-geography tail.- **MC-4 — the ProceedToFix "stall" re-attributed; horizon margin
+  world-geography tail.- **INIT-1e — the WP_SAD vocabulary collision found and gated
+  (2026-10-02).** The PATH 45 characterization exposed the support
+  families' regression: the wire's WP_SAD (16) is SHARED vocabulary —
+  the BAI/STRATBOMB planners write it on delivery points AND the
+  support planners write it on racetrack corners (the measured AWACS
+  route: actions 1,16,16,7,7; TANK: 1,8,8,16,16,7,7). INIT-1b's
+  unconditional WP_SAD addition armed the StrikeModule on the support
+  flights' own orbit corners, and INIT-1d's armed-stick capture hold
+  then PINNED them there — the AWACS flight held its first orbit corner
+  for the whole run (hdgrw swinging ±180, cLat -74,222 at run end). Fix:
+  MissionPlan carries `ag_delivery_mission` (stamped by the bridge from
+  the mission byte's category — Strike/SEAD/CAS deliver; default true
+  keeps the engine-agnostic harnesses delivering), and every
+  delivery-action consumer gates on it: the strike arming, the
+  armed-stick capture hold, and the delivery-first resume. Measured
+  (qc/coverage_map_init1e): AWACS 4/4 recovered (was stranding),
+  employment 31 PASS / 0 FAIL holds, releases hold at 123 / 123 / 38,
+  gate fails zero, **PATH 45 → 43** (the support families' corner
+  excursions gone; the remainder is the delivery-arc route-holding and
+  the departure-turn families). The predicate lives at the single
+  source of truth (mission_type.hpp: mission_is_ag_delivery).- **MC-4 — the ProceedToFix "stall" re-attributed; horizon margin
   +20 — LANDED (2026-10-02).** The horizons tranche's dominant finding
   (AIRLIFT flights spending 18 minutes in ProceedToFix without
   sequencing) was instrumented (a [fix] probe in check_fix_reached

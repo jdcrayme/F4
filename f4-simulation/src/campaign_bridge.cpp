@@ -1768,6 +1768,13 @@ build_mission_plan_from_flight(
         }
     }
 
+    // INIT-1e: the plan's delivery doctrine rides to the brain — the
+    // Strike/SEAD/CAS families deliver; every other family's action-16
+    // points (the support racetrack corners) are station geometry, not
+    // deliveries.
+    plan.ag_delivery_mission =
+        f4::campaign::mission_is_ag_delivery(fp->mission);
+
     // start_phase stays Ground: the campaign flight departs from its
     // airbase (taxi → takeoff → enroute), which is exactly the brain's
     // default sequencing.
@@ -2066,6 +2073,8 @@ spawn_aircraft_for_intent(
         plan->mission_type = intent.mission_byte;
         plan->tot_s = static_cast<double>(intent.time_on_target);
         plan->target_objective_id = intent.target_objective_id;
+        plan->ag_delivery_mission =
+            f4::campaign::mission_is_ag_delivery(intent.mission_byte);
         // EMPL-2 — receiver eligibility from the synthetic route (the
         // same scan the flight path runs on the saved plan; the ladder's
         // stamped routes carry kWpRefuel the same way).

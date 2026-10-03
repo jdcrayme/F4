@@ -56,6 +56,27 @@ the strike flights now fly their full 90-minute arcs and the windows'
 final quarters land on the delivery-run and near-field-stack
 excursions.
 
+## INIT-1e — the WP_SAD vocabulary collision gated; AWACS recovers 4/4; PATH 45 -> 43
+
+The PATH characterization exposed the support families' regression: the
+wire's WP_SAD (16) is SHARED vocabulary — the BAI/STRATBOMB planners
+write it on delivery points AND the support planners write it on
+racetrack corners (the measured AWACS route: actions 1,16,16,7,7;
+TANK: 1,8,8,16,16,7,7). INIT-1b's unconditional WP_SAD addition armed
+the StrikeModule on the support flights' own orbit corners, and
+INIT-1d's armed-stick capture hold then pinned them there — the AWACS
+flight held its first orbit corner for the whole run (hdgrw swinging
++-180, cLat -74,222 at run end). Fix: MissionPlan carries
+ag_delivery_mission (stamped by the bridge from the mission byte's
+category — Strike/SEAD/CAS deliver; default true keeps the
+engine-agnostic harnesses delivering), and every delivery-action
+consumer gates on it: the strike arming, the armed-stick capture hold,
+and the delivery-first resume. The predicate lives at the single source
+of truth (mission_type.hpp: mission_is_ag_delivery). Measured: AWACS
+4/4 recovered (was stranding), employment 31 PASS / 0 FAIL holds,
+123 releases / 123 impacts / 38 features hold, gate fails zero,
+PATH 45 -> 43.
+
 ## INIT-1d — the employment clause closes: 31 PASS / 0 FAIL; the matrix totals 123 releases / 123 impacts / 38 features
 
 The two SAD employment FAILs instrumented and fixed. CS079-1: its

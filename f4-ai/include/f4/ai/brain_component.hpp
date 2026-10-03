@@ -164,6 +164,19 @@ struct MissionPlan {
     double tot_s{0.0};
     /// The target objective's VU_ID.num (0 = none).
     std::uint32_t target_objective_id{0};
+    /// INIT-1e — the plan's flight is an A-G ordnance DELIVERY flight
+    /// (the Strike/SEAD/CAS doctrine families). Gates the delivery-action
+    /// consumers: the strike arming, the armed-stick capture hold, and
+    /// the delivery-first resume. The wire's WP_SAD (16) is shared
+    /// vocabulary — the BAI/STRATBOMB planners write it on delivery
+    /// points AND the support planners write it on racetrack corners —
+    /// so the action byte alone cannot discriminate a delivery from a
+    /// station corner (the measured AWACS flight armed on its own orbit
+    /// corner and held its capture for the whole run). The campaign
+    /// bridge stamps this from the mission byte's category; default TRUE
+    /// keeps the engine-agnostic harnesses (the ground-strike/QC paths
+    /// whose plans ARE deliveries) delivering.
+    bool ag_delivery_mission{true};
 };
 
 // ============================================================================
@@ -540,7 +553,9 @@ public:
                 // leaving the cursor on the delivery waypoint — the
                 // flight departs the field toward its target.
                 nav_.resume_from(
-                    modules::is_ag_delivery_action(plan_.route[0].action)
+                    (plan_.ag_delivery_mission &&
+                     modules::is_ag_delivery_action(
+                         plan_.route[0].action))
                         ? 0
                         : 1);
                 if (std::getenv("F4_LAND_DEBUG") != nullptr) {
@@ -1054,6 +1069,7 @@ public:
             const auto wp_index = nav_.current_waypoint_index();
             const bool strike_wp =
                 wp_index < plan_.route.size() &&
+                plan_.ag_delivery_mission &&
                 modules::is_ag_delivery_action(
                     plan_.route[wp_index].action);
             // The delivery's aim target (Step 15): the route waypoint's

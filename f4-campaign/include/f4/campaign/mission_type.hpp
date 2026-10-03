@@ -251,6 +251,22 @@ mission_category(std::uint8_t mission_byte) noexcept {
     }
 }
 
+/// The A-G ordnance delivery categories (Strike/SEAD/CAS): the mission
+/// families whose routes carry live delivery points. INIT-1e: the wire's
+/// WP_SAD (16) is SHARED vocabulary — the BAI/STRATBOMB planners write it
+/// on delivery points AND the support planners write it on racetrack
+/// corners (the measured AWACS route: actions 1,16,16,7,7; TANK:
+/// 1,8,8,16,16,7,7) — so the action byte alone cannot discriminate a
+/// delivery from a station corner. Gate every delivery-action consumer
+/// (strike arming, the delivery-point co-location, the capture hold, the
+/// delivery-first resume) on this predicate.
+[[nodiscard]] constexpr bool
+mission_is_ag_delivery(std::uint8_t mission_byte) noexcept {
+    const MissionCategory c = mission_category(mission_byte);
+    return c == MissionCategory::Strike || c == MissionCategory::SEAD ||
+           c == MissionCategory::CAS;
+}
+
 /// Category -> short display name ("CAP", "Strike", ...). The name is the
 /// stable rendering key for the viewer's symbol table and QC filters.
 [[nodiscard]] constexpr std::string_view
