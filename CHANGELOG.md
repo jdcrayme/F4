@@ -56,6 +56,32 @@ the strike flights now fly their full 90-minute arcs and the windows'
 final quarters land on the delivery-run and near-field-stack
 excursions.
 
+## INIT-1d — the employment clause closes: 31 PASS / 0 FAIL; the matrix totals 123 releases / 123 impacts / 38 features
+
+The two SAD employment FAILs instrumented and fixed. CS079-1: its
+saved route opens WITH the delivery point (strike -> egress) and the
+handoff's resume_from(1) skipped the mission itself (the delivery
+waypoint "captured" by the handoff jump at 153,501 ft) — a route whose
+first waypoint is a delivery action now resumes at it (resume_from(0)
+no-ops; the cursor stays on the mission). CS138-2: the delivery
+waypoint's speed-proportional capture (~4,020 ft) sequenced it AT
+closest approach (4,013 ft) before the release gate's range+cone was
+satisfied — the brain now holds the delivery waypoint's capture while
+the stick is armed, the aim valid, and the stick unfallen
+(NavigationModule::hold_delivery_capture), and the attack-run law
+gained the along-track reversal: past the aim the leg's extension ran
+AWAY from the target forever (the armed flight chased the extension
+for its whole 120-minute run, closest approach 8,715 ft, inside release
+range throughout — the same line-chase the landing module's T5
+wrong-side pursuit solved). Held, the attack leg flies INTO the aim;
+the gate fires inside its envelope; the hold lifts when the stick
+completes and the capture sequences the egress. Measured: SAD 4/4
+deliver; employment 31 PASS / 0 FAIL / 0 SKIP; the matrix totals 123
+releases / 123 impacts / 38 features destroyed; gate fails zero. The
+matrix rows now carry the features counter (the aimpoint/feature-layer
+concern — impacts with 0 feature kills on some types — is visible per
+type).
+
 ## INIT-1c — the saved ATO's TOT appointed; the tot clause gains its saved-path semantics
 
 The tot clause's 43 SKIPs were "no TOT appointed": the bridge never

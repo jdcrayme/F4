@@ -531,7 +531,18 @@ public:
                 // family's nine exit-4 gates. The projection stays the
                 // NAV-D1 air-spawn site's tool (an airborne materialization
                 // genuinely is mid-route); a departure is not.
-                nav_.resume_from(1);
+                // INIT-1d: the reduction's own exception — a route whose
+                // FIRST waypoint IS the delivery point (the planner wrote
+                // strike → egress; the measured SAD flight CS079-1) must
+                // resume AT it: resume_from(1) skipped the mission
+                // itself (the delivery waypoint "captured" by the
+                // handoff jump at 153,501 ft). resume_from(0) no-ops,
+                // leaving the cursor on the delivery waypoint — the
+                // flight departs the field toward its target.
+                nav_.resume_from(
+                    modules::is_ag_delivery_action(plan_.route[0].action)
+                        ? 0
+                        : 1);
                 if (std::getenv("F4_LAND_DEBUG") != nullptr) {
                     const auto* st =
                         owner_.get_interface<flight::IAircraftState>();
@@ -1092,6 +1103,14 @@ public:
                 }
                 strike_.set_target(aim_target_id);
                 strike_.update(dt, state, aim, aim_valid);
+                // INIT-1d: hold the delivery waypoint's capture while the
+                // stick is armed and unfallen — the attack run flies INTO
+                // the aim and the release gate fires inside its envelope;
+                // the capture-at-closest-approach race otherwise dismantled
+                // the attack run at 4,013 ft (the measured SAD flight).
+                // An invalid aim (a target without a transform) lifts the
+                // hold — nothing can release there, and the flight moves on.
+                nav_.hold_delivery_capture(aim_valid);
                 // ROUTE-HOLD/INIT-1 telemetry — the F4_LAND_DEBUG pattern
                 // (1 Hz while a delivery waypoint is armed): the aim the
                 // module was given and the geometry it computed, so a
@@ -1137,9 +1156,11 @@ public:
                 combat_intent_.bomb_aim = strike_.last_aim();
             } else {
                 strike_.clear_target();
+                nav_.hold_delivery_capture(false);
             }
         } else {
             strike_.clear_target();
+            nav_.hold_delivery_capture(false);
         }
 
         // =================================================================

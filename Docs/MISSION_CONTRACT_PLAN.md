@@ -354,7 +354,40 @@ with an owner.
   carries near-term TOTs. The push-wait model (flights holding for
   their appointed push time) remains the CAMPAIGN_LOOP_PLAN §7
   TOT-pacing tranche's to name.
-- **MC-4 — the ProceedToFix "stall" re-attributed; horizon margin
+- **INIT-1d — the employment clause closes: 31 PASS / 0 FAIL
+  (2026-10-02).** The two SAD employment FAILs had distinct mechanisms,
+  both instrumented and fixed:
+  1. **CS079-1 — the delivery-first route.** Its saved route opens WITH
+     the delivery point (strike → egress), and the handoff's
+     resume_from(1) skipped the mission itself (the delivery waypoint
+     "captured" by the handoff jump at 153,501 ft). The reduction now
+     has its exception: a route whose first waypoint is a delivery
+     action resumes at it (resume_from(0) no-ops — the cursor stays on
+     the mission).
+  2. **CS138-2 — the armed-stick capture race.** The delivery
+     waypoint's speed-proportional capture (max(3000, 10*vcas) ≈ 4,020
+     ft) sequenced it AT closest approach (measured: 4,013 ft) while
+     the release gate wanted the aircraft inside its range (~9,400 ft)
+     with alignment — the attack run dismantled before the stick fell.
+     The brain now holds the delivery waypoint's capture while the
+     stick is armed, the aim valid, and the stick unfallen
+     (NavigationModule::hold_delivery_capture), and the attack-run law
+     gained the along-track reversal it lacked: past the aim the leg's
+     extension ran AWAY from the target forever (the armed flight
+     chased the extension for its whole 120-minute run, closest
+     approach 8,715 ft, inside release range the whole time — the same
+     line-chase the landing module's T5 wrong-side pursuit solved).
+     Held, the attack leg flies INTO the aim; the gate fires inside its
+     envelope; the brain lifts the hold when the stick completes and
+     the capture sequences the egress.
+  Measured (qc/coverage_map_init1d): SAD 4/4 flights release; **the
+  employment clause 31 PASS / 0 FAIL / 0 SKIP; the matrix totals 123
+  releases / 123 impacts / 38 features destroyed; gate fails zero.**
+  The matrix rows now carry the features counter (the aimpoint/
+  feature-layer concern — OCASTRIKE/STRATBOMB impacts with 0 feature
+  kills — is visible per type). The card residuals stand: PATH 45 on
+  the long arcs, first_attempt 13 go-arounds, recovery 11
+  world-geography tail.- **MC-4 — the ProceedToFix "stall" re-attributed; horizon margin
   +20 — LANDED (2026-10-02).** The horizons tranche's dominant finding
   (AIRLIFT flights spending 18 minutes in ProceedToFix without
   sequencing) was instrumented (a [fix] probe in check_fix_reached

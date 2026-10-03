@@ -192,6 +192,24 @@ public:
         return contact_stabilized_;
     }
 
+    /// INIT-1d — hold the capture of the CURRENT waypoint while it is a
+    /// delivery action and the stick is armed and unfallen (the brain
+    /// sets it from its own strike state each tick, before update()).
+    /// The speed-proportional capture radius (max(3000, 10*vcas) ≈
+    /// 4,020 ft at 402 kts) otherwise sequences the delivery waypoint
+    /// AT closest approach — the measured SAD flight passed its
+    /// GNDSTRIKE point 4,013 ft wide, the attack run dismantled under
+    /// it, and the stick never fell although the release gate (range
+    /// ≈ 9,400 ft + a 20-deg cone) had every right to fire on the way
+    /// in. Held, the attack leg flies INTO the aim — the cross-track
+    /// law converges on the line, the line ends at the target, and the
+    /// gate fires inside its own envelope; the brain lifts the hold
+    /// when the stick completes (delivered) and the capture fires at
+    /// once, sequencing the egress.
+    void hold_delivery_capture(bool on) noexcept {
+        hold_delivery_capture_ = on;
+    }
+
     /// NAV-B: the LNAV desired heading for the ACTIVE leg — leg course +
     /// cross-track correction (see controls_for_waypoint). Pure function
     /// of the cached state; call after update(). Exposed for unit tests
@@ -348,7 +366,8 @@ private:
     double station_elapsed_{0.0};
     std::size_t loop_start_{0};   // the anchor's index
     std::size_t loop_end_{0};     // the span's last corner
-    bool contact_stabilized_{false};  // EMPL-2: fly the hold leg straight
+    bool contact_stabilized_{false};
+    bool hold_delivery_capture_{false};  // INIT-1d: the armed-stick capture hold  // EMPL-2: fly the hold leg straight
 
     // Cached state for control logic (refreshed each update()).
     geo::WorldPosition current_position_;

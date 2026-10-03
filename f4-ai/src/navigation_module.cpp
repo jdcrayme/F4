@@ -243,6 +243,15 @@ void NavigationModule::cache_aircraft_state(const flight::IAircraftState* state)
 
 void NavigationModule::check_waypoint_capture()
 {
+    // INIT-1d: the armed-stick capture hold (see hold_delivery_capture
+    // in the header) — a delivery waypoint whose stick is armed and
+    // unfallen is not sequenced by the speed-proportional radius; the
+    // attack leg flies INTO the aim and the brain lifts the hold when
+    // the stick completes.
+    if (hold_delivery_capture_ && wp_index_ < route_.size() &&
+        is_ag_delivery_action(route_[wp_index_].action)) {
+        return;
+    }
     if (wp_index_ >= route_.size()) return;  // nothing left
 
     const auto& target = route_[wp_index_].position;
@@ -550,6 +559,22 @@ double NavigationModule::nav_heading_rad() const
                 const double course =
                     AirSteering::bearing_to(attack_from_, wp.position);
                 const double leg_len = std::max(1.0, alen);
+                // INIT-1d: past the aim the leg's extension runs AWAY
+                // from the target, and the line law (course + cross-track
+                // correction) has no along-track reversal — the armed
+                // aircraft chased the extension for the rest of the run
+                // with the stick unfallen (the measured SAD flight:
+                // armed 120 min, closest approach 8,715 ft, inside the
+                // release range the whole time). Command pursuit of the
+                // aim instead — the turn back re-joins the leg inbound,
+                // where the release gate fires.
+                const double along =
+                    (current_position_.x - attack_from_.x) * (adx / alen)
+                  + (current_position_.y - attack_from_.y) * (ady / alen);
+                if (along > leg_len) {
+                    return AirSteering::bearing_to(current_position_,
+                                                   wp.position);
+                }
                 // Right unit vector of the virtual leg (ENU; compass
                 // course convention) — the same construction the real
                 // leg uses below.

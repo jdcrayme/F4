@@ -241,6 +241,10 @@ def _absorb_summary(row: dict, summary_path: Path) -> None:
             "armed": s.get("ordnance", {}).get("strike_flights_armed", 0),
             "released": s.get("ordnance", {}).get("bombs_released", 0),
             "impacts": s.get("ordnance", {}).get("bombs_impacted", 0),
+            # INIT-1b follow-up: the war-consequence counter — bombs that
+            # impact but kill no features are the aimpoint/feature-layer
+            # finding's signature; make it visible on every row.
+            "features": s.get("ordnance", {}).get("features_destroyed", 0),
         }
         if "tasking" in s:
             t = s["tasking"]
@@ -415,6 +419,9 @@ def verdict_for(row: dict, args) -> tuple[str, str]:
         notes.append(f"all {s['aircraft']} recovered by {minutes} min")
 
     if cat in ORDNANCE_CATEGORIES:
+        if s["released"] > 0 and s.get("impacts", 0) > 0                 and s.get("features", 0) == 0:
+            notes.append("impacts %d, 0 features destroyed (aimpoint/"
+                         "feature-layer concern)" % s["impacts"])
         if s["armed"] > 0 and s["released"] == 0:
             return ("FAIL",
                     "EMPLOYMENT: armed %d, released 0 after %d min — no "
