@@ -56,6 +56,19 @@ the strike flights now fly their full 90-minute arcs and the windows'
 final quarters land on the delivery-run and near-field-stack
 excursions.
 
+## INIT-1h — the drag factor parameterized by the delivery dz (measured neutral, kept as the correct form)
+
+bomb_drag_factor_for now computes its dragged/vacuum ratio at the
+delivery dz (the co-located points fly at ~1,500 ft, not the 5,000-ft
+reference). Measured: the impacts were byte-identical at both
+references — the Mk-82's drag is near-nil at 675 fps at these dz (the
+ratio ~1.0 either way); kept parameterized as the more correct form
+for cards whose drag is significant at low dz. The finding matters:
+the 448-717-ft stick residual is therefore NOT the drag factor — it is
+the pipper model vs the bomb sim at the release (the CCIP accuracy
+chain's own tranche), plus the second-pass overflight sticks (10-12k)
+whose release geometry needs the second-pass analysis.
+
 ## INIT-1g — the release-accuracy tranche: the pipper gate restored; INTSTRIKE 15 features, STRIKE 5; the mid-turn release hold
 
 The feature-kill gap (impacts with 0 features destroyed) traced to the

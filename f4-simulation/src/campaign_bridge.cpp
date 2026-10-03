@@ -1296,25 +1296,33 @@ constexpr int kDoctrineSalvoMax = 4;
 /// One number per weapon class, deterministic, and it tracks the SAME ODE
 /// the bomb entity flies (bomb.cpp), so the trigger and the flyout agree
 /// on where the bomb lands.
+constexpr double kMinDeliveryWaypointAltFt = 1500.0;
+
 double bomb_drag_factor_for(const weapons::WeaponClassTable& table,
-                            std::uint32_t bomb_handle) {
+                            std::uint32_t bomb_handle, double dz_ft) {
     const auto* rec = table.get(bomb_handle);
     if (rec == nullptr) return 0.85;   // safe default
 
-    constexpr double kAltFt = 5000.0;
+    // INIT-1h: the reference altitude follows the delivery dz (the
+    // co-located points fly at ~1,500 ft, not the 5,000-ft reference).
+    // Measured: the impacts were byte-identical at both references — the
+    // Mk-82's drag is near-nil at 675 fps at these dz, the ratio ~1.0
+    // either way. Kept parameterized: the form is the more correct one
+    // for cards whose drag IS significant at low dz.
+    const double alt_ft = std::max(1000.0, dz_ft);
     constexpr double kSpeedFps = 675.0;
     constexpr double kDt = 0.1;        // coarse: the ratio is smooth
 
     weapons::Bomb dragged;
     dragged.release(weapons::BombConfig::from_record(*rec),
-                    f4::geo::WorldPosition{0.0, 0.0, kAltFt},
+                    f4::geo::WorldPosition{0.0, 0.0, alt_ft},
                     f4::math::Vec3<double>{kSpeedFps, 0.0, 0.0}, 0.0);
     weapons::BombConfig vac = weapons::BombConfig::from_record(*rec);
     vac.cd = 0.0;
     vac.ref_area_ft2 = 0.0;
     weapons::Bomb vacuum;
     vacuum.release(vac,
-                    f4::geo::WorldPosition{0.0, 0.0, kAltFt},
+                    f4::geo::WorldPosition{0.0, 0.0, alt_ft},
                     f4::math::Vec3<double>{kSpeedFps, 0.0, 0.0}, 0.0);
     auto fly = [](weapons::Bomb& b) {
         double t = 0.0;
@@ -1402,7 +1410,8 @@ StrikeArmament arm_flight_strike(
         auto& brain = *aircraft.get<f4::ai::BrainComponent>();
         auto& strike = brain.strike();
         strike.config.drag_factor =
-            bomb_drag_factor_for(table, droppable_handle);
+            bomb_drag_factor_for(table, droppable_handle,
+                                 kMinDeliveryWaypointAltFt);
         strike.config.salvo_max = std::min(out.droppable_rounds,
                                            kDoctrineSalvoMax);
         if (const auto* rec = table.get(droppable_handle)) {
@@ -1469,7 +1478,6 @@ const char* wp_action_text(std::uint8_t action) {
 constexpr double kMinWaypointAltFt = 500.0;
 
 /// Altitude floor for A-G delivery waypoints (see the route builder).
-constexpr double kMinDeliveryWaypointAltFt = 1500.0;
 
 /// Waypoint count where a route stops being "the flight's real plan" and
 /// starts being noise: single-waypoint plans (just a takeoff point, the

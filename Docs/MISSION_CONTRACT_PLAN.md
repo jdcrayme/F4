@@ -473,7 +473,17 @@ with an owner.
   features; the nearest-objective fallback aims the stick at the
   battalion's parent objective but the impact books on the unit).
   Owner: the unit-damage ledger tranche + the release-accuracy
-  refinement.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
+  refinement.- **INIT-1h — the drag factor parameterized by the delivery dz
+  (2026-10-03).** bomb_drag_factor_for now computes its dragged/vacuum
+  ratio at the delivery dz (the co-located points fly at ~1,500 ft, not
+  the 5,000-ft reference). Measured: the impacts were byte-identical at
+  both references — the Mk-82's drag is near-nil at 675 fps at these
+  dz (the ratio ~1.0 either way); kept parameterized as the more
+  correct form for cards whose drag is significant at low dz. The
+  448-717-ft stick residual is therefore NOT the drag factor: it is the
+  pipper model vs the bomb sim at the release (the CCIP accuracy
+  chain's own tranche), plus the second-pass overflight sticks
+  (10-12k) whose release geometry needs the second-pass analysis.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
   (2026-10-03).** The INIT-1f measurement (the turn excursions at their
   geometric floor) drove the metric semantics to match its own
   documented doctrine: PATH = STEADY-STATE leg tracking. eval_path now
