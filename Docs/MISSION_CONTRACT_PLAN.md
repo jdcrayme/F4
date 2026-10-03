@@ -534,7 +534,22 @@ with an owner.
   measured: the bomb sim's bombs do NOT decelerate horizontally (the
   travel 13,768 ft = gs x the fall exactly) — the drag acts on the
   fall only; the bomb_drag_factor_for ratio (dragged/vacuum = 1.63 at
-  dz 2,251, clamped to 1.0) documents it.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
+  dz 2,251, clamped to 1.0) documents it.- **INIT-1i follow-up — the feature-kill mechanism NAMED: the holdover
+  releases fire 2,500+ ft short (2026-10-03).** The feature-kill gap's
+  remaining mechanism measured on the recorded SAD/OCASTRIKE runs: the
+  holdover fallback (aim_dist < computed_range - release_holdover_ft)
+  fires on the FIRST descent-crossing of the shrinking computed range —
+  hundreds of feet-ms before the pipper's own pass can converge. The
+  measured SAD stick: released at aim_dist ~13.4k, the bombs landing
+  2,532-2,680 ft SHORT of the aim (the walk 2,532 -> 2,680 walking
+  away), no feature inside the ~144-ft envelope. The OCASTRIKE sticks:
+  the same signature (the 10-12k cluster). The pipper's own pass
+  (aim_dist ~ rng, aligned) would land ON the aim — the holdover
+  preempts it every approach. The scoped fix: the holdover must wait
+  for the pipper's convergence window to pass (the pipper-first
+  ordering with the holdover as the receding-pass last resort), not
+  just the range crossing. The release-accuracy tranche owns it with
+  the probes in place.- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
   (2026-10-03).** The INIT-1f measurement (the turn excursions at their
   geometric floor) drove the metric semantics to match its own
   documented doctrine: PATH = STEADY-STATE leg tracking. eval_path now

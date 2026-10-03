@@ -91,6 +91,18 @@ chain's own tranche — and the SAD/STRATBOMB battalion targets have no
 FeatureSet (the unit-damage ledger tranche). Strike suites 12+6;
 bridge 22; combat 31; verify.cmd GREEN.
 
+Follow-up measurement: the feature-kill gap's remaining mechanism
+named — the holdover fallback (aim_dist < computed_range - holdover)
+fires on the FIRST descent-crossing of the shrinking computed range,
+hundreds of feet before the pipper's own pass can converge. The
+measured SAD stick: released at aim_dist ~13.4k, the bombs landing
+2,532-2,680 ft SHORT of the aim, no feature inside the ~144-ft
+envelope. The pipper's own pass (aim_dist ~ rng, aligned) would land
+ON the aim — the holdover preempts it every approach. The scoped fix:
+the holdover waits for the pipper's convergence window (the pipper-
+first ordering with the holdover as the receding-pass last resort).
+The release-accuracy tranche owns it with the probes in place.
+
 ## INIT-1h — the drag factor parameterized by the delivery dz (measured neutral, kept as the correct form)
 
 bomb_drag_factor_for now computes its dragged/vacuum ratio at the
