@@ -335,6 +335,25 @@ with an owner.
   departure-procedure tranche (turn during the climb at a lower gate)
   and the per-category horizons.
 
+- **INIT-1c — the saved ATO's TOT appointed; the tot clause gains its
+  saved-path semantics (2026-10-02).** The tot clause's 43 SKIPs were
+  "no TOT appointed": the bridge never carried the save's own
+  time_on_target onto the plan. The session's TOT arithmetic
+  (seconds_to_time_on_target: tot − (epoch + clock)) fixed the units —
+  the save's times are ABSOLUTE campaign seconds and the appointment is
+  campaign-relative. The plan build now appoints plan.tot_s = tot − now
+  for delivery missions with a FUTURE appointment (the sim does not
+  model the ATO push wait — flights spawn at their bases and fly at the
+  run's start). The measured TestCamp distribution across the delivery
+  families: **4 stale rows, 109 beyond the run, 0 in-horizon** — so
+  eval_tot gained the matching scope rule (an appointment beyond the
+  run scopes out as "+N h against a push wait the spawn does not
+  model" instead of sitting unappointed), and the cards now name their
+  own stale ATO rows ("+2121 h", "+626 h"). In-horizon appointments
+  judge automatically — the clause lights up the day the world or ATO
+  carries near-term TOTs. The push-wait model (flights holding for
+  their appointed push time) remains the CAMPAIGN_LOOP_PLAN §7
+  TOT-pacing tranche's to name.
 - **MC-4 — the ProceedToFix "stall" re-attributed; horizon margin
   +20 — LANDED (2026-10-02).** The horizons tranche's dominant finding
   (AIRLIFT flights spending 18 minutes in ProceedToFix without

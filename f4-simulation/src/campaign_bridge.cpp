@@ -1735,6 +1735,37 @@ build_mission_plan_from_flight(
                 }
             }
         }
+
+        // INIT-1c — the saved ATO's own appointment. The flight's
+        // time_on_target is ABSOLUTE campaign seconds (the same anchor
+        // the session's TOT arithmetic runs on: tot_rel = tot − now);
+        // plan.tot_s is what the MC-1 tot clause judges the delivery
+        // capture against. Appointed only for delivery missions with a
+        // FUTURE appointment: the sim does not model the ATO push wait
+        // (flights spawn at their bases and fly at the run's start), so
+        // a past appointment is a stale ATO row and a beyond-the-run
+        // appointment is recorded for the card to scope — the measured
+        // TestCamp distribution across the delivery families: 4 stale,
+        // 109 days out, 0 in-horizon.
+        if (delivery_mission) {
+            const auto camp_ids =
+                world.with_component<CampaignStateComponent>();
+            if (!camp_ids.empty()) {
+                const auto* cs =
+                    EntityHandle(camp_ids[0],
+                                 const_cast<EntityWorld*>(&world))
+                        .get<CampaignStateComponent>();
+                if (cs != nullptr) {
+                    const std::int64_t rel =
+                        static_cast<std::int64_t>(fp->time_on_target) -
+                        static_cast<std::int64_t>(cs->current_time);
+                    if (rel > 0 &&
+                        rel <= static_cast<std::int64_t>(2147483647)) {
+                        plan.tot_s = static_cast<double>(rel);
+                    }
+                }
+            }
+        }
     }
 
     // start_phase stays Ground: the campaign flight departs from its

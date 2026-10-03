@@ -56,6 +56,24 @@ the strike flights now fly their full 90-minute arcs and the windows'
 final quarters land on the delivery-run and near-field-stack
 excursions.
 
+## INIT-1c — the saved ATO's TOT appointed; the tot clause gains its saved-path semantics
+
+The tot clause's 43 SKIPs were "no TOT appointed": the bridge never
+carried the save's own time_on_target onto the plan. The session's TOT
+arithmetic fixed the units (the save's times are absolute campaign
+seconds; the appointment is campaign-relative: tot - now). The plan
+build now appoints plan.tot_s for delivery missions with a FUTURE
+appointment — the sim does not model the ATO push wait (flights spawn
+at their bases and fly at the run's start), so past appointments
+(stale ATO rows) are not appointed and beyond-the-run appointments are
+scoped by eval_tot ("+N h against a push wait the spawn does not
+model") instead of sitting unappointed. Measured TestCamp delivery
+families: 4 stale rows, 109 beyond, 0 in-horizon — the cards now name
+their own stale ATO rows ("+2121 h", "+626 h"), and in-horizon
+appointments judge automatically the day the world carries near-term
+TOTs. The push-wait model remains the CAMPAIGN_LOOP_PLAN §7 TOT-pacing
+tranche's to name.
+
 ## INIT-1b — OCASTRIKE solved; the coverage matrix runs with ZERO gate fails
 
 The [strike] probe caught the last exit-4's mechanism: the OCASTRIKE

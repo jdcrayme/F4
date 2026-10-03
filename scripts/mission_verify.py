@@ -262,6 +262,15 @@ def eval_station(f: dict, clause: dict) -> tuple[str, str]:
 def eval_tot(f: dict, clause: dict) -> tuple[str, str]:
     if f["tot_s"] <= 0.0:
         return "SKIP", "no TOT appointed"
+    if f["tot_s"] > f["t_end"]:
+        # INIT-1c: the saved ATO's appointment is campaign-RELATIVE and
+        # can be days out (the measured TestCamp delivery families: 4
+        # stale rows, 109 beyond, 0 in-horizon). The sim does not model
+        # the ATO push wait — flights spawn at their bases and fly at
+        # the run's start — so an appointment beyond the run is scoped
+        # out, not judged against a push that never happened.
+        return "SKIP", (f"appointment beyond the run (+{f['tot_s'] / 3600:.0f} h "
+                        "against a push wait the spawn does not model)")
     deliveries = [e for e in f["events"]
                   if e["kind"] == "waypoint_captured"
                   and e.get("wp_action") in DELIVERY_ACTIONS]
