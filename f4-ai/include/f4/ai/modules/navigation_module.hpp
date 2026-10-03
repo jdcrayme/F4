@@ -294,6 +294,13 @@ public:
     /// Clamp on the computed lead distance (ft). The geometric lead for a
     /// 180-deg reversal at 350+ kts exceeds 20k ft; beyond this the module
     /// just sequences at the clamp and lets the cross-track law re-center.
+    /// (INIT-1e measured: raising this to 60,000 — the geometric lead for
+    /// a 120-deg turn at cruise — did NOT reduce the big-angle overshoots
+    /// (BARCAP2 still 20.8-22.1k p90; SWEEP 25k) and added a regression:
+    /// the early-sequence turns cut across the new line shallowly and the
+    /// far-field intercept converged slower. The overshoot is the TURN
+    /// DYNAMICS at the clamp, not the lead distance — owner: the
+    /// delivery-geometry PATH tranche.)
     double turn_lead_max_ft{22000.0};
     /// EMPL-1a: below this engagement distance the attack run's virtual
     /// leg degenerates (the anchored course becomes bearing-noise) and
