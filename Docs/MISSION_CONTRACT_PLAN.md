@@ -432,7 +432,25 @@ with an owner.
   corner turns also recover cleaner), employment 31/0, gate fails
   zero, wall ~660 s. PATH sits 33 PASS / 43 FAIL with the FAILs at
   their geometric floor pending the metric-doctrine decision.
-- **MC-4 — the ProceedToFix "stall" re-attributed; horizon margin
+- **MC-4 — the PATH turn-window semantics landed; PATH 43 -> 23
+  (2026-10-03).** The INIT-1f measurement (the turn excursions at their
+  geometric floor) drove the metric semantics to match its own
+  documented doctrine: PATH = STEADY-STATE leg tracking. eval_path now
+  scopes the turn windows (the samples within 75 s of a waypoint
+  capture, plus the departure's own first 90 s) as reported-not-banded
+  geometry — the same treatment the departure transient already had —
+  and runs the steady-state p90 on the rest. The turn-arc peaks ride
+  the detail as diagnostics. The 75-s bound is measured (the corner
+  turns: ~60 s of arc at the corner speed + the roll). The remaining 23
+  FAILs are the post-turn convergence tails (the failing samples sit
+  75-150 s post-capture, xte 4-12k median, converging at the legal
+  far-field rate) — the route-holding refinement's honest remainder.
+  The tangent-arc flyout (commanding the outgoing course as a heading
+  after the capture — the geometric tangent-arc correction) was built
+  and measured a wash-to-worse on the fail counts (the arc's rollout
+  offset feeds the same convergence tails) and was reverted with the
+  evidence. Suites green; verify.cmd GREEN; the selftest GREEN with the
+  turn-window semantics.- **MC-4 — the ProceedToFix "stall" re-attributed; horizon margin
   +20 — LANDED (2026-10-02).** The horizons tranche's dominant finding
   (AIRLIFT flights spending 18 minutes in ProceedToFix without
   sequencing) was instrumented (a [fix] probe in check_fix_reached

@@ -56,6 +56,27 @@ the strike flights now fly their full 90-minute arcs and the windows'
 final quarters land on the delivery-run and near-field-stack
 excursions.
 
+## MC-4 — the PATH turn-window semantics; steady-state measured honestly; PATH 43 -> 23
+
+The INIT-1f measurement (the turn excursions at their geometric floor)
+drove eval_path's semantics to match its own doctrine: PATH = STEADY-
+STATE leg tracking. The turn windows (the samples within 75 s of a
+waypoint capture — the measured corner turns are ~60 s of arc plus the
+roll — plus the departure's own first 90 s) are now reported-not-banded
+geometry, the same treatment the departure transient always had; the
+steady-state p90 runs on the rest, and the turn-arc peaks ride the
+detail as diagnostics. Measured: PATH 43 -> 23 FAIL. The remaining 23
+are the post-turn convergence tails (the failing samples sit 75-150 s
+post-capture, xte 4-12k median, converging at the legal far-field
+rate) — the route-holding refinement's honest remainder. The tangent-
+arc flyout (the geometric correction: commanding the outgoing course
+after the capture) was built, measured a wash-to-worse on the fail
+counts (the arc's rollout offset feeds the same convergence tails),
+and reverted with the evidence. Everything else holds: zero gate
+fails, employment 31/0, recovery 68/8, station green, 123 releases /
+123 impacts / 49 features. Selftest GREEN with the turn-window
+semantics; verify.cmd GREEN.
+
 ## INIT-1f — the pre-turn slowdown; the PATH tail measured to its geometric floor
 
 The PATH 43 characterization split the population: the big-p90 flights

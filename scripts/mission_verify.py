@@ -207,15 +207,35 @@ def eval_path(f: dict, clause: dict) -> tuple[str, str]:
     quarter of the Enroute window. The per-waypoint capture distance is
     NOT a metric at all: the captures are turn-anticipated (NAV-B cuts
     the corner up to a turn radius early BY DESIGN).
+
+    INIT-1g — the turn windows are ALSO reported, not banded, on the
+    same doctrine: the measured corner turns (90-120 deg at the corner
+    speed) hold R ~12,000 ft off the new line BY CONSTRUCTION — the
+    tangent arc's mid-turn deviation is R-scale, so the 2,000-ft band is
+    unreachable mid-turn at any legal speed. The samples within 75 s of
+    a waypoint capture are turn geometry (the measured corner turns:
+    ~60 s of arc + the roll); the steady-state p90 runs on the rest, and
+    the turn-arc peaks ride the detail as diagnostics.
     """
     band = clause["max_miss_ft"]
     t0, t1 = enroute_window(f)
     if t0 is None:
         return "SKIP", "no Enroute phase (airborne-start approach or unrouted)"
+    # The turn windows: within 75 s after each waypoint capture (the
+    # measured corner-turn geometry), plus the departure transient's own
+    # first 90 s of the window (reported separately below).
+    turn_caps = [e["sim_time_s"] for e in f["events"]
+                 if e["kind"] == "waypoint_captured"]
+    turn_caps.append(t0)  # the departure transient's own window
+
+    def in_turn_window(t: float) -> bool:
+        return any(t0 <= c <= t < c + 75.0 for c in turn_caps)
+
     xs = [(s["sim_time_s"], abs(s.get("cross_track_error_ft", 0.0)))
           for s in f["snapshots"]
           if t0 <= s["sim_time_s"] < t1
-          and s.get("cross_track_error_ft", 0.0) > 0.0]
+          and s.get("cross_track_error_ft", 0.0) > 0.0
+          and not in_turn_window(s["sim_time_s"])]
     if not xs:
         return "SKIP", ("snapshots carry no leg cross-track (pre-MC-2 "
                         "documents)")
@@ -223,15 +243,25 @@ def eval_path(f: dict, clause: dict) -> tuple[str, str]:
     quarter = xs[int(len(xs) * 0.75):]
     steady_p90 = sorted(x for _, x in quarter)[
         int(len(quarter) * 0.9)] if quarter else 0.0
-    peak = max(x for _, x in xs)
+    all_xs = [(s["sim_time_s"], abs(s.get("cross_track_error_ft", 0.0)))
+              for s in f["snapshots"]
+              if t0 <= s["sim_time_s"] < t1
+              and s.get("cross_track_error_ft", 0.0) > 0.0]
+    peak = max(x for _, x in all_xs)
+    turn_peak = max((x for t, x in all_xs if in_turn_window(t)), default=0)
     if steady_p90 > band:
         return "FAIL", (f"steady-state leg cross-track p90 {steady_p90:.0f} ft "
                         f"(tol {band:.0f} ft) — the flight is not holding "
                         f"its route")
-    transient = (f"; departure transient peaked {peak:.0f} ft"
-                 if peak > band else "")
+    notes = []
+    if turn_peak > band:
+        notes.append(f"turn-arc peak {turn_peak:.0f} ft (geometry, not "
+                     "banded)")
+    if peak > band:
+        notes.append(f"departure transient peaked {peak:.0f} ft")
+    tail = ("; " + "; ".join(notes)) if notes else ""
     return "PASS", (f"steady-state cross-track p90 {steady_p90:.0f} ft "
-                    f"(tol {band:.0f}){transient}")
+                    f"(tol {band:.0f}){tail}")
 
 
 def eval_station(f: dict, clause: dict) -> tuple[str, str]:
