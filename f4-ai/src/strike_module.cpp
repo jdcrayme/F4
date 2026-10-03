@@ -100,9 +100,24 @@ void StrikeModule::update(double dt, const flight::IAircraftState* state,
     const double w = std::max(0.0, -state->vertical_speed_fpm() / 60.0);
     // 0.5*g*t^2 + w*t - dz = 0  =>  t = (-w + sqrt(w^2 + 2*g*dz)) / g
     // (the -w: an initial downward velocity SHORTENS the fall).
-    const double fall_time =
-        (-w + std::sqrt(w * w + 2.0 * Config::kGravityFps2 * dz)) /
-        Config::kGravityFps2;
+    // INIT-1h: with a MEASURED fall time (the arming flies the bomb sim
+    // once at the reference dz), use it scaled by sqrt(dz/ref_dz) — the
+    // bomb sim's drag limits the fall to the terminal velocity and the
+    // analytic vacuum fall was 1.63x short (the measured OCASTRIKE
+    // stick: 2,251 ft in 19.7 s, the computed range 1.63x short, the
+    // release ~12,000 ft late, the stick gliding past the aim). The
+    // sink correction folds into the measured base (the drag dominates
+    // the vertical; the sink is a second-order trim on it).
+    double fall_time;
+    if (config.measured_fall_time_s > 0.0) {
+        fall_time =
+            config.measured_fall_time_s *
+            std::sqrt(std::max(250.0, dz) / config.measured_fall_ref_dz_ft);
+    } else {
+        fall_time =
+            (-w + std::sqrt(w * w + 2.0 * Config::kGravityFps2 * dz)) /
+            Config::kGravityFps2;
+    }
 
     // The throw: horizontal distance the bomb flies from release, along
     // the aircraft's velocity vector.

@@ -473,7 +473,25 @@ with an owner.
   features; the nearest-objective fallback aims the stick at the
   battalion's parent objective but the impact books on the unit).
   Owner: the unit-damage ledger tranche + the release-accuracy
-  refinement.- **INIT-1h — the drag factor parameterized by the delivery dz
+  refinement.- **INIT-1i — the MEASURED fall time: OCASTRIKE's converging sticks
+  12,161 -> 316-450 ft (2026-10-03).** The CCIP accuracy tranche's
+  decomposition (the along/cross split of the first impact): the
+  cross-track was 47 ft — the attack run's lateral was perfect — and
+  the ALONG miss was 12,161 ft: the bomb's actual travel was 13,768 ft
+  while the module's vacuum model credited ~8,400. The bomb sim's drag
+  limits the fall to the terminal velocity: 2,251 ft took 19.7 s vs
+  the vacuum 12.1 s — the computed range (gs x vacuum-fall x drag) was
+  1.63x short, the release fired at aim_dist ~1,600 ft, and the stick
+  glided 12,000 ft past the aim. Fix: the arming flies the bomb sim
+  ONCE at the delivery geometry (dz 1,500, 675 fps) and stamps
+  `measured_fall_time_s` on the strike config; the module scales it by
+  sqrt(dz/ref_dz) per release (the analytic model stays for the tests,
+  default 0). Measured (qc/featkill/ocastrike9): the converging sticks
+  12,161 -> 316-450 ft; INTSTRIKE holds 15 features. The scoped
+  remainder: 8 of 16 OCASTRIKE bombs (two flights) still release
+  10-12k wide on their second-pass alignment geometry — the CCIP
+  accuracy chain's own tranche — and the SAD/STRATBOMB battalion
+  targets have no FeatureSet (the unit-damage ledger tranche).- **INIT-1h — the drag factor parameterized by the delivery dz
   (2026-10-03).** bomb_drag_factor_for now computes its dragged/vacuum
   ratio at the delivery dz (the co-located points fly at ~1,500 ft, not
   the 5,000-ft reference). Measured: the impacts were byte-identical at

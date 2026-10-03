@@ -1412,6 +1412,32 @@ StrikeArmament arm_flight_strike(
         strike.config.drag_factor =
             bomb_drag_factor_for(table, droppable_handle,
                                  kMinDeliveryWaypointAltFt);
+        // INIT-1h — the MEASURED fall time: fly the bomb sim once at the
+        // delivery geometry and time the fall. The analytic vacuum fall
+        // was 1.63x short of the bomb sim's drag-limited descent (the
+        // measured OCASTRIKE stick: 2,251 ft in 19.7 s), the computed
+        // range fired the release ~12,000 ft late, and the stick glided
+        // past the aim (the impacts 12,161 ft wide with the cross-track
+        // at 47 ft — the lateral was perfect, the ALONG was the range).
+        {
+            const auto* probe_rec = table.get(droppable_handle);
+            if (probe_rec == nullptr) return out;
+            weapons::Bomb probe;
+            probe.release(weapons::BombConfig::from_record(*probe_rec),
+                          f4::geo::WorldPosition{
+                              0.0, 0.0, kMinDeliveryWaypointAltFt},
+                          f4::math::Vec3<double>{675.0, 0.0, 0.0}, 0.0);
+            double t = 0.0;
+            while (!probe.terminal() && t < 120.0) {
+                probe.tick(0.1);
+                t += 0.1;
+            }
+            if (probe.status() == weapons::BombStatus::Impact) {
+                strike.config.measured_fall_time_s = probe.flight_time_s();
+                strike.config.measured_fall_ref_dz_ft =
+                    kMinDeliveryWaypointAltFt;
+            }
+        }
         strike.config.salvo_max = std::min(out.droppable_rounds,
                                            kDoctrineSalvoMax);
         if (const auto* rec = table.get(droppable_handle)) {

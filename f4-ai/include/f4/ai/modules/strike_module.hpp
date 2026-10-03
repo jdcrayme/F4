@@ -128,6 +128,20 @@ public:
         /// the card model vs the bomb sim at that geometry — owner: the
         /// release-accuracy tranche, with the measured stick walks.)
         double drag_factor{1.0};
+        /// INIT-1h — the MEASURED fall time (s) at the reference dz, from
+        /// flying the bomb sim once at arming (the same rig
+        /// bomb_drag_factor_for uses). The bomb sim's drag limits the
+        /// fall to the terminal velocity: the measured OCASTRIKE stick
+        /// fell 2,251 ft in 19.7 s — 1.63x the vacuum fall (12.1 s) the
+        /// analytic model credited — so the computed range was 1.63x
+        /// short, the release fired ~12,000 ft late, and the stick
+        /// glided past the aim (the impacts 12,161 ft wide, the
+        /// cross-track 47 ft: the lateral was perfect, the ALONG was the
+        /// bomb's range). 0 = the analytic vacuum model (the tests).
+        /// Scaled by sqrt(dz / measured_fall_ref_dz_ft) per release.
+        double measured_fall_time_s{0.0};
+        /// The dz the measured fall time was taken at.
+        double measured_fall_ref_dz_ft{1500.0};
         /// Stick spacing (seconds between releases).
         double salvo_interval_s{0.25};
         /// Stick size (bombs per target). The host's store may run dry
