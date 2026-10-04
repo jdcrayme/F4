@@ -259,6 +259,7 @@ def eval_path(f: dict, clause: dict) -> tuple[str, str]:
             cursor = wi
             turn_caps.append(e["sim_time_s"])
     turn_caps.append(t0)  # the departure transient's own window
+    turn_caps.sort()
 
     def in_turn_window(t: float) -> bool:
         return any(t0 <= c <= t < c + 75.0 for c in turn_caps)
@@ -325,31 +326,98 @@ def eval_path(f: dict, clause: dict) -> tuple[str, str]:
                         "turn/hold geometry) — too short to judge "
                         "steady state")
 
-    # The excursion blocks: contiguous over-band runs on the banded
-    # samples. Two runs are the SAME excursion unless at least 60 s of
-    # BANDED, under-band samples separate them — an exclusion gap (a
-    # turn window, a hold) hides the flight but is not evidence of
-    # settling (the measured hold-family flights: the fragmented
-    # banded set read as 48 "excursions" where the whole window was
-    # one wander; the prototype's index-delta merge split on every
-    # excluded island).
-    merged = []
-    last_under_t = None
+    # INIT-2f — the settle intervals: >= 60 s of BANDED under-band
+    # samples. Settling is the metric's reset signal: the arc-geometry
+    # classification (below) and the departure-transient boundary both
+    # key on it, because a corner arc and a join transient both END by
+    # reaching the line and staying.
+    settles = []
+    run0 = None
+    prev_t = None
     for t, x in xs:
+        if x <= band:
+            if run0 is None:
+                run0 = t
+            prev_t = t
+        else:
+            if run0 is not None and prev_t - run0 >= 60.0:
+                settles.append((run0, prev_t))
+            run0 = None
+    if run0 is not None and prev_t - run0 >= 60.0:
+        settles.append((run0, prev_t))
+
+    # INIT-2f: the departure transient ends at the FIRST settle — a
+    # splice-resumed flight converging over 4 min is reported-not-banded
+    # doctrine (the ROUTE-HOLD finding), and the arc rule's 240-s tail
+    # alone would cut such a transient into a fake excursion block. A
+    # flight that NEVER settles has no transient boundary: its whole
+    # window is judged (the wanderer from spawn).
+    transient_end = settles[0][0] if settles else t0
+
+    # INIT-2f — the arc-geometry classifier: an over-band banded sample
+    # is CORNER-ARC geometry (reported, not banded) when it lies within
+    # 240 s of the most recent progression capture AND no settle
+    # interval separates them. The measured arcs: 100-225 s at corner
+    # speed (R ~13,000 ft), xte peaking at R mid-arc, crossing zero at
+    # the corner — the fixed 75-s window truncated every arc's tail
+    # into over-band islands that read as oscillation (six flights
+    # FAILed "oscillates across the band" whose only over-band samples
+    # were arc tails). A settle resets the arc clock: a NEW departure
+    # from the line after genuine settling is an excursion, not
+    # geometry.
+    arc_tail_s = 240.0
+    cap_iter = iter([c for c in turn_caps])
+    last_cap = -1.0e18
+    settled_before_cap = False
+    settle_iter = iter(sorted(settles))
+    next_settle = next(settle_iter, None)
+
+    def _is_arc(t: float, x: float) -> bool:
+        return (x > band and t - last_cap <= arc_tail_s
+                and not settled_before_cap)
+
+    xs_judged = []       # (t, x) samples this clause judges
+    arc_xs = []          # (t, x) arc-geometry samples (reported)
+    transient_xs = []    # (t, x) departure-transient samples (reported)
+    cap_i = 0            # walk pointers: captures and settle intervals
+    settle_i = 0         # are both sorted; each sample advances them
+    for t, x in xs:
+        while cap_i < len(turn_caps) and turn_caps[cap_i] <= t:
+            if turn_caps[cap_i] > last_cap:
+                last_cap = turn_caps[cap_i]
+                settled_before_cap = False   # a capture restarts the arc clock
+            cap_i += 1
+        while settle_i < len(settles) and settles[settle_i][1] <= t:
+            if settles[settle_i][0] >= last_cap:
+                settled_before_cap = True    # settled since that capture
+            settle_i += 1
+        if x > band and t < transient_end:
+            transient_xs.append((t, x))
+        elif _is_arc(t, x):
+            arc_xs.append((t, x))
+        else:
+            xs_judged.append((t, x))
+
+    # The excursion blocks: contiguous over-band runs on the JUDGED
+    # samples. Two runs are the SAME excursion unless more than 60 s
+    # separates them (banded under-band or arc-geometry between — both
+    # are evidence the flight came back; a pure exclusion gap is not;
+    # a gap of exactly one unobserved minute is not evidence of
+    # anything — the 6-s sampling cannot see it). The blocks then must
+    # SUSTAIN: the measured capture-tick spikes (the snapshot's
+    # cross-track at the recapture instant reads the capture approach —
+    # 1-2 samples, sub-second) are reporting artifacts, not route
+    # deviations; the real excursion families (the join transients,
+    # the wanderers) run minutes. 30 s, or the block is dropped.
+    merged = []
+    last_exc_t = None
+    for t, x in xs_judged:
         if x > band:
-            if merged and (last_under_t is None
-                           or t - last_under_t < 60.0):
+            if merged and (last_exc_t is None or t - last_exc_t <= 60.0):
                 merged[-1][1] = t
             else:
                 merged.append([t, t])
-        else:
-            last_under_t = t
-    # A block must SUSTAIN to count: the measured capture-tick spikes
-    # (the snapshot's cross-track at the recapture instant reads the
-    # capture approach — 1-2 samples, sub-second) are reporting
-    # artifacts, not route deviations; the real excursion families
-    # (the join transients, the wanderers) run minutes. 30 s of banded
-    # time, or the block is dropped.
+        last_exc_t = t
     merged = [b for b in merged if b[1] - b[0] >= 30.0]
 
     def _p90(v: list[float]) -> float:
@@ -357,13 +425,23 @@ def eval_path(f: dict, clause: dict) -> tuple[str, str]:
         return s[int(len(s) * 0.9)] if s else 0.0
 
     peak = max(x for _, x in xs_all)
+    arc_peak = max((x for _, x in arc_xs), default=0)
     turn_peak = max((x for t, x in xs_all if in_turn_window(t)), default=0)
     if merged:
         t_est = merged[-1][1]
         est_min = (t_est - xs[0][0]) / 60.0
-        post = [x for t, x in xs if t >= t_est]
-        steady = (sum(1 for x in post if x <= band) / len(post)) \
-            if post else 1.0
+        post = [x for t, x in xs_judged if t >= t_est]
+        if len(post) < 3 or t_est > xs[-1][0] - 60.0:
+            # The excursion runs to (or essentially to) the window's
+            # end: the flight NEVER established — the route-holding
+            # finding of record's whole-flight wanderer. An empty post
+            # set is not "holding 100%"; it is "still off its route".
+            return "FAIL", (f"still off its route at the window's end "
+                            f"(excursion {merged[-1][0] - xs[0][0]:.0f} s in, "
+                            f"peak {max(x for _, x in xs_judged):.0f} ft, "
+                            f"tol {band:.0f} ft) — the flight is not "
+                            "holding its route")
+        steady = (sum(1 for x in post if x <= band) / len(post))
         steady_pct = int(round(100.0 * steady))
         steady_p90 = _p90(post)
         if steady_pct < 50 or len(merged) > 3:
@@ -382,33 +460,36 @@ def eval_path(f: dict, clause: dict) -> tuple[str, str]:
                             f"excursion(s), max {peak:.0f} ft — the flight "
                             "is not holding its route")
     else:
-        # No sustained excursion: the whole-window p90 IS the steady
-        # state. Sub-30-s islands (capture-tick spikes) ride the
-        # percentiles; a p90 over the band is an OSCILLATOR — the
-        # measured far-field intercept family (0 -> 21k ft with a
-        # sub-30-s period never holds anything).
-        steady_p90 = _p90([x for _, x in xs])
+        # No sustained excursion: the p90 over the JUDGED samples is
+        # the steady state (arc geometry and the departure transient
+        # are reported, not banded). A p90 over the band with no
+        # sustained excursion is a continuous wanderer the block rule
+        # cannot see (the measured delivery-hold family: one wander
+        # spanning the window, no settle, no blocks).
+        steady_p90 = _p90([x for _, x in xs_judged])
         steady_pct = 100
         est_min = 0.0
         if steady_p90 > band:
-            return "FAIL", (f"oscillates across the band: steady p90 "
+            return "FAIL", (f"wanders off its route: steady p90 "
                             f"{steady_p90:.0f} ft (tol {band:.0f} ft), max "
                             f"{peak:.0f} ft, no sustained excursion — the "
                             "flight is not holding its route")
 
     notes = []
-    if turn_peak > band:
-        notes.append(f"turn-arc peak {turn_peak:.0f} ft (geometry, not "
+    if arc_peak > band:
+        notes.append(f"turn-arc peak {arc_peak:.0f} ft (geometry, not "
                      "banded)")
     if merged:
         notes.append(f"joined at {est_min:.0f} min"
                      + (f" after {len(merged)} excursion(s)"
                         if len(merged) > 1 else ""))
+    if transient_xs:
+        tp = max(x for _, x in transient_xs)
+        if tp > band:
+            notes.append(f"departure transient peaked {tp:.0f} ft")
     if hold_time > 60.0:
         notes.append(f"{hold_time/60:.0f} min in station holds (designed "
                      "orbit, not banded)")
-    if peak > band and not merged:
-        notes.append(f"transient peaked {peak:.0f} ft")
     tail = ("; " + "; ".join(notes)) if notes else ""
     return "PASS", (f"holds {steady_pct}% of its route time at p90 "
                     f"{steady_p90:.0f} ft (tol {band:.0f}){tail}")

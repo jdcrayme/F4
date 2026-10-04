@@ -5,6 +5,23 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## INIT-2f — the PATH arc-geometry classifier: the corner arcs leave the band; PATH 29/11/36 -> 36 PASS / 4 FAIL / 36 SKIP
+
+The "route-intercept oscillation family" dissolved: the six
+"oscillators" had no sustained excursions — their over-band samples
+were corner arcs (turn radius 13.7k ft at corner speed, 100-225 s)
+that the fixed 75-s turn window truncated into sub-30-s islands
+riding the p90. The classifier that works: settle intervals (>= 60 s
+of banded under-band) as the reset signal; an over-band sample is
+arc geometry (reported, not banded) within 240 s of the most recent
+progression capture with no settle between; everything else is an
+excursion. The departure-transient boundary moved to the first
+settle; two block-rule repairs (the >60-s-exclusive merge; a block
+running to the window's end = "still off its route" — an empty post
+set is not "holding 100%"). Every PASS reads p90 <= band; the four
+remaining FAILs are the delivery-hold wanderers (SAD x3, BAI/1681).
+Selftest GREEN; verify.cmd GREEN.
+
 ## INIT-2e — the PATH metric doctrine: establish-and-hold; the designed orbits leave the band
 
 The time-shape data: every big PATH p90 lived in the join transient

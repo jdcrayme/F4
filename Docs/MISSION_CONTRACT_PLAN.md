@@ -623,6 +623,42 @@ with an owner.
   decision), SAD's stick residual (unchanged), and the second-pass
   geometry is OBSOLETE (the clean passes release first pass; the
   10-12k "second-pass" sticks were the balloons).
+- **INIT-2f — the PATH arc-geometry classifier: the corner arcs
+  leave the band; the oscillators dissolve (2026-10-04).** The
+  "route-intercept oscillation family" scoped by INIT-2e dissolved
+  under the trace data: the six "oscillators" (INTERCEPT x2,
+  OCASTRIKE x3, JSTAR) had NO sustained excursions — their over-band
+  samples were CORNER ARCS the fixed 75-s turn window truncated
+  (the measured OCASTRIKE arc: the pre-turn slowdown to 262 kts, the
+  turn -90 -> -176 deg, xte peaking 13,709 ft = the turn radius at
+  corner speed, arc 100-225 s, the capture at the arc's START — the
+  75-s window covered barely half and every arc's tail became a
+  sub-30-s over-band island riding the p90). The fixed-window A/B
+  (75/150/210 s) converted FAILs into SKIPs — route time drains, the
+  metric loses its teeth; the until-settle window failed
+  geometrically (the arc crosses the old line mid-turn, closing the
+  window early). The classifier that works: SETTLE INTERVALS (>= 60 s
+  of banded under-band) as the reset signal, and an over-band sample
+  is ARC GEOMETRY (reported, not banded) when it lies within 240 s of
+  the most recent progression capture with no settle between;
+  everything else is an EXCURSION. The departure transient boundary
+  moved to the first settle (the documented reported-not-banded
+  doctrine, now exact — a 4-min splice transient no longer fragments
+  into a fake block). Two block-rule repairs the fixtures forced: the
+  merge gap is >60 s exclusive (a gap of exactly one unobserved
+  minute is not evidence of settling), and a block extending to the
+  window's end is "STILL OFF ITS ROUTE" (an empty post-establish set
+  is not "holding 100%"). Measured (qc/coverage_map_init2d
+  re-carded): **PATH 29/11/36 -> 36 PASS / 4 FAIL / 36 SKIP**, every
+  PASS p90 <= band, every FAIL naming its mechanism — the four
+  remaining are the delivery-hold wanderers (SAD x3, BAI/1681: the
+  flights holding their TIMING/delivery orbits for beyond-the-run
+  appointments, 2.4k-24k ft off the route legs for hours). Selftest
+  GREEN (the wanderer fixture now exercises the exact-60-s merge and
+  the end-of-window rules); verify.cmd GREEN. The scoped remainder:
+  the delivery-hold orbit geometry (the 4 FAILs' owner), the phase
+  machine's early Enroute exit, the TOT push-wait model, the
+  unit-damage ledger + fixture-generator batch, the hp review.
 - **INIT-2e — the PATH metric doctrine: establish-and-hold; the
   designed orbits leave the band (2026-10-04).** The delivery-hold
   PATH verdicts question resolved into a metric-doctrine rewrite
