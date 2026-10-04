@@ -623,6 +623,39 @@ with an owner.
   decision), SAD's stick residual (unchanged), and the second-pass
   geometry is OBSOLETE (the clean passes release first pass; the
   10-12k "second-pass" sticks were the balloons).
+- **INIT-2g — the attack run adopts the distance-scheduled
+  intercept: the delivery-first orbit converges in one pass;
+  features 63 -> 70 (2026-10-04).** The delivery-hold orbit tranche
+  opened on the 4 remaining PATH FAILs and the delivery-first
+  geometry question the session opened with (flight 4294971682's
+  spawn-heading-vs-attack-leg finding, scoped since INIT-2b) — and
+  both resolved into ONE nav-side defect: the attack-run branch of
+  the NAV-B law clamped its cross-track intercept at the FLAT
+  0.35 rad. The real legs got the ROUTE-HOLD distance-scheduled ramp
+  (0.35 -> 0.95 rad over the 3x-gain span, the damper faded by the
+  same schedule) but the virtual attack leg never did. The measured
+  consequence (the SAD lead, an AIR-SPAWNED delivery-first flight at
+  12,000 ft heading away from its aim): the initial turn drifted
+  24,000-38,000 ft off the virtual leg, the flat clamp recovered at
+  its ~140 ft/s fixed point, and the flight took THREE full swings
+  (~150 s each, the 13,700-ft turn radius at the 262-kt pre-turn
+  slowdown) — 15 minutes — before the stick fell. Fix: the delivery
+  branch mirrors the leg law exactly (the scheduled lim_a + the
+  faded damper; byte-identical at xte inside the gain, where the
+  releases live). Measured: the never-delivering hold flight 1680
+  now converges and employs (released at 6,000 ft inside the dz
+  band); the wingman's first bomb at pipper 34 ft. Matrix
+  (qc/coverage_map_init2g vs init2d): **features 63 -> 70**
+  (STRATBOMB 8, BAI 12, SAD 3, OCASTRIKE 6; INTSTRIKE gave 2 back),
+  PATH 4 -> 2 FAILs, recovery 65 -> 67 PASS, employment 28 -> 30
+  PASS (the hold family employs), duration 71 -> 73. The two
+  remaining PATH FAILs (SAD 1679/1682) are the TIMING-hold flights
+  whose appointments sit beyond the run — their pre-hold attack runs
+  still judge long because the hold never ends; that is the TOT
+  push-wait family, not the intercept. The nine suites green
+  (29+12+17+31+32+5+7+22+14); verify.cmd GREEN. Scoped: the TOT
+  push-wait model (the fixture-generator tranche), the unit-damage
+  ledger, the hp review.
 - **INIT-2f — the PATH arc-geometry classifier: the corner arcs
   leave the band; the oscillators dissolve (2026-10-04).** The
   "route-intercept oscillation family" scoped by INIT-2e dissolved

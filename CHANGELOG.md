@@ -5,6 +5,22 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## INIT-2g — the attack run adopts the distance-scheduled intercept: features 63 -> 70
+
+The delivery-first orbit's owner found: the attack-run branch of the
+NAV-B law clamped its intercept at the FLAT 0.35 rad — the real legs
+got the ROUTE-HOLD distance-scheduled ramp, the virtual attack leg
+never did. The measured SAD lead (air-spawned at 12,000 ft heading
+away) drifted 24-38k ft off the virtual leg and took THREE full
+swings (~150 s each) — 15 minutes — before its stick fell. The
+delivery branch now mirrors the leg law (the scheduled lim + faded
+damper; byte-identical near the line). Measured: the never-delivering
+hold flight now employs; the wingman releases at pipper 34 ft;
+matrix features 63 -> 70 (STRATBOMB 8, BAI 12, SAD 3), PATH FAILs
+4 -> 2, recovery 65 -> 67, employment 28 -> 30, duration 71 -> 73.
+The two remaining PATH FAILs are the beyond-the-run TIMING holders —
+the TOT push-wait family. Nine suites green; verify.cmd GREEN.
+
 ## INIT-2f — the PATH arc-geometry classifier: the corner arcs leave the band; PATH 29/11/36 -> 36 PASS / 4 FAIL / 36 SKIP
 
 The "route-intercept oscillation family" dissolved: the six

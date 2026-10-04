@@ -630,14 +630,36 @@ double NavigationModule::nav_heading_rad() const
                   + (current_position_.y - attack_from_.y) * right_y;
                 // NAV-B/B2 correction (mirrored from the leg law below;
                 // the gains are the module's own, so a retune moves both).
+                // INIT-2g: the attack run now uses the leg law's
+                // DISTANCE-SCHEDULED intercept (the ROUTE-HOLD ramp to
+                // max_intercept_far_rad, the damper faded by the same
+                // schedule). The flat 0.35-rad clamp was the delivery-
+                // first orbit: an air-spawned flight (the measured SAD
+                // lead, 12,000 ft up heading away from its aim) drifted
+                // 24,000-38,000 ft off the virtual leg during the initial
+                // turn and recovered at the flat clamp's ~140 ft/s
+                // fixed point — THREE full swings (~150 s each, the
+                // 13,700-ft turn radius at the 262-kt slowdown) before
+                // the stick fell at 15 min. The far-field 0.95-rad cut
+                // converges the same excursion in one pass, and the
+                // near-field law stays byte-identical (the ramp starts
+                // at xte_gain_ft, where the releases live).
+                const double axte_a = std::abs(xte);
+                const double ta =
+                    std::clamp((axte_a - xte_gain_ft) / (2.0 * xte_gain_ft),
+                               0.0, 1.0);
+                const double lim_a =
+                    max_intercept_rad
+                  + (max_intercept_far_rad - max_intercept_rad) * ta;
                 const double corr_p =
                     std::clamp(std::atan2(-xte, xte_gain_ft),
-                               -max_intercept_rad, max_intercept_rad);
+                               -lim_a, lim_a);
                 const double closing = AirSteering::heading_error(
                     current_heading_rad_, course);
                 const double corr =
-                    std::clamp(corr_p - xte_damp_gain * std::sin(closing),
-                               -max_intercept_rad, max_intercept_rad);
+                    std::clamp(corr_p - (1.0 - ta) * xte_damp_gain
+                                              * std::sin(closing),
+                               -lim_a, lim_a);
                 return course + corr;
             }
         }
