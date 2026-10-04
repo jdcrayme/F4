@@ -245,6 +245,27 @@ void StrikeModule::update(double dt, const flight::IAircraftState* state,
         if (!aligned || !in_range || turning ||
             (!on_pipper && !past_holdover) ||
             config.hold_fire) {
+            // INIT-2h: the refused-release autopsy — the four gate bits
+            // at 1 Hz once the pass is inside twice the release range
+            // (the measured OCASTRIKE orbit: dist bottoms 2,25x INSIDE
+            // rng with the aim near the nose and the stick still never
+            // falls — one of these bits owns it and nothing said which).
+            if (armed_ && aim_dist < 2.0 * computed_range_ft_) {
+                static int dbg_gate = 0;
+                if (++dbg_gate % 60 == 0) {
+                    std::fprintf(stderr,
+                                 "[gate] dist %.0f rng %.0f aligned %d"
+                                 " in_range %d turning %d (%.3f)"
+                                 " pipper %d (%.0f) holdover %d"
+                                 " hold_fire %d\n",
+                                 aim_dist, computed_range_ft_,
+                                 aligned ? 1 : 0, in_range ? 1 : 0,
+                                 turning ? 1 : 0, heading_rate_radps_,
+                                 on_pipper ? 1 : 0, predicted_miss_ft_,
+                                 past_holdover ? 1 : 0,
+                                 config.hold_fire ? 1 : 0);
+                }
+            }
             return;
         }
     }

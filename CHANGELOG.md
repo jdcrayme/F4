@@ -5,6 +5,22 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MC-4c — the release-cone diagnosis: the pursuit orbit named; the probes stay, the fix waits for a stateful re-attack
+
+The never-delivering flights: no rung preempts (4,601 armed samples,
+safe 0 / comb 0), the aircraft closes to 2,25x ft — inside the
+release range, holdover open — and the new [gate] probe names the
+refusals: 623 in-range samples, every one refused by the release
+cone. The geometry: the past-aim pursuit swings the reversal around
+at the bank-limited turn radius (1.94 deg/s at the delivery speed,
+R ~13,000 ft) into a pursuit orbit tangent to the aim — every
+re-approach crosses abeam, the cone correctly refusing what would
+land 1,800+ ft wide. The bounded re-attack extension fixed the pass
+quality (re-joins at pipper 49-335 ft) but measured map-neutral and
+was reverted with the diagnosis in the code. Nine suites green;
+verify.cmd GREEN. Next: the stateful re-attack (extend only after a
+refused pass), the delivery-first hold gap, the unit-damage ledger.
+
 ## MC-4b — the TOT push-wait model: the appointments honored; the tot clause judges
 
 The fixture stamp (scripts/fixture_stamp_tot.py): the save's delivery

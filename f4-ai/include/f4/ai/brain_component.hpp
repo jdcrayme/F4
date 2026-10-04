@@ -1085,6 +1085,38 @@ public:
         // a target re-arms fresh only through a NEW waypoint targeting
         // it, see StrikeModule::set_target).
         // =================================================================
+        // INIT-2h: the OUTER-gate autopsy — when a delivery wp is
+        // current but the block's gate refuses it, print WHICH bit at
+        // 1 Hz (the measured OCASTRIKE flight: the attack converged to
+        // 7,183 ft, then 75 silent minutes orbiting the stack with the
+        // stick unfallen — the inner disarm never fired, so the outer
+        // gate owned it and nothing said which rung).
+        if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+            const auto wi_probe = nav_.current_waypoint_index();
+            const bool delivery_now =
+                wi_probe < plan_.route.size() &&
+                plan_.ag_delivery_mission &&
+                modules::is_ag_delivery_action(
+                    plan_.route[wi_probe].action);
+            const bool gate_open =
+                phase_ == Phase::Enroute &&
+                safety_mode_ == SafetyMode::None &&
+                combat_mode_ != CombatMode::Defensive &&
+                !nav_.is_complete();
+            if (delivery_now && !gate_open &&
+                ++strike_probe_phase_ % 60 == 1) {
+                std::fprintf(stderr,
+                             "[strikegate] id %llu wp %zu enroute %d"
+                             " safety %d defensive %d complete %d\n",
+                             static_cast<unsigned long long>(
+                                 owner_.id().value),
+                             wi_probe,
+                             phase_ == Phase::Enroute ? 1 : 0,
+                             safety_mode_ == SafetyMode::None ? 0 : 1,
+                             combat_mode_ == CombatMode::Defensive ? 1 : 0,
+                             nav_.is_complete() ? 1 : 0);
+            }
+        }
         if (phase_ == Phase::Enroute && safety_mode_ == SafetyMode::None &&
             combat_mode_ != CombatMode::Defensive &&
             !nav_.is_complete()) {
@@ -1176,7 +1208,8 @@ public:
                                      " leg %.1f hdg %.1f xte %.0f"
                                      " along %.0f/%.0f wpz %.0f"
                                      " vst %.0f gff %.1f aerr %.0f"
-                                     " tgt %.1f sperr %.0f\n",
+                                     " tgt %.1f sperr %.0f"
+                                     " safe %d comb %d\n",
                                      static_cast<unsigned long long>(
                                          owner_.id().value),
                                      wp_index,
@@ -1209,7 +1242,9 @@ public:
                                      leg.gamma_ff_deg,
                                      leg.alt_err_ft,
                                      leg.theta_target_deg,
-                                     leg.speed_err_kt);
+                                     leg.speed_err_kt,
+                                     static_cast<int>(safety_mode_),
+                                     static_cast<int>(combat_mode_));
                     }
                 }
                 combat_intent_.bomb_release =
@@ -1259,6 +1294,28 @@ public:
                 combat_intent_.bomb_aim_valid = strike_.last_aim_valid();
                 combat_intent_.bomb_aim = strike_.last_aim();
             } else {
+                // INIT-2h: the DISARM autopsy — a delivery wp whose arm
+                // gate failed silently walked the post-release route (the
+                // measured OCASTRIKE flight: the attack converged to
+                // 7,183 ft, the probes stopped, and the flight orbited
+                // the stack for 75 min with the stick unfallen). Print
+                // WHICH gate at 1 Hz while the failing wp is a delivery.
+                if (std::getenv("F4_LAND_DEBUG") != nullptr &&
+                    wp_index < plan_.route.size() &&
+                    modules::is_ag_delivery_action(
+                        plan_.route[wp_index].action) &&
+                    ++strike_probe_phase_ % 60 == 1) {
+                    std::fprintf(stderr,
+                                 "[disarm] id %llu wp %zu delivered %d"
+                                 " aim_id %llu delivered_flag %d\n",
+                                 static_cast<unsigned long long>(
+                                     owner_.id().value),
+                                 wp_index,
+                                 strike_.delivered() ? 1 : 0,
+                                 static_cast<unsigned long long>(
+                                     plan_.route[wp_index].target_id),
+                                 strike_.delivered() ? 1 : 0);
+                }
                 strike_.clear_target();
                 nav_.hold_delivery_capture(false);
             }

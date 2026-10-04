@@ -669,6 +669,40 @@ with an owner.
   post-hold never-deliveries, the delivery-first hold, the timing
   residuals, the features collateral, the unit-damage ledger
   (elements stamping), the hp review.
+- **MC-4c — the post-hold never-deliveries: the release-cone
+  diagnosis; the pursuit orbit named and scoped (2026-10-04).** The
+  3 never-delivering flights (OCASTRIKE/1682, SAD/1680,
+  STRATBOMB/1679 — hold, release on time, then 75 silent minutes
+  with the stick unfallen) were autopsied with three new probes (all
+  F4_LAND_DEBUG-gated): [strikegate] (the strike rung's outer gate
+  bits), [disarm] (the inner arm gate), and [gate] (the strike
+  module's OWN release-gate bits, sampled inside twice the release
+  range). The chain: NO rung preempts (safe 0 / comb 0 across all
+  4,601 armed samples — the flight flies the nav's attack leg the
+  whole time), the armed-stick hold keeps the delivery wp current,
+  and the aircraft closes... to 2,25x ft — INSIDE the computed
+  release range with the holdover open — and the [gate] probe names
+  the refusals: **623 in-range samples, every one refused by the
+  release cone (aligned 0)**. The geometry: the past-aim pursuit
+  (INIT-1d) swings the reversal around at the BANK-LIMITED turn
+  radius (262 kts / 25 deg = 1.94 deg/s, R ~13,000 ft) into a
+  pursuit orbit TANGENT to the aim — every re-approach crosses
+  abeam, the aim 20-30 deg off the track, the cone (correctly)
+  refusing what would land 1,800+ ft wide. The candidate fix (the
+  bounded re-attack extension: fly the leg's extension outbound
+  10-20k, then pursue) FIXED the pass quality — the re-joins
+  released at pipper 49-335 ft, xte 11-20 ft, the best release
+  geometry ever measured — but measured MAP-NEUTRAL (the matrix
+  totals identical at 10k and 20k; the 20k variant's extra
+  re-attack time pushed TOT/recovery late) and was REVERTED with the
+  diagnosis in the code. The [gate]/[disarm]/[strikegate] probes
+  stay. The nine suites green (29+12+17+31+32+5+7+22+14); verify.cmd
+  GREEN. Scoped: the orbit family's fix needs the re-attack to cost
+  nothing when the first pass is clean (a stateful re-attack: extend
+  only after a REFUSED pass — the module would need the cone's
+  verdict fed back), the delivery-first hold gap (SAD/1682's -58
+  min: no preceding waypoint to hold at), the timing residuals, and
+  the unit-damage ledger + the hp review.
 - **INIT-2g — the attack run adopts the distance-scheduled
   intercept: the delivery-first orbit converges in one pass;
   features 63 -> 70 (2026-10-04).** The delivery-hold orbit tranche

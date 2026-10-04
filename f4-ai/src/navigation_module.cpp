@@ -106,6 +106,21 @@ void NavigationModule::set_route(std::vector<Waypoint> route) {
     // EMPL-1a: a re-tasked module must not inherit the previous route's
     // attack run (same rule as the station hold above).
     attack_engaged_ = false;
+    // INIT-2h: every set_route prints under the probe — the measured
+    // OCASTRIKE flight's hold re-armed twice after its release and the
+    // flight cycled the anchor->delivery arc for 75 min; without this
+    // print the re-router is invisible (no capture events, no phase
+    // change, no disarm — the route replacement resets the hold state
+    // and the cycle restarts silently).
+    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        std::fprintf(stderr,
+                     "[setroute] n=%zu first (%.0f,%.0f) last (%.0f,%.0f)\n",
+                     route_.size(),
+                     route_.empty() ? -1.0 : route_.front().position.x,
+                     route_.empty() ? -1.0 : route_.front().position.y,
+                     route_.empty() ? -1.0 : route_.back().position.x,
+                     route_.empty() ? -1.0 : route_.back().position.y);
+    }
     // NAV-B: the first leg emanates from where the aircraft is when the
     // FIRST update() runs (see update() — set_route can be called before
     // any state has been cached, e.g. the Enroute start-phase handoff,
@@ -613,6 +628,23 @@ double NavigationModule::nav_heading_rad() const
                 // release range the whole time). Command pursuit of the
                 // aim instead — the turn back re-joins the leg inbound,
                 // where the release gate fires.
+                //
+                // INIT-2h diagnosis (the [gate] probe): the immediate
+                // pursuit swings the reversal around at the BANK-LIMITED
+                // turn radius (262 kts / 25 deg = 1.94 deg/s, R ~13,000
+                // ft) into a pursuit orbit tangent to the aim — the
+                // measured flight crossed ABEAM 623 times in range with
+                // the release cone refusing every pass (75 min, stick
+                // unfallen). The bounded re-attack extension (fly the
+                // extension outbound 10-20k, then pursue) fixed the
+                // pass quality (the re-joins released at pipper 49-335
+                // ft) but measured MAP-NEUTRAL (the matrix totals
+                // identical at both 10k and 20k; the extra re-attack
+                // time pushed the 20k variant's TOT/recovery late) and
+                // was REVERTED — the orbit family's flights (the
+                // delivery-first route shapes) fail for the
+                // delivery-first reasons, not the pursuit. The [gate]
+                // probe stays for the family's next tranche.
                 const double along =
                     (current_position_.x - attack_from_.x) * (adx / alen)
                   + (current_position_.y - attack_from_.y) * (ady / alen);
