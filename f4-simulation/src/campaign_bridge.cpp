@@ -1529,6 +1529,179 @@ const char* wp_action_text(std::uint8_t action) {
 /// above pattern but below terrain features in most theaters.
 constexpr double kMinWaypointAltFt = 500.0;
 
+/// MC-4b — the PUSH-WAIT HOLD (shared by the saved-flight and the
+/// synthetic-intent plan builders). plan.tot_s is the appointment;
+/// nothing in the route waited for it (the stamped TestCamp deliveries
+/// fired 37-72 min EARLY: the delivery wp sequenced on arrival, the
+/// strike released, and the tot clause judged the miss). The model:
+/// the waypoint before the first delivery becomes a HOLD POINT — the
+/// flight orbits there until the appointment minus the delivery
+/// transit, then delivers on time. The hold duration is elapsed-since-
+/// entry in the nav (station_elapsed_ < station_time_s), so the hold
+/// is computed from the route geometry: the route distance to the hold
+/// point (the entry estimate, + a ground-spawn allowance for taxi/
+/// takeoff/climb) and the hold-to-target transit, both at the leg
+/// cruise speed. Only lengthens (a designed hold is never shortened);
+/// only for waits worth flying (>= 5 min — the +-300-s tot tolerance
+/// absorbs smaller misses). The delivery-first routes (the delivery at
+/// route[0]) have no preceding waypoint to hold at and keep their
+/// immediate attack — scoped.
+void apply_push_wait_hold(f4::ai::MissionPlan& plan,
+                          bool delivery_mission) {
+    if (!delivery_mission || plan.tot_s <= 0.0) {
+        return;
+    }
+    {
+        std::ptrdiff_t d = -1;
+        for (std::size_t i = 0; i < plan.route.size(); ++i) {
+            if (f4::ai::modules::is_ag_delivery_action(
+                    plan.route[i].action)) {
+                d = static_cast<std::ptrdiff_t>(i);
+                break;
+            }
+        }
+        if (d > 0) {
+            constexpr double kHoldCruiseFps = 350.0 * 1.68781;
+            constexpr double kGroundSpawnAllowanceS = 660.0;
+            constexpr double kMinWorthwhileWaitS = 300.0;
+            double route_ft = 0.0;
+            for (std::ptrdiff_t i = 0; i < d - 1; ++i) {
+                const double dx = plan.route[i + 1].position.x -
+                                  plan.route[i].position.x;
+                const double dy = plan.route[i + 1].position.y -
+                                  plan.route[i].position.y;
+                route_ft += std::sqrt(dx * dx + dy * dy);
+            }
+            const double ddx = plan.route[d].position.x -
+                               plan.route[d - 1].position.x;
+            const double ddy = plan.route[d].position.y -
+                               plan.route[d - 1].position.y;
+            const double transit_s =
+                std::sqrt(ddx * ddx + ddy * ddy) / kHoldCruiseFps;
+            const double eta_s = route_ft / kHoldCruiseFps +
+                                 kGroundSpawnAllowanceS;
+            // The hold releases at the NEXT loop corner after the clock
+            // expires (the wrap quantization — one lap is ~7.5 min at
+            // the hold orbit's 24,000 ft / 200 kts): center the wait on
+            // half a lap so the miss rides the +-300-s tot tolerance
+            // instead of a full lap of bias.
+            constexpr double kHoldOrbitRadiusFt = 24000.0;
+            constexpr double kHoldOrbitSpeedKts = 200.0;
+            constexpr double kPi = 3.14159265358979323846;
+            const double lap_s = 2.0 * kPi * kHoldOrbitRadiusFt /
+                                 (kHoldOrbitSpeedKts * 1.68781);
+            const double wait_s = plan.tot_s - eta_s - transit_s
+                                  - lap_s * 0.5;
+            if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+                std::fprintf(stderr,
+                             "[hold] d %td tot %.0f eta %.0f transit"
+                             " %.0f wait %.0f saved_st %.0f loop %u\n",
+                             d, plan.tot_s, eta_s, transit_s, wait_s,
+                             plan.route[d - 1].station_time_s,
+                             plan.route[d - 1].loop_waypoints);
+            }
+            if (wait_s > kMinWorthwhileWaitS) {
+                auto& prev_wp = plan.route[d - 1];
+                if (prev_wp.station_time_s < wait_s) {
+                    // The nav's hold needs an ANCHOR waypoint (with the
+                    // station time + the loop span) plus a circle to
+                    // fly. The anchor is INSERTED, never route[d-1]
+                    // reused: a ground launch resumes at route[1] (the
+                    // base IS route[0], never captured) and an anchor
+                    // there is silently skipped — the measured walk-
+                    // through (the flights flew the circle and delivered
+                    // 21 min early with the hold never arming).
+                    // The JOIN STACK's proven orbit parameters: the
+                    // 24,000-ft radius at the 200-kt stack leg speed.
+                    // An 8,000-ft circle at the 350-kt leg cruise is
+                    // unflyable (the corner turn radius at 350 kts is
+                    // ~23,000 ft — the measured divergence: the aircraft
+                    // chased the corners clean off the map). The radius
+                    // and speed constants live at the wait computation.
+                    // The anchor sits ON THE ARRIVAL LINE, 24,000 ft
+                    // short of the delivery point (a holding pattern
+                    // short of the target, not on top of the base —
+                    // the d==1 case put it on the spawn square and the
+                    // leg base->anchor was degenerate).
+                    const double ddx2 = plan.route[d].position.x -
+                                        prev_wp.position.x;
+                    const double ddy2 = plan.route[d].position.y -
+                                        prev_wp.position.y;
+                    const double dlen = std::sqrt(ddx2 * ddx2 + ddy2 * ddy2);
+                    double ux = 0.0;
+                    double uy = -1.0;
+                    if (dlen > 1.0) {
+                        ux = ddx2 / dlen;
+                        uy = ddy2 / dlen;
+                    }
+                    // The gap: an anchor exactly R back puts the
+                    // delivery ON the orbit's rim — the measured
+                    // DEEPSTRIKE flew post-release attacks from the rim
+                    // that never converged (the armed capture hold
+                    // orbiting the aim at 15,000 ft, always out of
+                    // range). 15,000 ft of clearance keeps the delivery
+                    // outside the circle and every exit approach
+                    // converging inward.
+                    constexpr double kHoldOrbitClearanceFt = 15000.0;
+                    f4::geo::WorldPosition anchor_pos{
+                        plan.route[d].position.x
+                            - ux * (kHoldOrbitRadiusFt +
+                                    kHoldOrbitClearanceFt),
+                        plan.route[d].position.y
+                            - uy * (kHoldOrbitRadiusFt +
+                                    kHoldOrbitClearanceFt),
+                        prev_wp.position.z};
+                    const double cx = anchor_pos.x;
+                    const double cy = anchor_pos.y;
+                    const double spd = kHoldOrbitSpeedKts;
+                    f4::ai::modules::NavigationModule::Waypoint anchor{
+                        "HOLD0", anchor_pos, spd};
+                    anchor.action = 0;
+                    anchor.target_id = 0;
+                    anchor.station_time_s = wait_s;
+                    anchor.loop_waypoints = 12;
+                    std::vector<f4::ai::modules::NavigationModule::Waypoint>
+                        orbit;
+                    orbit.push_back(anchor);
+                    for (int k = 1; k < 12; ++k) {
+                        const double ang =
+                            2.0 * kPi * static_cast<double>(k) / 12.0;
+                        f4::ai::modules::NavigationModule::Waypoint p{
+                            "HOLD" + std::to_string(k),
+                            f4::geo::WorldPosition{
+                                cx + kHoldOrbitRadiusFt * std::sin(ang),
+                                cy - kHoldOrbitRadiusFt * std::cos(ang),
+                                prev_wp.position.z},
+                            spd};
+                        p.action = 0;
+                        p.target_id = 0;
+                        orbit.push_back(p);
+                    }
+                    plan.route.insert(
+                        plan.route.begin() + d,
+                        std::make_move_iterator(orbit.begin()),
+                        std::make_move_iterator(orbit.end()));
+                    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+                        for (std::size_t i = 0; i < plan.route.size();
+                             ++i) {
+                            std::fprintf(stderr,
+                                         "[holdroute] %zu %s act %u"
+                                         " st %.0f loop %u"
+                                         " (%.0f,%.0f)\n",
+                                         i, plan.route[i].name.c_str(),
+                                         plan.route[i].action,
+                                         plan.route[i].station_time_s,
+                                         plan.route[i].loop_waypoints,
+                                         plan.route[i].position.x,
+                                         plan.route[i].position.y);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Altitude floor for A-G delivery waypoints (see the route builder).
 
 /// Waypoint count where a route stops being "the flight's real plan" and
@@ -1928,6 +2101,7 @@ build_mission_plan_from_flight(
     // deliveries.
     plan.ag_delivery_mission =
         f4::campaign::mission_is_ag_delivery(fp->mission);
+    apply_push_wait_hold(plan, plan.ag_delivery_mission);
 
     // start_phase stays Ground: the campaign flight departs from its
     // airbase (taxi → takeoff → enroute), which is exactly the brain's
@@ -2229,6 +2403,7 @@ spawn_aircraft_for_intent(
         plan->target_objective_id = intent.target_objective_id;
         plan->ag_delivery_mission =
             f4::campaign::mission_is_ag_delivery(intent.mission_byte);
+        apply_push_wait_hold(*plan, plan->ag_delivery_mission);
         // EMPL-2 — receiver eligibility from the synthetic route (the
         // same scan the flight path runs on the saved plan; the ladder's
         // stamped routes carry kWpRefuel the same way).

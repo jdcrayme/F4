@@ -5,6 +5,25 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MC-4b — the TOT push-wait model: the appointments honored; the tot clause judges
+
+The fixture stamp (scripts/fixture_stamp_tot.py): the save's delivery
+TOTs (-132..+2,752 hours, zero in-horizon) stamped into a
+deterministic +30..+88-min band. The bridge's apply_push_wait_hold
+(both plan builders): the pre-delivery waypoint becomes a hold point —
+an inserted anchor + a 12-point 24,000-ft / 200-kt orbit (the AAR
+stack's proven geometry; 8,000 ft at leg cruise measured unflyable),
+parked 24,000 ft short of the delivery with 15,000-ft rim clearance,
+holding until the appointment minus transit, half-lap centered.
+Repairs the fixtures forced: the anchor is inserted (ground spawns
+resume at route[1] and never capture route[0]); the allowance 660 s;
+the verifier's DELIVERY_ACTIONS gains WP_SAD 16. Measured: tot 43
+SKIP -> 21 PASS / 10 FAIL / 12 SKIP; DEEPSTRIKE delivers at 31 vs
+TOT 32 and recovers. Collateral: features 70 -> 59, recovery -2,
+employment -2. The 10 remaining tot FAILs scoped (3 post-hold
+never-deliveries, the delivery-first gap, the timing residuals).
+Nine suites green; verify.cmd GREEN.
+
 ## INIT-2g — the attack run adopts the distance-scheduled intercept: features 63 -> 70
 
 The delivery-first orbit's owner found: the attack-run branch of the

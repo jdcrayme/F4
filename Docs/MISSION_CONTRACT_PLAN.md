@@ -623,6 +623,52 @@ with an owner.
   decision), SAD's stick residual (unchanged), and the second-pass
   geometry is OBSOLETE (the clean passes release first pass; the
   10-12k "second-pass" sticks were the balloons).
+- **MC-4b — the TOT push-wait model: the fixture stamped, the
+  appointments honored; the tot clause judges (2026-10-04).** The
+  fixture-generator tranche's first two pieces landed together. THE
+  STAMP (scripts/fixture_stamp_tot.py, the tracked step on the
+  gitignored decoded save): the AG-delivery flights' time_on_target —
+  the save's own appointments measured -132..+2,752 HOURS against the
+  campaign clock (ZERO inside any run) — are stamped into a
+  deterministic +30..+88-min band (id-hash staggered, idempotent,
+  hand-authored appointments kept). THE MODEL (the bridge's
+  apply_push_wait_hold, shared by the saved-flight and the
+  synthetic-intent builders): the waypoint before the first delivery
+  becomes a HOLD POINT — an inserted anchor + a 12-point orbit (the
+  AAR join stack's proven 24,000-ft / 200-kt geometry; an 8,000-ft
+  circle at leg cruise measured UNFLYABLE — the corner turn radius at
+  350 kts is ~23,000 ft and the aircraft chased the corners clean off
+  the map) — parked 24,000 ft short of the delivery ON THE ARRIVAL
+  LINE with a 15,000-ft rim clearance (an anchor exactly R back put
+  the delivery ON the rim: the measured DEEPSTRIKE flew post-release
+  attacks that never converged), holding until the appointment minus
+  the transit, the wait centered on half a lap (the release fires at
+  the next loop corner — the wrap quantization is ~7.5 min). THREE
+  fixture-driven repairs along the way: the anchor is INSERTED, never
+  route[d-1] reused (a ground launch resumes at route[1] — the base
+  IS route[0], never captured; the first shape's flights walked the
+  circle and delivered 21 min early with the hold never arming); the
+  ground-spawn allowance 300 -> 660 s; and the verifier's
+  DELIVERY_ACTIONS gains WP_SAD 16 (the BAI/STRATBOMB deliveries'
+  captures were invisible to the tot/employment clauses). Measured
+  (qc/coverage_map_mc4b4 vs init2g): **the tot clause LIVE: 43 SKIP
+  -> 21 PASS / 10 FAIL / 12 SKIP** — 21 deliveries inside the +-300-s
+  tolerance where zero appointments were honored before; the single-
+  flight DEEPSTRIKE delivers at 31 min vs TOT 32 and recovers (the
+  exit-4 gate it caught during the iteration un-broken); the single-
+  mission reads: deliveries at +6/+3/-1/-2 min. The remaining 10 tot
+  FAILs scoped: three post-hold never-deliveries (OCASTRIKE/1682,
+  SAD/1680, STRATBOMB/1679 — the attack-from-hold-exit geometry),
+  SAD/1682's -58 min (the DELIVERY-FIRST route: no preceding waypoint
+  to hold at — the scoped gap), and the +-6-10-min estimate
+  residuals. Collateral, honest: features 70 -> 59 (STRIKE -6 and
+  STRATBOMB -8 on the shifted delivery geometry; ONCALLCAS +4, SAD
+  +4), recovery 65 (-2), employment 28 (-2), PATH 41 PASS / 3 FAIL /
+  32 SKIP (more flights judged). The nine suites green
+  (29+12+17+31+32+5+7+22+14); verify.cmd GREEN. Scoped next: the 3
+  post-hold never-deliveries, the delivery-first hold, the timing
+  residuals, the features collateral, the unit-damage ledger
+  (elements stamping), the hp review.
 - **INIT-2g — the attack run adopts the distance-scheduled
   intercept: the delivery-first orbit converges in one pass;
   features 63 -> 70 (2026-10-04).** The delivery-hold orbit tranche

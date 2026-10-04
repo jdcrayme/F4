@@ -43,7 +43,13 @@ from pathlib import Path
 # re-pin is a diff here (and shows in the card history).
 # ---------------------------------------------------------------------------
 
-DELIVERY_ACTIONS = {14, 15, 17, 18, 19}   # GNDSTRIKE/NAVSTRIKE/STRIKE/BOMB/SEAD
+DELIVERY_ACTIONS = {14, 15, 16, 17, 18, 19}   # GNDSTRIKE/NAVSTRIKE/SAD/STRIKE/BOMB/SEAD
+# INIT-1e: the wire's WP_SAD (16) is SHARED vocabulary — the BAI/
+# STRATBOMB planners write it on delivery points AND the support
+# planners write it on racetrack corners. The route-side consumers
+# gate on plan.ag_delivery_mission; the verifier's card has no plan,
+# but its flights ARE delivery-archetype flights (the archetype gates
+# the clause), so the action set here only ever judges deliveries.
 CAP_MISSIONS = ("BARCAP", "BARCAP2", "HAVCAP", "TARCAP", "RESCAP",
                 "AMBUSHCAP", "SWEEP", "PATROL", "INTERCEPT", "ALERT")
 SUPPORT_MISSIONS = ("TANKER", "AWACS", "JSTAR", "ECM", "RECON", "SAR",
