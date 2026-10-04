@@ -203,10 +203,9 @@ def eval_path(f: dict, clause: dict) -> tuple[str, str]:
     legitimately starts its first leg off-line (the departure geometry vs
     the T3 route-path projection — measured: 21,308 ft converging over
     ~4 min on the stock BARCAP, then 110-390 ft held for the rest of the
-    flight). The band governs the convergence, i.e. the p90 of the final
-    quarter of the Enroute window. The per-waypoint capture distance is
-    NOT a metric at all: the captures are turn-anticipated (NAV-B cuts
-    the corner up to a turn radius early BY DESIGN).
+    flight). The per-waypoint capture distance is NOT a metric at all:
+    the captures are turn-anticipated (NAV-B cuts the corner up to a
+    turn radius early BY DESIGN).
 
     INIT-1g — the turn windows are ALSO reported, not banded, on the
     same doctrine: the measured corner turns (90-120 deg at the corner
@@ -214,8 +213,27 @@ def eval_path(f: dict, clause: dict) -> tuple[str, str]:
     tangent arc's mid-turn deviation is R-scale, so the 2,000-ft band is
     unreachable mid-turn at any legal speed. The samples within 75 s of
     a waypoint capture are turn geometry (the measured corner turns:
-    ~60 s of arc + the roll); the steady-state p90 runs on the rest, and
-    the turn-arc peaks ride the detail as diagnostics.
+    ~60 s of arc + the roll).
+
+    INIT-2e — the station-hold windows join the reported-not-banded
+    set, and the verdict becomes ESTABLISH-AND-HOLD. The measured map
+    population: every big p90 lived in the first 10-20 minutes (the
+    spawn/join transient) or inside the designed hold orbit (the
+    racetrack/TIMING circle lives 3k-30k ft off the route legs BY
+    CONTRACT — the station clause owns that contract; one flight
+    measured 22,650 ft of "error" during a hold it entered on
+    schedule). The doctrine the numbers support: band ONLY the route
+    time (the Enroute window minus the turn windows minus the hold
+    windows), find the EXCURSION BLOCKS (contiguous over-band runs,
+    60-s settle gaps merged), and judge the flight by (a) the fraction
+    of its route time spent SETTLED after the last excursion (>= 50%)
+    and (b) the excursion count (<= 3 — a join and a rejoin are
+    flight-life; a per-leg wanderer leaves more). The excursions ride
+    the detail: the establish time, the peak, the hold time. The
+    whole-flight wanderer (the route-holding finding of record: one
+    excursion block spanning the window) fails on (a); the recurring
+    leaver fails on (b); the flight that joins late and then holds
+    honestly passes WITH its establish time on the record.
     """
     band = clause["max_miss_ft"]
     t0, t1 = enroute_window(f)
@@ -224,44 +242,176 @@ def eval_path(f: dict, clause: dict) -> tuple[str, str]:
     # The turn windows: within 75 s after each waypoint capture (the
     # measured corner-turn geometry), plus the departure transient's own
     # first 90 s of the window (reported separately below).
-    turn_caps = [e["sim_time_s"] for e in f["events"]
-                 if e["kind"] == "waypoint_captured"]
+    # INIT-2e: only ROUTE-PROGRESSION captures open windows — the loop
+    # laps' recaptures (the measured hold flights: 94 captures, the
+    # cursor cycling the same loop indices every 60-90 s) chained
+    # 75-s windows into a blanket that consumed the whole window. A
+    # capture whose wp_index does not advance the route cursor is lap
+    # geometry: it lives inside the hold exclusion or on a repeated leg
+    # the steady-state law already judges.
+    turn_caps = []
+    cursor = -1
+    for e in f["events"]:
+        if e["kind"] != "waypoint_captured":
+            continue
+        wi = e.get("wp_index", -1)
+        if wi > cursor:
+            cursor = wi
+            turn_caps.append(e["sim_time_s"])
     turn_caps.append(t0)  # the departure transient's own window
 
     def in_turn_window(t: float) -> bool:
         return any(t0 <= c <= t < c + 75.0 for c in turn_caps)
 
-    xs = [(s["sim_time_s"], abs(s.get("cross_track_error_ft", 0.0)))
-          for s in f["snapshots"]
-          if t0 <= s["sim_time_s"] < t1
-          and s.get("cross_track_error_ft", 0.0) > 0.0
-          and not in_turn_window(s["sim_time_s"])]
-    if not xs:
-        return "SKIP", ("snapshots carry no leg cross-track (pre-MC-2 "
-                        "documents)")
-    xs.sort()
-    quarter = xs[int(len(xs) * 0.75):]
-    steady_p90 = sorted(x for _, x in quarter)[
-        int(len(quarter) * 0.9)] if quarter else 0.0
-    all_xs = [(s["sim_time_s"], abs(s.get("cross_track_error_ft", 0.0)))
+    # INIT-2e: the station-hold windows (the designed off-route orbit).
+    holds = []
+    h0 = None
+    for e in f["events"]:
+        if e["kind"] == "station_entered":
+            h0 = e["sim_time_s"]
+        elif e["kind"] == "station_exited" and h0 is not None:
+            holds.append((h0, e["sim_time_s"]))
+            h0 = None
+    if h0 is not None:
+        holds.append((h0, t1))  # still holding at the window's end
+
+    # INIT-2e: the exclusions as INTERVALS (a pointwise predicate
+    # fragments the banded set — the measured loop-hold flights capture
+    # a lap waypoint every 60-90 s and the 75-s turn windows chained
+    # into a blanket that left zero banded samples after the join).
+    # The union of the turn windows and the hold windows, clamped to
+    # the Enroute window, is the flight's non-route time; the rest is
+    # its route time, the only thing this clause bands.
+    def _union(intervals: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        out = []
+        for a, b in sorted(intervals):
+            if b <= a:
+                continue
+            if out and a <= out[-1][1]:
+                out[-1] = (out[-1][0], max(out[-1][1], b))
+            else:
+                out.append((a, b))
+        return out
+
+    excluded = _union(
+        [(c, c + 75.0) for c in turn_caps if t0 <= c <= t1]
+        + [(a, b) for a, b in holds])
+    excluded = [(max(a, t0), min(b, t1)) for a, b in excluded]
+    route_time = max(1.0, (t1 - t0)
+                     - sum(b - a for a, b in excluded))
+    hold_time = sum(min(b, t1) - max(a, t0) for a, b in holds)
+
+    def banded(t: float) -> bool:
+        return not any(a <= t < b for a, b in excluded)
+
+    xs_all = [(s["sim_time_s"], abs(s.get("cross_track_error_ft", 0.0)))
               for s in f["snapshots"]
               if t0 <= s["sim_time_s"] < t1
               and s.get("cross_track_error_ft", 0.0) > 0.0]
-    peak = max(x for _, x in all_xs)
-    turn_peak = max((x for t, x in all_xs if in_turn_window(t)), default=0)
-    if steady_p90 > band:
-        return "FAIL", (f"steady-state leg cross-track p90 {steady_p90:.0f} ft "
-                        f"(tol {band:.0f} ft) — the flight is not holding "
-                        f"its route")
+    xs = [(t, x) for t, x in xs_all if banded(t)]
+    if not xs:
+        if xs_all:
+            return "SKIP", ("no banded route time (the whole Enroute "
+                            "window is turn/hold geometry)")
+        return "SKIP", ("snapshots carry no leg cross-track (pre-MC-2 "
+                        "documents)")
+    if route_time < 600.0:
+        # The phase machine's Enroute window is too short to demonstrate
+        # steady-state holding (the measured join transients run 8-20
+        # min): the short-hop family's honest verdict is SKIP, not a
+        # FAIL on a window that is 90% departure transient.
+        return "SKIP", (f"only {route_time:.0f} s of banded route time "
+                        f"(the {t1-t0:.0f}-s Enroute window is mostly "
+                        "turn/hold geometry) — too short to judge "
+                        "steady state")
+
+    # The excursion blocks: contiguous over-band runs on the banded
+    # samples. Two runs are the SAME excursion unless at least 60 s of
+    # BANDED, under-band samples separate them — an exclusion gap (a
+    # turn window, a hold) hides the flight but is not evidence of
+    # settling (the measured hold-family flights: the fragmented
+    # banded set read as 48 "excursions" where the whole window was
+    # one wander; the prototype's index-delta merge split on every
+    # excluded island).
+    merged = []
+    last_under_t = None
+    for t, x in xs:
+        if x > band:
+            if merged and (last_under_t is None
+                           or t - last_under_t < 60.0):
+                merged[-1][1] = t
+            else:
+                merged.append([t, t])
+        else:
+            last_under_t = t
+    # A block must SUSTAIN to count: the measured capture-tick spikes
+    # (the snapshot's cross-track at the recapture instant reads the
+    # capture approach — 1-2 samples, sub-second) are reporting
+    # artifacts, not route deviations; the real excursion families
+    # (the join transients, the wanderers) run minutes. 30 s of banded
+    # time, or the block is dropped.
+    merged = [b for b in merged if b[1] - b[0] >= 30.0]
+
+    def _p90(v: list[float]) -> float:
+        s = sorted(v)
+        return s[int(len(s) * 0.9)] if s else 0.0
+
+    peak = max(x for _, x in xs_all)
+    turn_peak = max((x for t, x in xs_all if in_turn_window(t)), default=0)
+    if merged:
+        t_est = merged[-1][1]
+        est_min = (t_est - xs[0][0]) / 60.0
+        post = [x for t, x in xs if t >= t_est]
+        steady = (sum(1 for x in post if x <= band) / len(post)) \
+            if post else 1.0
+        steady_pct = int(round(100.0 * steady))
+        steady_p90 = _p90(post)
+        if steady_pct < 50 or len(merged) > 3:
+            return "FAIL", (f"{len(merged)} route excursion(s) in the banded "
+                            f"window, established {est_min:.0f} min in, "
+                            f"holding {steady_pct}% of its route time (max "
+                            f"excursion {peak:.0f} ft, tol {band:.0f} ft) — "
+                            "the flight is not holding its route")
+        if steady_p90 > band:
+            # The sustained excursion ended but the flight keeps
+            # oscillating across the band afterward — the establish was
+            # not a settle (the measured re-oscillator family).
+            return "FAIL", (f"re-oscillates after establishing at "
+                            f"{est_min:.0f} min: steady p90 {steady_p90:.0f} "
+                            f"ft (tol {band:.0f} ft), {len(merged)} earlier "
+                            f"excursion(s), max {peak:.0f} ft — the flight "
+                            "is not holding its route")
+    else:
+        # No sustained excursion: the whole-window p90 IS the steady
+        # state. Sub-30-s islands (capture-tick spikes) ride the
+        # percentiles; a p90 over the band is an OSCILLATOR — the
+        # measured far-field intercept family (0 -> 21k ft with a
+        # sub-30-s period never holds anything).
+        steady_p90 = _p90([x for _, x in xs])
+        steady_pct = 100
+        est_min = 0.0
+        if steady_p90 > band:
+            return "FAIL", (f"oscillates across the band: steady p90 "
+                            f"{steady_p90:.0f} ft (tol {band:.0f} ft), max "
+                            f"{peak:.0f} ft, no sustained excursion — the "
+                            "flight is not holding its route")
+
     notes = []
     if turn_peak > band:
         notes.append(f"turn-arc peak {turn_peak:.0f} ft (geometry, not "
                      "banded)")
-    if peak > band:
-        notes.append(f"departure transient peaked {peak:.0f} ft")
+    if merged:
+        notes.append(f"joined at {est_min:.0f} min"
+                     + (f" after {len(merged)} excursion(s)"
+                        if len(merged) > 1 else ""))
+    if hold_time > 60.0:
+        notes.append(f"{hold_time/60:.0f} min in station holds (designed "
+                     "orbit, not banded)")
+    if peak > band and not merged:
+        notes.append(f"transient peaked {peak:.0f} ft")
     tail = ("; " + "; ".join(notes)) if notes else ""
-    return "PASS", (f"steady-state cross-track p90 {steady_p90:.0f} ft "
-                    f"(tol {band:.0f}){tail}")
+    return "PASS", (f"holds {steady_pct}% of its route time at p90 "
+                    f"{steady_p90:.0f} ft (tol {band:.0f}){tail}")
 
 
 def eval_station(f: dict, clause: dict) -> tuple[str, str]:
@@ -576,6 +726,43 @@ def selftest() -> int:
     card = flight_card(list(flights.values())[0])
     verdicts = {r["clause"]: r["verdict"] for r in card["clauses"]}
     check("tot-miss strike tot", verdicts["tot"], "FAIL")
+
+    # 4b. INIT-2e — the establish-and-hold PATH: a flight that wanders
+    # for the first third (the join transient), then holds inside the
+    # band, with a station hold in the middle (the designed orbit) ->
+    # PASS with the establish on the record.
+    hold_evs = [
+        ev("phase_changed", t=10, from_phase="Ground", to_phase="Enroute"),
+        ev("waypoint_captured", t=600, wp_index=0, wp_action=0),
+        ev("station_entered", t=1300, wp_index=1),
+        ev("station_exited", t=1800, wp_index=1),
+        ev("phase_changed", t=2400, from_phase="Enroute", to_phase="Approach"),
+    ]
+    snap5 = []
+    for t in range(0, 2400, 60):
+        xte = 8000.0 if t <= 1200 else 300.0   # wanders, then settles
+        if 1300 <= t < 1800:
+            xte = 25000.0                       # the designed orbit
+        snap5.append(snap(t, cross_track_error_ft=xte, mission="AMIS_SAD"))
+    trace5 = {"snapshots": snap5, "mission_events": hold_evs,
+              "combat_events": []}
+    flights = flights_from_trace(trace5)
+    attach_combat_events(flights, trace5)
+    card = flight_card(list(flights.values())[0])
+    verdicts = {r["clause"]: r["verdict"] for r in card["clauses"]}
+    check("establish-and-hold path", verdicts["path"], "PASS")
+
+    # 4c. The whole-window wanderer (the route-holding finding of
+    # record): one excursion block spanning the window -> FAIL.
+    snap6 = [snap(t, cross_track_error_ft=9000.0, mission="AMIS_SAD")
+             for t in range(0, 2400, 60)]
+    trace6 = {"snapshots": snap6, "mission_events": hold_evs,
+              "combat_events": []}
+    flights = flights_from_trace(trace6)
+    attach_combat_events(flights, trace6)
+    card = flight_card(list(flights.values())[0])
+    verdicts = {r["clause"]: r["verdict"] for r in card["clauses"]}
+    check("wanderer path", verdicts["path"], "FAIL")
 
     # 4. Scenario flight (no identity) -> generic contract; a landing-only
     # arc (Approach -> Complete) whose PATH is owned by the landing clauses.

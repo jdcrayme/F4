@@ -5,6 +5,24 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## INIT-2e — the PATH metric doctrine: establish-and-hold; the designed orbits leave the band
+
+The time-shape data: every big PATH p90 lived in the join transient
+(one flight: 33,998 ft in its first 10-min bucket, 1,050 ft for the
+next two hours) or inside the designed hold orbit (22,650 ft of
+"error" during a hold entered on schedule). The clause now bands
+ONLY route time — the Enroute window minus the turn-window and
+station-hold unions (interval math; the pointwise form let loop-lap
+capture windows chain into a blanket) — with an establish-and-hold
+verdict (sustained excursions, >= 50% route time settled, p90 <=
+2,000), a short-window SKIP (under 600 s of banded route time), and
+two honest FAILs: the whole-window oscillator (sub-30-s crossings,
+10%+ of samples at 15,873 ft — a new scoped nav-route-intercept
+family) and the wanderer. The accounting closes: every PASS reads
+p90 <= band. Measured: PATH 24 FAIL -> 29 PASS / 11 FAIL / 36 SKIP;
+the 11 FAILs are six oscillators, two re-oscillators, three
+delivery-hold wanderers. Selftest +2 cases; verify.cmd GREEN.
+
 ## INIT-2d — the go-around decay-k retune 0.035 -> 0.050: the matrix first-attempt FAILs 25 -> 15
 
 All 25 first-attempt FAILs were exactly one go-around each, spread

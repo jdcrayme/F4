@@ -623,6 +623,46 @@ with an owner.
   decision), SAD's stick residual (unchanged), and the second-pass
   geometry is OBSOLETE (the clean passes release first pass; the
   10-12k "second-pass" sticks were the balloons).
+- **INIT-2e — the PATH metric doctrine: establish-and-hold; the
+  designed orbits leave the band (2026-10-04).** The delivery-hold
+  PATH verdicts question resolved into a metric-doctrine rewrite
+  backed by the time-shape data: every big p90 in the 24-FAIL
+  population lived either in the first 10-20 minutes (the spawn/join
+  transient — one flight measured 33,998 ft of p90 in its first
+  10-min bucket and 1,050 ft for the next two hours) or INSIDE the
+  designed hold orbit (the racetrack/TIMING circle lives 3k-30k ft
+  off the route legs BY CONTRACT — 22,650 ft of "error" measured
+  during a hold the flight entered on schedule). The clause now
+  bands ONLY the route time: the Enroute window minus the
+  turn-window union minus the station-hold union (interval math —
+  the pointwise form let the loop laps' 75-s capture windows chain
+  into a blanket that consumed whole windows), with three verdict
+  mechanisms: a SHORT-WINDOW SKIP (under 600 s of banded route time
+  cannot demonstrate establishment — the measured join transients
+  run 8-20 min; the phase machine's early Enroute exit puts the
+  station families' whole orbit outside the clause's reach, and the
+  station clause owns that contract), an ESTABLISH-AND-HOLD PASS
+  (sustained excursions end, the flight holds >= 50% of its route
+  time at p90 <= 2,000 ft, the establish time and the hold minutes
+  ride the detail), and two honest FAILs (the WHOLE-WINDOW OSCILLATOR
+  — sub-30-s crossings never sustain but 10%+ of the samples ride
+  15,873 ft: the far-field route-intercept family, a NEW scoped
+  finding; and the RE-OSCILLATOR/WANDERER families). The block
+  accounting closes coherently: every PASS reads p90 <= band (the
+  30-s sustain rule drops the capture-tick spike islands; without it
+  a 15,873-ft-p90 flight read "holds 100%"). Measured
+  (qc/coverage_map_init2d re-carded in place): **PATH 24 FAIL -> 29
+  PASS / 11 FAIL / 36 SKIP** — the 11 are six oscillators (INTERCEPT
+  x2, OCASTRIKE x3, JSTAR: the nav route-intercept oscillation, a
+  new scoped family distinct from the landing intercept INIT-2
+  fixed), two re-oscillators (OTHER: establish then re-cross, post
+  p90 19k), and the three delivery-hold wanderers (SAD/1682, BAI/1681
+  with 50 sustained excursions). Selftest grows the
+  establish-and-hold and wanderer cases (GREEN); verify.cmd GREEN.
+  The scoped remainder: the route-intercept oscillation family (the
+  nav-side twin of the INIT-2 landing fix), the delivery-hold orbit
+  geometry, and the phase machine's early Enroute exit (the station
+  families' route life is unjudged territory).
 - **INIT-2d — the go-around decay-k retune 0.035 -> 0.050: the
   matrix first-attempt FAILs 25 -> 15 (2026-10-03).** All 25
   first-attempt FAILs were exactly ONE go-around each, spread
