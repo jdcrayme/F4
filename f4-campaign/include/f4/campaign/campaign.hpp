@@ -92,6 +92,12 @@ struct MissionIntent {
     CampaignTime issued_time{0};
     /// Campaign time the mission launches (seconds, relative).
     CampaignTime time_on_target{0};
+    /// MC-5 — the ATO launch slot: how long the ground launch holds at
+    /// parking before the takeoff (the backward-passed takeoff time —
+    /// the package TOT minus this element's enroute estimate, the
+    /// reference's SetWPTimes backward pass collapsed to the planning
+    /// arithmetic). 0 = launch at the wave's own spacing.
+    std::int64_t takeoff_delay_s{0};
     /// Owning team slot (from the unit data's owner vocabulary).
     std::uint8_t team{0};
     /// Owning team name (empty when the slot is unnamed).

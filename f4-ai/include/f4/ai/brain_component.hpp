@@ -129,6 +129,14 @@ struct MissionPlan {
     /// Empty = the aircraft parks on the runway.
     std::vector<geo::WorldPosition> taxi_in_route;
 
+    /// MC-5 — the ATO launch slot: how long the GROUND launch holds
+    /// at parking before taxiing (the plan's TOT minus the backward-
+    /// passed enroute at the leg cruise, minus the ground allowance —
+    /// the reference's SetWPTimes backward pass collapsed to the
+    /// planning arithmetic). The spawn sets the takeoff module's
+    /// runway_wait_s from it; 0 = the default spacing.
+    double launch_delay_s{0.0};
+
     /// Approach style at the end of the route: false = straight-in final
     /// (default), true = full traffic pattern (downwind/base/final).
     bool fly_traffic_pattern{false};

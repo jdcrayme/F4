@@ -2402,6 +2402,9 @@ int run_qc(int argc, char** argv) {
         out << "  \"name\": \"campaign_qc\",\n";
         out << "  \"theater\": \"" << ws.theater << "\",\n";
         out << "  \"spawn_mode\": \"campaign_flights\",\n";
+        // MC-5: the ATO launch-timing model - the campaign flights
+        // defer their takeoffs to their package launch slots.
+        out << "  \"ato_launch_timing\": true,\n";
         // ABSOLUTE — the sim resolves scenario-relative paths against the
         // scenario file's OWN directory (the out-dir here, not the CWD;
         // the same relative-path lesson campaign_session.cpp §6 already

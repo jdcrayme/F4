@@ -703,6 +703,54 @@ with an owner.
   verdict fed back), the delivery-first hold gap (SAD/1682's -58
   min: no preceding waypoint to hold at), the timing residuals, and
   the unit-damage ledger + the hp review.
+- **MC-5 — the ATO launch-timing model: the package TOTs, the
+  backward pass, the takeoff slots; the reference's own semantics
+  (2026-10-04).** The FreeFalcon reference read (CAMPTASK/mission.cpp
+  SetWPTimes): the TOT anchors a WAYPOINT (per tot_type: takeoff/
+  enroute/ingress/target), a backward pass derives the takeoff time
+  (TOT minus the leg times at the clamped cruise), an infeasible
+  takeoff (before now) slips at the ATM, and the ATC runway queue IS
+  the slot grid (FindFlightTakeoffTime pushes collisions one slot).
+  The per-airframe speeds come from the class table (Unit::
+  GetCruiseSpeed = class_data->MovementSpeed) with the per-waypoint
+  planned speeds clamped [0.7 cruise, 1.3 max]. Implemented: THE
+  STAMP v2 (scripts/fixture_stamp_tot.py): the delivery packages'
+  TOTs derive from the LIMITING element's enroute estimate — the
+  straight-line base-to-target distance x the measured corner factor
+  1.17 at the measured 385-fps cruise, + the 180-s teleport-launch
+  allowance, clamped 15-90 min; every element of a package shares it
+  (the two-element packages now coordinate). THE BACKWARD PASS (the
+  flight builder): launch_delay = TOT - the plan's straight-line
+  enroute - the allowance, armed by the scenario's new
+  ato_launch_timing (default false — the tests and the goldens keep
+  the pre-MC-5 launch shape; the measured
+  CrashParksTheCorpseFullFidelity regression fixed the flag way: the
+  delivery-only first gate still parked a test delivery past its
+  window). THE DEFERRAL: the takeoff module's runway_wait_s (the
+  DEAGG-RWY parking hold) — the wait happens AT THE BASE, not in a
+  threat-ring orbit; the orbit-hold (apply_push_wait_hold) is now
+  the AIRBORNE-delivery model only (the CAS/retask case). The
+  emitter carries the element launch slots to the intent path
+  (takeoff_delay_s). CALIBRATION history (all measured): the first
+  cruise (the ATM's 12 grids/min = ~121 kts) put every arrival 2.9x
+  early — the sim flies its legs at ~226-230 kts (the whole-flight
+  vt_fps medians: EVERY airframe 226-230 except ONCALLCAS's 414-kts
+  dash profiles — the reference's per-airframe MovementSpeed
+  collapses to one number in this sim's FCS); the 455 first fix was
+  the ATTACK-descent speed; the dogleg route sum overestimated the
+  transit 3.5x (the sim's abeam captures fly the ingress nearly
+  straight — the straight-line x 1.17 is the measured truth). The
+  final numbers (qc/coverage_map_mc5f vs mc4b4): **tot 21 PASS/
+  10 FAIL -> 24 PASS / 7 FAIL / 12 SKIP, the median miss -0.6 min,
+  23 of 30 inside the +-300-s tolerance, the worst 11**; features
+  68 (vs 59 — the orbit-hold's collateral recovered), recovery 70/
+  6 (the best yet), employment 30 PASS, first_attempt FAILs 6 (the
+  best yet). The honest costs: PATH PASSes 22 / SKIPs 53 (the
+  deferred launches shrink the in-run route windows the clause
+  judges — a launch-timing consequence, the metric-doctrine
+  tranche's), duration PASSes 43 / SKIPs 33 (the late recoveries
+  span the horizon). The nine suites green (29+12+17+31+32+5+7+22+
+  14); verify.cmd GREEN.
 - **INIT-2g — the attack run adopts the distance-scheduled
   intercept: the delivery-first orbit converges in one pass;
   features 63 -> 70 (2026-10-04).** The delivery-hold orbit tranche

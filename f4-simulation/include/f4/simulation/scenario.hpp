@@ -489,6 +489,14 @@ struct Scenario {
     /// golden keeps the pre-FID shape bit for bit.
     bool campaign_flights_deferred{false};
 
+    /// MC-5 — the ATO launch-timing model: a GROUND-launched delivery
+    /// flight defers its takeoff to its package's launch slot (the plan's
+    /// launch_delay_s -> runway_wait_s) instead of launching at the wave's
+    /// own spacing. Default false — every scenario and golden keeps
+    /// the pre-MC-5 launch shape; the campaign-qc tool arms it (the ATO
+    /// semantics are the QC contract there).
+    bool ato_launch_timing{false};
+
     /// Optional: Falcon4.AII (terrdata/ai/Falcon4.AII) — the campaign AI
     /// INI whose SIM_BUBBLE_SIZE / GROUND_BUBBLE_SIZE tune the sim-bubble
     /// deaggregation radii (B.0). Empty (the default) or a missing file

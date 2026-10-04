@@ -37,30 +37,66 @@ from pathlib import Path
 DELIVERY_MISSIONS = frozenset(
     [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 31])
 
-STALE_BAND_S = 6 * 3600      # leave appointments within +/- 6 h alone
-BASE_DELAY_S = 1_800         # current + 30 min
-STAGGER_S = 120              # x (id_num % 30): a 58-minute spread
+TOT_MARGIN_S = 600.0         # the attack's own span past the enroute
+TOT_MIN_REL_S = 900.0        # 15 min: the earliest push
+TOT_MAX_REL_S = 5400.0       # 90 min: the recovery still fits
+GROUND_ALLOWANCE_S = 180.0   # the TELEPORT launch: roll + climb (no taxi)
+CRUISE_FPS = 385.0           # the measured whole-flight cruise (mc5c vt medians)
+CORNER_FACTOR = 1.17         # straight-line -> the sim's actual flight path
+
+
+def _enroute_s(it: dict) -> float:
+    """The element's enroute estimate: the STRAIGHT-LINE base-to-target
+    distance x the corner factor, at the measured cruise. The sim's
+    abeam captures fly the save's ingress doglegs nearly straight (the
+    measured OCASTRIKE transit = straight x 1.17; the dogleg sum
+    overestimated 3.5x) — the estimate must match what the sim FLIES."""
+    wps = it.get("waypoints") or []
+    if not wps:
+        return GROUND_ALLOWANCE_S
+    # The delivery waypoint: the first WP with a delivery action; the
+    # sim's plan co-locates deliveries ON the target, so the fallback
+    # is the waypoint FARTHEST from the base (the deep strike point).
+    def _is_delivery(w):
+        return w.get("action", 0) in (14, 15, 16, 17, 18, 19)
+    target = next((w for w in wps if _is_delivery(w)), None)
+    if target is None:
+        bx, by = it.get("x", 0), it.get("y", 0)
+        target = max(wps, key=lambda w: (w["x"] - bx) ** 2 +
+                                          (w["y"] - by) ** 2)
+    dx = target["x"] - it.get("x", 0)
+    dy = target["y"] - it.get("y", 0)
+    straight_grid = (dx * dx + dy * dy) ** 0.5
+    return (straight_grid * CORNER_FACTOR *
+            (1024.0 / CRUISE_FPS) + GROUND_ALLOWANCE_S)
 
 
 def stamp(world: dict) -> tuple[int, int]:
-    """Stamp the out-of-horizon delivery TOTs. Returns (stamped, kept)."""
+    """Stamp the delivery packages' TOTs (MC-5): per package, the
+    LIMITING element's enroute estimate anchors the appointment (the
+    most limiting package element selects the TOT, the reference's ATO
+    rule); every element of the package shares it. Deterministic: the
+    same world re-stamps to the same values. Returns (stamped, kept,
+    where kept is always 0 — the signature is retained for the older
+    callers)."""
     current = world["campaign"]["current_time"]
     items = world["units"]["items"]
-    stamped = kept = 0
+    members: dict[int, list[dict]] = {}
     for it in items:
-        mission = it.get("mission", 0)
-        if mission not in DELIVERY_MISSIONS:
-            continue
-        tot = it.get("time_on_target", 0)
-        if not tot:
-            continue
-        if abs(tot - current) <= STALE_BAND_S:
-            kept += 1
-            continue
-        delay = BASE_DELAY_S + (it.get("id_num", 0) % 30) * STAGGER_S
-        it["time_on_target"] = current + delay
-        stamped += 1
-    return stamped, kept
+        if it.get("mission", 0) in DELIVERY_MISSIONS:
+            members.setdefault(it.get("package_id", 0), []).append(it)
+    stamped = 0
+    for pkg_items in members.values():
+        enroutes = [_enroute_s(it) for it in pkg_items]
+        tot_rel = max(min(max(enroutes) + TOT_MARGIN_S, TOT_MAX_REL_S),
+                      TOT_MIN_REL_S)
+        for it in pkg_items:
+            # The derivation is deterministic — a re-run produces the
+            # same values, which IS the idempotence (no band needed;
+            # the reference derives the launch schedule every cycle).
+            it["time_on_target"] = current + int(tot_rel)
+            stamped += 1
+    return stamped, 0
 
 
 def main() -> int:
@@ -68,11 +104,11 @@ def main() -> int:
                 else Path(__file__).resolve().parent.parent
                 / "testcamp.world.json")
     world = json.loads(path.read_text(encoding="utf-8"))
-    stamped, kept = stamp(world)
+    stamped, _ = stamp(world)
     path.write_text(json.dumps(world, separators=(",", ":"),
                                ensure_ascii=False), encoding="utf-8")
-    print(f"{path.name}: stamped {stamped} delivery TOT(s) into the "
-          f"+30..+88 min band, kept {kept} in-horizon")
+    print(f"{path.name}: derived {stamped} package TOT(s) from the "
+          f"limiting element's enroute")
     return 0
 
 

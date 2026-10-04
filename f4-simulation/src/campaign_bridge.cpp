@@ -53,6 +53,13 @@ namespace f4::simulation {
 
 namespace {
 
+/// MC-4b/MC-5 — the push-wait hold (the AIRBORNE delivery's on-station
+/// wait until push). Defined below with the plan builders; the flight-
+/// spawn path calls it first (the spawn knows air/ground, the builder
+/// does not).
+void apply_push_wait_hold(f4::ai::MissionPlan& plan,
+                          bool delivery_mission, bool airborne);
+
 // Same constant as f4-world/src/world_loader.cpp (not exported). One grid
 // unit = 1024 ft in the Falcon 4.0 campaign.
 constexpr double FT_PER_GRID = 1024.0;
@@ -587,7 +594,8 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                               f4::entities::EntityId>* unit_id_map,
                           const AirSpawnPose* air_pose,
                           const f4::world::TheaterTables* theater_tables,
-                          bool pilot_skill_flow) {
+                          bool pilot_skill_flow,
+                          bool ato_launch_timing) {
     using namespace f4::entities;
     using namespace f4::flight;
     using namespace f4::ai;
@@ -790,7 +798,19 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
             // brain skips the taxi/takeoff phases and hands the plan to
             // the NavigationModule (the LNAV scenarios' own contract).
             plan->start_phase = MissionPlan::StartPhase::Enroute;
+        } else if (ato_launch_timing && plan->launch_delay_s > 45.0) {
+            // MC-5 — the ATO launch slot: the backward-passed takeoff
+            // time parks the flight at parking until its package's
+            // launch moment; the arrival lands on the TOT. Armed by the
+            // scenario (ato_launch_timing) — the tests and the
+            // goldens keep the pre-MC-5 launch shape.
+            brain.module().runway_wait_s = plan->launch_delay_s;
         }
+        // MC-5: the orbit-hold (the on-station wait until push) is the
+        // AIRBORNE delivery's model only — a ground launch defers at
+        // parking (the ATO slot), it does not orbit in the threat ring.
+        apply_push_wait_hold(*plan, plan->ag_delivery_mission,
+                             spawn_in_air);
         // MC-1: the saved flight's own mission byte (the origin stamp
         // carries the same value; the plan's copy keeps the identity
         // with the route it belongs to). Saved routes carry no TOT.
@@ -1192,7 +1212,8 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const std::unordered_map<std::uint32_t,
                                  f4::entities::EntityId>* unit_id_map,
                              const f4::world::TheaterTables* theater_tables,
-                             bool pilot_skill_flow) {
+                             bool pilot_skill_flow,
+                             bool ato_launch_timing) {
     using namespace f4::entities;
 
     // Find every entity with a FlightPlanComponent. f4-world::populate_units
@@ -1244,7 +1265,8 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                 world, flight_id, ct, cfg, airfield,
                 scenario_aircraft, slot, airbase_airfields,
                 objective_id_map, weapon_table, unit_id_map,
-                /*air_pose=*/nullptr, theater_tables, pilot_skill_flow)) {
+                /*air_pose=*/nullptr, theater_tables, pilot_skill_flow,
+                ato_launch_timing)) {
             spawned.push_back(*spawned_id);
         }
     }
@@ -1547,8 +1569,17 @@ constexpr double kMinWaypointAltFt = 500.0;
 /// route[0]) have no preceding waypoint to hold at and keep their
 /// immediate attack — scoped.
 void apply_push_wait_hold(f4::ai::MissionPlan& plan,
-                          bool delivery_mission) {
-    if (!delivery_mission || plan.tot_s <= 0.0) {
+                          bool delivery_mission, bool airborne) {
+    // MC-5: the orbit-hold is the ON-STATION model — an AIRBORNE
+    // delivery (the CAS/retask case: nothing to defer, the flight
+    // orbits until push). A GROUND launch's wait belongs at parking
+    // (the runway_wait_s ATO slot, set by the spawner from the
+    // intent's takeoff delay): orbiting 24,000 ft short of the target
+    // burned 30+ minutes at combat power inside the threat ring, and
+    // the timing residuals rode the hold's lap-quantized release.
+    // Ground-launched deliveries now arrive ON their package TOT by
+    // launching later.
+    if (!delivery_mission || plan.tot_s <= 0.0 || !airborne) {
         return;
     }
     {
@@ -2093,6 +2124,71 @@ build_mission_plan_from_flight(
                 }
             }
         }
+
+        // MC-5 — the BACKWARD PASS (the reference's SetWPTimes
+        // collapsed to the planning arithmetic): the takeoff time is
+        // the TOT minus the planned enroute (the route's leg lengths
+        // at the leg cruise, plus the ground allowance for taxi/
+        // takeoff/climb); the spawn parks the flight for this long
+        // (launch_delay_s -> runway_wait_s) and the arrival lands on
+        // the package TOT.
+        // DELIVERY MISSIONS ONLY: the launch timing is the strike-
+        // package model — a non-delivery plan's TOT (a CAP's own
+        // appointment, a test harness's) does not own a launch slot,
+        // and deferring one parks it past its whole window (the
+        // measured CrashParksTheCorpseFullFidelity: the flight never
+        // went Enroute in 10 min).
+        if (plan.tot_s > 0.0 && plan.ag_delivery_mission) {
+                        // MC-5 — the BACKWARD PASS (the reference's
+                        // SetWPTimes collapsed to the planning
+                        // arithmetic): the takeoff time is the TOT
+                        // minus the planned enroute — the route's
+                        // leg lengths at the leg cruise, plus the
+                        // ground allowance for taxi/takeoff/climb.
+                        // The spawn parks the flight for this long
+                        // (launch_delay_s -> runway_wait_s); the
+                        // arrival lands on the package TOT.
+                        // CALIBRATED on the mc5c run's whole-flight
+                        // vt_fps medians: EVERY airframe in this sim
+                        // cruises 226-230 kts (381-388 fps — the FCS's
+                        // speed schedule dominates the airframe drag
+                        // differences; the reference's per-airframe
+                        // MovementSpeed collapses to one number here),
+                        // ONCALLCAS's dash profiles excepted. The
+                        // 455 used first was the ATTACK-descent speed
+                        // and overestimated the cruise 17%. The
+                        // TELEPORT launch has no taxi (roll + climb =
+                        // ~180 s).
+                        constexpr double kLegCruiseFps = 385.0;
+                        constexpr double kGroundAllowanceS = 180.0;
+                        // The STRAIGHT-LINE estimate (the anchor to the
+                        // first delivery waypoint), not the saved route's
+                        // dogleg sum: the sim's abeam captures fly the
+                        // ingress nearly straight — the measured OCASTRIKE
+                        // transit was the straight distance x 1.17, while
+                        // the dogleg sum overestimated 3.5x (the estimate
+                        // must match what the sim FLIES, not what the save
+                        // WROTE).
+                        constexpr double kCornerFactor = 1.17;
+                        std::size_t d_idx = 0;
+                        for (std::size_t k = 0; k < plan.route.size(); ++k) {
+                            if (f4::ai::modules::is_ag_delivery_action(
+                                    plan.route[k].action)) {
+                                d_idx = k;
+                                break;
+                            }
+                        }
+                        const double ddx = plan.route[d_idx].position.x -
+                                           plan.route[0].position.x;
+                        const double ddy = plan.route[d_idx].position.y -
+                                           plan.route[0].position.y;
+                        const double enroute_s =
+                            std::sqrt(ddx * ddx + ddy * ddy) * kCornerFactor /
+                                kLegCruiseFps +
+                            kGroundAllowanceS;
+                        plan.launch_delay_s =
+                            std::max(0.0, plan.tot_s - enroute_s);
+        }
     }
 
     // INIT-1e: the plan's delivery doctrine rides to the brain — the
@@ -2101,7 +2197,6 @@ build_mission_plan_from_flight(
     // deliveries.
     plan.ag_delivery_mission =
         f4::campaign::mission_is_ag_delivery(fp->mission);
-    apply_push_wait_hold(plan, plan.ag_delivery_mission);
 
     // start_phase stays Ground: the campaign flight departs from its
     // airbase (taxi → takeoff → enroute), which is exactly the brain's
@@ -2357,6 +2452,15 @@ spawn_aircraft_for_intent(
     // block in spawn_aircraft_for_flight.
     if (!spawn_in_air) {
         brain.module().wait_then_teleport = true;
+        // MC-5: the ATO launch slot — the intent's backward-passed
+        // takeoff delay (the package TOT minus this element's enroute)
+        // parks the flight at parking until its package's launch time;
+        // the reference's own wait collapses to this order when the
+        // slot is near. The 45-s default stands when no slot derived.
+        if (intent.takeoff_delay_s > 45) {
+            brain.module().runway_wait_s =
+                static_cast<double>(intent.takeoff_delay_s);
+        }
     }
     // CAMP-SCALE-1 — the pilot-skill flow (gated): the intent's squadron
     // pilot roster (already resolved as `sq` above) sets the fusion
@@ -2403,7 +2507,8 @@ spawn_aircraft_for_intent(
         plan->target_objective_id = intent.target_objective_id;
         plan->ag_delivery_mission =
             f4::campaign::mission_is_ag_delivery(intent.mission_byte);
-        apply_push_wait_hold(*plan, plan->ag_delivery_mission);
+        apply_push_wait_hold(*plan, plan->ag_delivery_mission,
+                             spawn_in_air);
         // EMPL-2 — receiver eligibility from the synthetic route (the
         // same scan the flight path runs on the saved plan; the ladder's
         // stamped routes carry kWpRefuel the same way).

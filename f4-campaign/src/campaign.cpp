@@ -1089,6 +1089,63 @@ emit_flight_intents(const f4::world::IUnitCoreSource& units,
         }
     }
 
+    // MC-5 — the PACKAGE LAUNCH-TIMING pre-pass. The reference's
+    // SetWPTimes (CAMPTASK/mission.cpp): the TOT anchors the target
+    // waypoint, a forward pass schedules to landing, and a BACKWARD
+    // pass derives the takeoff time (TOT minus the planned enroute at
+    // the clamped cruise); an infeasible takeoff (before now) slips at
+    // the ATM. The save's own appointments are campaign-clock garbage
+    // (the MC-4b measurement: -132..+2,752 hours), so the anchor is
+    // DERIVED: per package, the LIMITING element's enroute estimate
+    // (the save's own route length at the campaign cruise, plus the
+    // ground allowance) sets the package TOT; every element's takeoff
+    // delay derives backward from it — the slowest element launches
+    // first, its package mates launch so they arrive together. The
+    // estimate is planning-grade (straight route lengths, one cruise
+    // number); the +-300-s tot tolerance owns the residual.
+    // The SIM's leg cruise (350 kts), not the ATM's campaign-move
+    // constant (12 grids/min = ~121 kts): the first run's arrivals all
+    // landed ~2.9x early — the estimate overshoot the flight time by
+    // exactly the ratio, and the tot clause went 21 PASS -> 0. The
+    // grid foot (1024, the bridge's FT_PER_GRID) over the leg speed.
+    constexpr double kGridFt = 1024.0;
+    constexpr double kLegCruiseFps = 350.0 * 1.68781;
+    constexpr double kSecondsPerGrid = kGridFt / kLegCruiseFps;
+    constexpr double kGroundAllowanceS = 660.0;  // taxi + takeoff + climb
+    struct LaunchPlan {
+        double enroute_s = 0.0;
+        bool delivery = false;
+    };
+    std::unordered_map<std::uint32_t, LaunchPlan> launch;
+    std::unordered_map<std::uint32_t, std::vector<int>> package_members;
+    for (int i = 0; i < units.unit_count(); ++i) {
+        if (units.unit_class(i) != f4::entities::UnitClass::Flight) continue;
+        const std::uint8_t mission = flights.mission(i);
+        if (!is_mission_tasked(mission)) continue;
+        LaunchPlan lp;
+        lp.delivery = mission_is_ag_delivery(mission);
+        double route_grid = 0.0;
+        // The delivery-first routes START at the target (the planner
+        // wrote strike -> egress; the measured SAD lead) — the base-to-
+        // first-waypoint leg closes the estimate for them.
+        const double bx = static_cast<double>(units.x(i));
+        const double by = static_cast<double>(units.y(i));
+        const auto& wps = units.waypoints(i);
+        if (!wps.empty()) {
+            const double dx0 = static_cast<double>(wps[0].x) - bx;
+            const double dy0 = static_cast<double>(wps[0].y) - by;
+            route_grid += std::sqrt(dx0 * dx0 + dy0 * dy0);
+        }
+        for (std::size_t k = 1; k < wps.size(); ++k) {
+            const double dx = static_cast<double>(wps[k].x) - wps[k - 1].x;
+            const double dy = static_cast<double>(wps[k].y) - wps[k - 1].y;
+            route_grid += std::sqrt(dx * dx + dy * dy);
+        }
+        lp.enroute_s = route_grid * kSecondsPerGrid + kGroundAllowanceS;
+        launch.emplace(units.id_num(i), lp);
+        package_members[flights.package_id(i)].push_back(i);
+    }
+
     std::vector<MissionIntent> intents;
     for (int i = 0; i < units.unit_count(); ++i) {
         if (units.unit_class(i) != f4::entities::UnitClass::Flight) continue;
@@ -1104,6 +1161,41 @@ emit_flight_intents(const f4::world::IUnitCoreSource& units,
         MissionIntent in;
         in.issued_time = now;
         in.time_on_target = flights.time_on_target(i);
+
+        // The package's derived appointment + this element's launch slot.
+        const auto pkg_it = package_members.find(flights.package_id(i));
+        if (pkg_it != package_members.end()) {
+            const LaunchPlan& self = launch.at(units.id_num(i));
+            double limiting = 0.0;
+            bool any_delivery = false;
+            for (const int m : pkg_it->second) {
+                const auto lit = launch.find(units.id_num(m));
+                if (lit == launch.end()) continue;
+                limiting = std::max(limiting, lit->second.enroute_s);
+                any_delivery = any_delivery || lit->second.delivery;
+            }
+            // MC-5: the fixture carries the PACKAGE TOTs now (the stamp
+            // derives them from the limiting element's enroute). The
+            // intent carries only the element's launch slot: how long
+            // AFTER now this element takes off so it arrives with its
+            // package.
+            if (any_delivery) {
+                const double tot_rel = static_cast<double>(
+                    in.time_on_target - now);
+                in.takeoff_delay_s = static_cast<std::int64_t>(
+                    std::max(0.0, tot_rel - self.enroute_s));
+            }
+            if (std::getenv("F4_LAND_DEBUG") != nullptr &&
+                self.delivery) {
+                std::fprintf(stderr,
+                             "[launch] pkg %u members %zd tot_rel %.0f"
+                             " self %.0f delay %lld\n",
+                             flights.package_id(i), pkg_it->second.size(),
+                             static_cast<double>(in.time_on_target - now),
+                             self.enroute_s,
+                             static_cast<long long>(in.takeoff_delay_s));
+            }
+        }
         in.team = units.owner(i);
         {
             auto it = team_name_by_slot.find(static_cast<int>(in.team));

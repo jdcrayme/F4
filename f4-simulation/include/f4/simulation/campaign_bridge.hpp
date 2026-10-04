@@ -464,7 +464,8 @@ spawn_aircraft_for_flight(f4::entities::EntityWorld& world,
                               f4::entities::EntityId>* unit_id_map = nullptr,
                           const AirSpawnPose* air_pose = nullptr,
                           const f4::world::TheaterTables* theater_tables = nullptr,
-                          bool pilot_skill_flow = false);
+                          bool pilot_skill_flow = false,
+                          bool ato_launch_timing = false);
 
 /// Spawn one aircraft entity per Flight-class unit in the EntityWorld.
 ///
@@ -536,7 +537,8 @@ spawn_aircraft_from_flights(f4::entities::EntityWorld& world,
                              const std::unordered_map<std::uint32_t,
                                  f4::entities::EntityId>* unit_id_map = nullptr,
                              const f4::world::TheaterTables* theater_tables = nullptr,
-                             bool pilot_skill_flow = false);
+                             bool pilot_skill_flow = false,
+                             bool ato_launch_timing = false);
 
 // ============================================================================
 // Mode B: Unit Deaggregation

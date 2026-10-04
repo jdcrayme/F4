@@ -5,6 +5,30 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## MC-5 — the ATO launch-timing model: the takeoff slots, the package TOTs; tot median miss -0.6 min
+
+The FreeFalcon reference's own semantics, read from SetWPTimes and
+FindFlightTakeoffTime: the TOT anchors a route waypoint, the
+backward pass derives the takeoff (TOT minus the leg times), the
+ATC runway queue is the slot grid, the per-airframe speeds come from
+the class table. Implemented: the stamp derives each delivery
+package's TOT from its limiting element's enroute (straight-line x
+1.17 at the measured 385-fps cruise); the flight builder backward-
+passes the launch delay (TOT minus the straight-line enroute minus
+the teleport-launch allowance), armed by the scenario's
+ato_launch_timing; the deferral parks the flight AT THE BASE
+(runway_wait_s) instead of orbiting in the threat ring — the
+orbit-hold remains the airborne-delivery (CAS/retask) model only.
+Calibration history measured: the ATM's campaign cruise put arrivals
+2.9x early; the sim's airframes all cruise 226-230 kts (the vt_fps
+medians — the per-airframe speeds collapse); the dogleg route sum
+overestimated the transit 3.5x. Final: tot 24 PASS / 7 FAIL (median
+miss -0.6 min, 23/30 within tolerance), features 68, recovery 70/6,
+employment 30, first_attempt FAILs 6. Costs: PATH PASSes 22 / SKIPs
+53 and duration SKIPs 33 (the deferred launches shrink the in-run
+windows — the metric doctrine's). Nine suites green; verify.cmd
+GREEN.
+
 ## MC-4c — the release-cone diagnosis: the pursuit orbit named; the probes stay, the fix waits for a stateful re-attack
 
 The never-delivering flights: no rung preempts (4,601 armed samples,

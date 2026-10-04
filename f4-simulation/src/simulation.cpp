@@ -2816,7 +2816,10 @@ void Simulation::spawn_from_campaign_flights() {
         &populated.unit_id_map,
         // CAMP-SCALE-1: the converted tables (null = the defaults) + the
         // pilot-skill gate.
-        theater_tables_.get(), scenario_.combat.pilot_skill_flow);
+        theater_tables_.get(), scenario_.combat.pilot_skill_flow,
+        // MC-5: the ATO launch-timing model (the scenario arms it; the
+        // tests and the goldens keep the pre-MC-5 launch shape).
+        scenario_.ato_launch_timing);
 
     if (aircraft_entities_.empty()) {
         throw std::runtime_error(

@@ -290,6 +290,7 @@ Scenario parse_scenario(f4::json::Reader& r) {
         else if (key == "record_every")    s.record_every = std::max(1, static_cast<int>(r.read_int()));
         else if (key == "record_path")     s.record_path = r.read_string();
         else if (key == "fcs_trace_path")  s.fcs_trace_path = r.read_string();
+        else if (key == "ato_launch_timing") s.ato_launch_timing = r.read_bool();
         else if (key == "start_in_approach") s.start_in_approach = r.read_bool();
         else if (key == "start_enroute")     s.start_enroute = r.read_bool();
         else if (key == "aircraft") {
