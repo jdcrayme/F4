@@ -623,6 +623,29 @@ with an owner.
   decision), SAD's stick residual (unchanged), and the second-pass
   geometry is OBSOLETE (the clean passes release first pass; the
   10-12k "second-pass" sticks were the balloons).
+- **INIT-2d — the go-around decay-k retune 0.035 -> 0.050: the
+  matrix first-attempt FAILs 25 -> 15 (2026-10-03).** All 25
+  first-attempt FAILs were exactly ONE go-around each, spread
+  map-wide (AIRLIFT 4, OCASTRIKE 3, ECM 3, ...). The [land-dbg] gate
+  autopsy on the AIRLIFT population: the surviving go-arounds were
+  the TAIL BAND, not the far-field oscillation the INIT-2 law fixed
+  — the lateral converging MONOTONICALLY (775 -> 645 -> 533 -> 436
+  -> 350 -> 271 ft against the 250-ft establish gate, heading and
+  beam gates green) as the fix's along-track room ran out one 2-s
+  sample short; the missed approach re-enters tight and the second
+  attempt establishes in 72 s (the measured AIRLIFT trace). k banks
+  the tail margin: the AIRLIFT recorded sweep (0.020 / 0.035 /
+  0.050) measured 2/4, 3/4, 3/4 landings with 1682's first attempt
+  clean only at 0.050; the matrix A/B: **first_attempt 25 -> 15
+  FAILs** (ten flights' first attempt now establishes: AIRLIFT,
+  AWACS, DEEPSTRIKE, ECM x2, OCASTRIKE, ONCALLCAS x2, STRIKE,
+  SWEEP), recovery 66 -> 65 (one AIRLIFT flight lands but is still
+  in its rollout at the 120-min horizon), every other clause total
+  identical. The landing suite is k-agnostic (32/32 at both
+  points); the nine suites green; verify.cmd GREEN. The 15
+  remaining first-attempt FAILs are the single-honest-missed-
+  approach tail plus the station-hold family's horizon boundary —
+  the metric-doctrine tranche's.
 - **INIT-2c — the cruise small-error bank drive: the pipper gate
   fires; SAD 0 -> 2, the matrix features 57 -> 63 (2026-10-03).**
   SAD's 563-846-ft stick residual decomposed with the [release]

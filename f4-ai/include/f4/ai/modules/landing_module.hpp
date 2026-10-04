@@ -311,11 +311,21 @@ public:
     /// first-attempt go-arounds). The exponential eases the cut as the
     /// offset closes: no crossing overshoot, the establish fires at the
     /// crossing. 0 = the constant-cut law (the A/B switch).
-    double intercept_decay_k{0.035};    // the tau ~28 s: the 1,000-ft cut
-                                        // ~8.7 deg (the old constant-cut's
-                                        // boundary value), the 12k cut ~39
-                                        // deg (the monotonic exponential —
-                                        // no crossing overshoot)
+    ///
+    /// INIT-2d — retuned 0.035 -> 0.050 on the matrix: the go-around
+    /// autopsies (the [land-dbg] gate probes) showed the surviving
+    /// singles were the TAIL BAND — the lateral converging monotonically
+    /// (775 -> 271 ft against the 250-ft gate, no oscillation) as the
+    /// fix's along-track room ran out one 2-s sample short. k controls
+    /// how much tail margin the far-field cut banks: 0.050 saved 10
+    /// first-attempt FAILs matrix-wide (25 -> 15; ten flights' first
+    /// attempt now establishes) at the cost of one AIRLIFT recovery
+    /// landing late in its rollout at the horizon. 0.020 measured 2/4
+    /// AIRLIFT landings, 0.035 3/4, 0.050 3/4 + one first-attempt save;
+    /// the landing suite is k-agnostic (32/32 at both points).
+    double intercept_decay_k{0.050};    // the 1,000-ft cut ~12.4 deg, the
+                                        // 12k cut ~50 deg (the monotonic
+                                        // exponential — no crossing overshoot)
     double intercept_lead_ratio{2.5};   // STAB-E51: steepen the scaled-lead
                                         // cut back to atan(1/2.5) = 21.8 deg
                                         // (was 1/5 = 11.3 deg, Tranche 31).

@@ -5,6 +5,20 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## INIT-2d — the go-around decay-k retune 0.035 -> 0.050: the matrix first-attempt FAILs 25 -> 15
+
+All 25 first-attempt FAILs were exactly one go-around each, spread
+map-wide. The [land-dbg] gate autopsy: the survivors are the TAIL
+BAND, not the far-field oscillation the INIT-2 law fixed — the
+lateral converging monotonically (775 -> 271 ft against the 250-ft
+establish gate, heading and beam gates green) as the fix's
+along-track room ran out one 2-s sample short. k banks the tail
+margin: the AIRLIFT recorded sweep measured 2/4, 3/4, 3/4 landings
+with a first-attempt save only at 0.050; the matrix A/B saved ten
+first attempts (25 -> 15) at the cost of one AIRLIFT rollout
+crossing the horizon (recovery 66 -> 65). Landing suite 32/32 at
+both points (k-agnostic); the nine suites green; verify.cmd GREEN.
+
 ## INIT-2c — the cruise small-error bank drive: the pipper gate fires at 27 ft; features 57 -> 63
 
 SAD's 563-846-ft stick residual decomposed with the [release] probe's
