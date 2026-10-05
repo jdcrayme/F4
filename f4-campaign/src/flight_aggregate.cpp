@@ -436,18 +436,28 @@ void FlightAggregateEngine::advance_flight_(
         while (remaining > 0.0 && f.wp_index < route.size() &&
                !f.arrived) {
             const auto& target = route[f.wp_index];
+            const double dx = static_cast<double>(target.x) - f.fx;
+            const double dy = static_cast<double>(target.y) - f.fy;
+            const double dist = std::sqrt(dx * dx + dy * dy);
             // CAMP-TOT-PACE: an appointment time (the seed stamps the
             // delivery waypoint's arrive = TOT) holds the walk SHORT
             // of the waypoint until its time — a flight with slack
             // used to transit the target whenever it got there (the
             // early side of the ±30-min delivery scatter). TIME mode's
             // own semantics, borrowed for one appointment.
-            if (target.arrive > 0 && now_abs < target.arrive) {
+            // CAMP-TOT-PACE 3 — the hold lives at the CAPTURE EDGE,
+            // not ahead of the leg: the old pre-step gate froze any
+            // row whose cursor waypoint was still appointed — a
+            // takeoff-deagg fold leaves a wave flight hundreds of
+            // grids short with the cursor on its delivery, and the
+            // freeze burned the whole pre-appointment ingress (the
+            // measured AIRWAR-QC +1,860-s median: late by exactly the
+            // lost leg). Walk freely; hold only when this update's
+            // step would CAPTURE the waypoint before its time.
+            if (target.arrive > 0 && now_abs < target.arrive &&
+                dist <= remaining) {
                 break;
             }
-            const double dx = static_cast<double>(target.x) - f.fx;
-            const double dy = static_cast<double>(target.y) - f.fy;
-            const double dist = std::sqrt(dx * dx + dy * dy);
             if (dist <= remaining) {
                 // Waypoint reached inside this update: snap, spend the
                 // distance, advance the cursor.
@@ -1078,15 +1088,19 @@ void FlightAggregateEngine::display_position(
     std::size_t wp = f.wp_index < route.size() ? f.wp_index : route.size();
     while (remaining > 0.0 && wp < route.size()) {
         const auto& target = route[wp];
-        // The appointment gate (advance_flight_'s own rule): the
-        // serving face holds short of an appointed waypoint too — one
-        // truth, no pause-then-jump at the hold point.
-        if (target.arrive > 0 && now_abs < target.arrive) {
-            break;
-        }
         const double dx = static_cast<double>(target.x) - px;
         const double dy = static_cast<double>(target.y) - py;
         const double dist = std::sqrt(dx * dx + dy * dy);
+        // The appointment gate (advance_flight_'s own rule): the
+        // serving face holds short of an appointed waypoint too — one
+        // truth, no pause-then-jump at the hold point. CAMP-TOT-PACE 3:
+        // the hold lives at the CAPTURE EDGE like the walk's (the old
+        // pre-step gate froze far-from-target rows out of their whole
+        // pre-appointment ingress).
+        if (target.arrive > 0 && now_abs < target.arrive &&
+            dist <= remaining) {
+            break;
+        }
         if (dist <= remaining) {
             // Waypoint reached inside the extrapolation: land on it,
             // spend the distance, target the next leg (a degenerate

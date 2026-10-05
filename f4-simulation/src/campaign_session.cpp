@@ -2582,6 +2582,20 @@ CampaignSession::apply_objective_priority(std::uint32_t objective_vu,
 
 void CampaignSession::handle_mission_intent_(
     const f4::campaign::MissionIntent& intent) {
+    // CAMP-TOT-PACE 2 — the receive probe: the route AT handler entry.
+    // The [pub] print (the ladder) showed real launch grids; the [seed]
+    // print showed zeros — this line splits the bus from the handler.
+    if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+        std::fprintf(stderr,
+                     "[recv] flight %u wps %zu r0 %.0f,%.0f\n",
+                     intent.flight_id, intent.route.size(),
+                     intent.route.empty()
+                         ? -1.0
+                         : intent.route.front().x,
+                     intent.route.empty()
+                         ? -1.0
+                         : intent.route.front().y);
+    }
     // CAMP-HOST-2: EVERY intent the ladder publishes files its event
     // FIRST (before the FID-5 gates — a full-fidelity session files
     // missions too; it just never aggregates them). The publish is a
@@ -2645,6 +2659,7 @@ void CampaignSession::handle_mission_intent_(
     // flight's SCHEDULED slot instead (unchanged). Flights without a
     // delivery leg (CAP racetracks and friends) keep the TOT-anchored
     // gate.
+    std::int64_t stored_tot_shift = 0;
     if (!seed.route.empty()) {
         const std::int64_t earliest = campaign_time() + 1;
         std::int64_t depart;
@@ -2785,12 +2800,81 @@ void CampaignSession::handle_mission_intent_(
                 static_cast<std::int32_t>(
                     std::clamp<std::int64_t>(tot, 0, 2147483647));
         }
+        // CAMP-TOT-PACE 2 — the STORED intent carries the rewrite too.
+        // The tier machinery materializes the live flight from
+        // synthetic_intents_, and the live plan's appointment IS the
+        // intent's: leaving the original here armed the airborne hold
+        // with the ATM's cycle midpoint while the row, the books, and
+        // the appointment gate all kept the staggered/pushed time (the
+        // [hold]-probed flight: tot 12,600 vs the row's 3,240 — a
+        // 9,360-s stale wait, the +1,860-s median delivery's owner).
+        // The delta rides both times the intent carries.
+        stored_tot_shift = tot - tot_abs;
     }
     if (flights_->register_synthetic(seed) ==
         static_cast<std::size_t>(-1)) {
         return;   // unusable seed — the loud refusal, nothing registered
     }
-    synthetic_intents_.emplace(vu, intent);
+    // CAMP-TOT-PACE 2 — the base-mismatch probe: the route's launch
+    // field, the WS record's airbase (what the ATM's snapshot read),
+    // and the SIM's SquadronComponent airbase (what the spawn uses).
+    // GATED ON A NON-EMPTY ROUTE: a flight whose package route failed
+    // to build registers route-less (a parked aggregate) — front()/
+    // back() on the empty vector is UB garbage dressed as telemetry.
+    if (std::getenv("F4_LAND_DEBUG") != nullptr && !seed.route.empty()) {
+        std::uint32_t ws_airbase = 0;
+        for (const auto& u : ws_.units) {
+            if (u.id_num == intent.squadron_id) {
+                ws_airbase = u.airbase_id;
+                break;
+            }
+        }
+        std::uint32_t sim_airbase = 0;
+        const auto sit = unit_id_map_.find(intent.squadron_id);
+        if (sit != unit_id_map_.end() && sit->second.valid()) {
+            f4::entities::EntityHandle h(sit->second, &sim_->world());
+            const auto* sq = h.get<f4::entities::SquadronComponent>();
+            if (sq != nullptr && sq->airbase.value != 0) {
+                // The airbase ENTITY's VU (its vu_id_num bag — the
+                // objective id the spawn's parking will serve).
+                const auto* pb = f4::entities::EntityHandle(
+                                     sq->airbase, &sim_->world())
+                                     .get<f4::entities::PropertyBag>();
+                if (pb != nullptr) {
+                    const auto i = pb->ints.find("vu_id_num");
+                    if (i != pb->ints.end()) sim_airbase =
+                                                 static_cast<std::uint32_t>(
+                                                     i->second);
+                }
+            }
+        }
+        std::fprintf(stderr,
+                     "[seed] vu %u sq %u wps %zu route0 %.0f,%.0f"
+                     " rEnd %.0f,%.0f ws_airbase %u sim_airbase %u\n",
+                     vu, intent.squadron_id, seed.route.size(),
+                     static_cast<double>(seed.route.front().x),
+                     static_cast<double>(seed.route.front().y),
+                     static_cast<double>(seed.route.back().x),
+                     static_cast<double>(seed.route.back().y),
+                     ws_airbase, sim_airbase);
+    }
+    {
+        f4::campaign::MissionIntent stored = intent;
+        if (stored_tot_shift != 0) {
+            const auto shift = [](std::int64_t v, std::int64_t d) {
+                return static_cast<std::int32_t>(
+                    std::clamp<std::int64_t>(
+                        static_cast<std::int64_t>(v) + d, 0, 2147483647));
+            };
+            stored.time_on_target =
+                shift(intent.time_on_target, stored_tot_shift);
+            if (stored.mission_over > 0) {
+                stored.mission_over =
+                    shift(intent.mission_over, stored_tot_shift);
+            }
+        }
+        synthetic_intents_.emplace(vu, stored);
+    }
     ++synthetic_registered_;
     // The one-frame numbers go live immediately (the handler fires
     // outside the advance() cadence — a host reading stats between

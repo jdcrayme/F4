@@ -703,6 +703,49 @@ with an owner.
   verdict fed back), the delivery-first hold gap (SAD/1682's -58
   min: no preceding waypoint to hold at), the timing residuals, and
   the unit-damage ledger + the hp review.
+- **MC-5a — the launch-slot regression closed; the stateful re-attack;
+  the delivery-first estimate origin; the unit-damage ledger (2026-10-04).**
+  Four landings on the MC-4c/MC-5 residuals, one regression found and
+  closed (full detail in the CHANGELOG):
+  1. **The park regression (MC-5's own).** The backward pass ran above
+     the `ag_delivery_mission` assignment (the field defaults TRUE),
+     and INIT-1c's appointment gate reads the broad
+     `delivery_action_for` local — so every appointed CAP/escort/
+     recon/support plan launched-slot'd from its RAW campaign-clock
+     TOT (+48..80 days) and parked at parking for it: 7 of 22 matrix
+     rows exit 3, 0 airborne in 2 h. The assignment hoisted above both
+     consumers; every family flies; tot FAILs 10 → 7 and PATH 4 → 1
+     against the pre-MC-5 baseline (the MC-5 gains stand).
+  2. **INIT-2h, the STATEFUL re-attack** — the scoped "extend only
+     after a REFUSED pass": the refused-pass latch arms on past-aim
+     with the stick armed and unfallen (hold_delivery_capture_), the
+     extension is a straight run along the attack ray's own course
+     (15,000 ft), and the leg RE-ANCHORS at the extended position —
+     the re-attack is a fresh attack run for the leg law, because the
+     pursuit-of-the-aim return measured a refused-re-attack LIMIT
+     CYCLE (the [attack]-probed CS079-2: 5k-35k ft oscillation,
+     ~90-s period, every pass refused on alignment). Never-refused
+     passes never arm it; the strike-family matrix is release-identical.
+  3. **The delivery-first backward-pass origin**: the enroute
+     estimate's origin for a delivery-first route (d_idx == 0) is the
+     route's own terminal LAND waypoint (the home base) — the old
+     route[0] origin read zero transit and launched the flight with
+     its whole ingress ahead.
+  4. **The unit-damage ledger** armed on the plain campaign_qc path
+     (was the session's unit-strike opt-in) — bombs on battalion
+     targets book their vehicle losses wherever bombs fly.
+  Plus the artifact fix the session found en route: campaign_result.json
+  was malformed JSON in every run (doubled Members separators,
+  function-scoped Array closes); strictly valid now.
+  REMAINING (scoped, with the probe data): the CS079-2 never-delivery
+  is the delivery-first ENGAGEMENT shape, not the pursuit — on a
+  delivery-first route the attack run anchors AT SPAWN (route[0] IS
+  the delivery; the probed anchor sat 170,342 ft from the aim, the
+  whole ingress flying as one virtual leg, the wingman trailing its
+  lead's delivery pass and cycling refused passes short of the aim).
+  Owner: a delivery-first engagement-range tranche (engage the attack
+  run on arming range; hold the wingman's pass until its own envelope)
+  plus the ±300-s timing residuals (the INTSTRIKE +5-min pair).
 - **MC-5 — the ATO launch-timing model: the package TOTs, the
   backward pass, the takeoff slots; the reference's own semantics
   (2026-10-04).** The FreeFalcon reference read (CAMPTASK/mission.cpp

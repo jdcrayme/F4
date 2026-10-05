@@ -859,6 +859,46 @@ follow-up refinement, documented here.
   scatter needs its own tranche, not another constant. The harness's
   median-±10-min assertion is the open bar (the test is env-gated;
   CI is unaffected).
+  RE-MEASURED AND DECOMPOSED AT HEAD (2026-10-04, the CAMP-TOT-PACE 2
+  session — the stock korea.world.json war, Tiered, 6 h,
+  qc/airwar_final.log): launches on design (median −590 s vs gate),
+  liftoffs ON the gate (median −27 s — the runway queue is NOT the
+  delay), **deliveries median +1,800 s late, 43/179 within ±15 min**
+  (was 2/155 at session start). Three mechanisms found, two fixed:
+  1. **The appointment hold froze whole legs** — advance_flight_'s /
+     display_position's arrive gate stopped the walk wherever the
+     cursor waypoint was appointed, however far away: a takeoff-deagg
+     fold leaves a wave flight hundreds of grids short with the
+     cursor on its delivery, and the freeze burned the whole
+     pre-appointment ingress (late by exactly the lost leg). The hold
+     now lives at the CAPTURE EDGE (walk freely; hold only when this
+     update's step would capture the appointed waypoint early) — the
+     wave cohort delivers on the beat (−147..−581 s).
+  2. **The stored intent kept the ATM's original appointment** while
+     the stagger/floor rewrote the seed's TOT — the deagged plan's
+     airborne hold armed with the ATM's cycle midpoint against the
+     row's pushed time (the [hold]-probed 12,600 vs 3,240). The
+     stored intent now carries the rewrite (the delta rides
+     time_on_target + mission_over).
+  3. **The late cohort's remaining mechanism (OPEN, instrumented)**:
+     the package-base mismatch. The [base] probe (all fields
+     type-reliable) measured 63 of 358 stock-war flights whose origin
+     home base ≠ the route's launch field — all in LATER cycles (the
+     first 45 minutes are fully consistent: route launch field = the
+     WS record's airbase = the sim component's airbase, verified
+     end-to-end by the [seed] probe). Fixed this tranche: the
+     PACKAGE-BASE gate — the escort pick requires the lead's airbase
+     (the reference's one-base package rule); the wave cohort delivers
+     on the beat (−147..−581 s); within ±15 min 23 → 43/179.
+     RETRACTED EN ROUTE: the first mismatch telemetry mixed raw int16
+     values through `%.0f` varargs (undefined behavior — the
+     all-zero/int-garbage routes the probes printed were the printf,
+     not the data); the probe chain now casts everything. The
+     remaining hunt: run the 6-h war with F4_AIRWAR_LIFECYCLE +
+     F4_LAND_DEBUG, pick a [base]-mismatched flight from the later
+     cycles, and read its [seed] line (ws_airbase vs sim_airbase vs
+     route0) — the reproduction is one 20-minute run, and the
+     mechanism will be whichever of the three numbers moves.
 
 - **Per-action altitude shaping** (C3): lands with its consumer (the
   fuel tranche) — documented in route_builder.hpp. (Package-shared

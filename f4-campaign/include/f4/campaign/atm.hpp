@@ -784,7 +784,8 @@ private:
                                               const MissionProfile& profile,
                                               std::uint8_t team,
                                               CampaignTime now,
-                                              const SquadronState* lead);
+                                              const SquadronState* lead,
+                                              bool require_lead_base = false);
 
     /// DOM-4 — the mutable schedule lookup (the gate's slide + denial
     /// books; the const accessor above stays the read path).

@@ -1172,7 +1172,11 @@ bool AirTaskingManager::build_support_flight_(
     sreq.tot_type = TotType::LE;
     sreq.tot = main.tot + sprof.separation;
 
-    SquadronPick pick = find_best_air_(sreq, sprof, team, now, main_sq);
+    // The PACKAGE-BASE gate: the escort flies the lead's shared route
+    // from the lead's field (the reference's one-base package rule —
+    // the mixed-base escort measured a TOT+30-min cross-country lie).
+    SquadronPick pick = find_best_air_(sreq, sprof, team, now, main_sq,
+                                       /*require_lead_base=*/true);
     if (pick.squadron == nullptr) {
         // The reference cancels the ESCORT FLIGHT, not the package —
         // the main flight still generates (counted, never silent).
@@ -1229,7 +1233,8 @@ AirTaskingManager::SquadronPick
 AirTaskingManager::find_best_air_(const MissionRequest& req,
                                   const MissionProfile& profile,
                                   std::uint8_t team, CampaignTime now,
-                                  const SquadronState* lead) {
+                                  const SquadronState* lead,
+                                  bool require_lead_base) {
     SquadronPick out;
     out.squadron = nullptr;
     out.travel_sec = 0;
@@ -1262,6 +1267,23 @@ AirTaskingManager::find_best_air_(const MissionRequest& req,
 
     for (auto& sq : squadrons_) {
         if (sq.owner != team) continue;
+
+        // CAMP-TOT-PACE 2 — the package-base gate. A PACKAGE member
+        // flies the lead's shared route, launches on the lead's TOT
+        // arithmetic, and joins the lead's formation — a member from a
+        // different airbase lives a cross-country lie: the measured
+        // stock-war escort (the [base] probe) drew a route from its
+        // lead's field 123 grids from its own, burned every sortie
+        // transiting between them, and delivered TOT+30 min. The
+        // reference's packages form at ONE airbase; the +2 same-base
+        // bonus below is the scoring nudge, this is the constraint —
+        // and a base with no capable wing cancels the escort flight,
+        // not the package (the reference's own rule, already coded at
+        // the caller).
+        if (require_lead_base && lead != nullptr &&
+            lead->airbase != sq.airbase) {
+            continue;
+        }
 
         // Base score: the rating term (UCD scores when present, else
         // the specialty fallback — rating_()).

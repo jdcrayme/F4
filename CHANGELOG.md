@@ -5,6 +5,123 @@ replaces live in `Docs/history/changes-archive.md`; the raw session log in
 `Docs/history/worklog.md`. Current design docs live in `Docs/` (see
 `Docs/README.md` for the index).
 
+## CAMP-TOT-PACE 2 — the AIRWAR-QC delivery scatter decomposed; the capture-edge hold
+
+The stock-war QC (test_campaign_airwar_qc, F4_STOCK_WORLD-gated) got an
+honest delivery measurement and its scatter got owners:
+
+- **The harness measures the LIVE delivery** — the deagged lead inside
+  the 8-grid delivery window, sampled per tick. The row-side cursor
+  pass it replaced inherited the fold-back's ops pin + reagg cooldown
+  (up to +1,100 s of bookkeeping lag per delivery). The
+  F4_AIRWAR_LIFECYCLE probe decomposes any flight's lifecycle (row
+  position/cursor/suspension + the live leads, per sample);
+  F4_AIRWAR_TRACE_VU names specific flights; the report gained the
+  liftoff-vs-gate median (−27 s: the runway queue is NOT the delay).
+- **The appointment hold froze whole legs (fixed)** — the walk's
+  arrive gate stopped the row wherever its cursor waypoint was
+  appointed, however far: a takeoff-deagg fold leaves a wave flight
+  hundreds of grids short with the cursor on its delivery, and the
+  freeze burned the whole pre-appointment ingress (late by exactly
+  the lost leg). The hold now lives at the CAPTURE EDGE — walk
+  freely, hold only when the next step would capture the appointed
+  waypoint early. The initial-wave cohort now delivers on the beat
+  (−147..−581 s across routes 63..408 grids).
+- **The stale-appointment fix** — the session stored the ORIGINAL
+  intent for the deagg path while the wave stagger / the feasibility
+  floor rewrote the seed's TOT: the deagged plan's airborne hold armed
+  with the ATM's cycle midpoint against the row's pushed appointment
+  (the [hold]-probed flight: plan tot 12,600 vs the row's 3,240 — a
+  9,360-s stale wait). The stored intent now carries the rewrite (the
+  delta rides time_on_target + mission_over); the books, the row, and
+  the live plan keep ONE appointment.
+- **The late cohort's remaining mechanism (open, instrumented)**: a
+  live attack sortie launched at TOT−450 ABORTS — the probed flight
+  turns away from its target ~160 grids out, folds back, and the row
+  walks through the delivery for the measured moment (~TOT+1,900).
+  Later-cycle flights hit this; the wave cohort is clean. Named
+  suspects: the push-wait hold's release arithmetic on a
+  short-notice appointment (its half-lap alone is ~1,400 s) and the
+  approach handoff's inbound gate. 6-h state: liftoffs −27 s,
+  deliveries +1,800 s median, 43/179 within ±15 (was 2/155); the
+  decomposition lives in CAMPAIGN_LOOP_PLAN §7's AIRWAR-QC note.
+- **The PACKAGE-BASE gate** — the [base] probe measured 63 of 358
+  stock-war flights whose origin home base ≠ the route's launch field
+  (all later-cycle; the first 45 minutes verify consistent
+  end-to-end). The escort pick now REQUIRES the lead's airbase — the
+  reference's one-base package rule (the +2 same-base bonus stays as
+  the scoring nudge; the gate is the constraint; a base with no
+  capable wing cancels the escort flight, not the package — the
+  reference's own rule, already coded at the caller). RETRACTED: the
+  first mismatch telemetry mixed raw int16 values through `%.0f`
+  varargs (UB — the all-zero/garbled routes were the printf, not the
+  data); the probe chain now casts everything, and the remaining hunt
+  (a later-cycle [base]-mismatched flight's [seed] line) is one
+  20-minute run.
+
+## MC-5a — the launch-slot regression closed; the re-attack goes stateful; the ledger artifact valid JSON
+
+- **The park regression (MC-5's own, the matrix 7 of 22 rows exit 3):**
+  MC-5 inserted the backward pass ABOVE the `plan.ag_delivery_mission`
+  assignment, and the field defaults TRUE — so every plan with an
+  appointed TOT backward-passed a launch slot. INIT-1c's appointment
+  gate reads the broad `delivery_action_for` local (its default branch
+  hands a strike action to EVERY non-SEAD/CAS category), so CAP,
+  escort, recon, and support plans carried their raw campaign-clock
+  appointments (+48..80 days on TestCamp) — and parked at parking for
+  them (the measured BARCAP: Taxi, brakes, 4,206,828-s runway wait, 0
+  of 4 airborne in 2 h). Fix: the delivery-doctrine assignment hoisted
+  above the INIT-1c appointment and the backward pass (both gate on
+  it). Every family launches again; the launch-timing gains stand (vs
+  the pre-MC-5 matrix: tot FAILs 10 → 7, PATH FAILs 4 → 1, gates 22/22
+  PASS; the INTSTRIKE +5-min pair and the CS079-2 never-delivery are
+  the documented residuals).
+- **INIT-2h — the stateful re-attack (MC-4c's named next):** the
+  refused-pass latch (past-aim with the stick armed and unfallen — the
+  brain's hold_delivery_capture_ state) arms a straight-out extension
+  along the attack ray (15,000 ft — the bank-limited reversal room at
+  the delivery speed), then the virtual leg RE-ANCHORS at the extended
+  position: the re-attack is a fresh attack run for the leg law to
+  converge, not a pursuit of the aim from the extension's wide offset
+  (the measured shape without the re-anchor: a refused-re-attack limit
+  cycle, 5k-35k ft oscillation, ~90-s period, 40 min, stick unfallen).
+  A pass that was never refused never arms it — the strike-family
+  matrix is release-identical (16/16 per family), the always-extend
+  variant's TOT/recovery cost is gone by construction. The [gate]
+  probe stays.
+- **The delivery-first backward-pass origin:** a delivery-first saved
+  route (strike → egress; the planner wrote it backwards) degenerated
+  the enroute estimate — route[0] IS the delivery, the straight line
+  reads zero, and the launch slot became tot − 180 s, launching the
+  flight with its whole transit ahead (arrivals transit-minutes late).
+  The estimate's origin for that shape is the route's own terminal
+  LAND waypoint (the home base).
+- **The unit-damage ledger armed on the plain QC path:** bomb-vs-
+  battalion booking (`GroundUnitLossMessage` → the ledger's ground
+  books) was the session's unit-strike opt-in only; the coverage
+  matrix's sticks on battalion targets registered nothing. The booking
+  is the war loop's own attrite leg — armed wherever bombs fly.
+- **The ledger artifact is JSON again:** campaign_result.json was
+  malformed in EVERY run (strict-validity is its own contract): the
+  Members-managed separators emitted twice (a hand `,\n` after every
+  `m.key` plus the helper's own before the next), the function-scoped
+  Array closes landing at END of document (every array after `teams`
+  corrupt), the squadron rows' `aircraft_tasking` bypassing the run's
+  separator, and the `{"t_ms": ...}` rows opened past the
+  `element_opened` discipline. Fixed block-scoped + helper-routed;
+  parsed clean, ledger suite green.
+- **AIRWAR-QC re-measured at HEAD (the stock korea.world.json war,
+  Tiered, 6 h):** launches on design (median −590 s vs gate — the
+  ops-window beat), deliveries median +1,860 s late, 1/155 within
+  ±15 min — the open bar still fails, and worse than the September
+  record (+21 min, ~20%): the delivery scatter lives in the TIER
+  machinery's aggregate walk (this session's changes don't touch it —
+  no saved flights in the stock world), making the tiered-aggregate
+  pacing the named owner of the TOT-pacing design tranche.
+
+verify.cmd GREEN; the fast tier, the scenario trio, the stock-landing
+harness, and the armed war all pass (the known-red set unchanged).
+
 ## MC-5 — the ATO launch-timing model: the takeoff slots, the package TOTs; tot median miss -0.6 min
 
 The FreeFalcon reference's own semantics, read from SetWPTimes and

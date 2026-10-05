@@ -2476,6 +2476,15 @@ int run_qc(int argc, char** argv) {
     // CampaignOriginComponent and the objectives' own VU residue.
     CampaignResultSink result_sink(result_ledger, sim.world());
     result_sink.attach(sim.bus());
+    // MC-4c residual — the unit-damage ledger. A strike aimed at a
+    // BATTALION target (the SAD/STRATBOMB shape: unit entities with no
+    // FeatureSet) lands its bombs on the unit; the blast endpoint
+    // publishes GroundUnitLossMessage and the ledger books the vehicle
+    // loss (air-sourced, provenance-carried) — but the booking was the
+    // session's unit-strike opt-in, so the plain QC path's sticks on
+    // battalions registered nothing ("empty, elements: 0"). The booking
+    // is the war loop's own attrite leg: arm it wherever bombs fly.
+    result_sink.set_book_unit_losses(true);
 
     // A-G slice: the ordnance ledger — subscribe to the release + impact
     // events on the SIM's bus before the run, then read the objective

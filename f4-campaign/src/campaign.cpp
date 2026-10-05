@@ -638,6 +638,24 @@ void Campaign::run_tasking_cycle_atm_() {
                  loiter_station || sweep_line || objective_cas)) {
                 const auto rb = route_planner_->build(
                     team, profile, ft.airbase_vu, ft.target_vu);
+                // CAMP-TOT-PACE 2 — the route-build probe: the launch
+                // base the builder resolved (the all-zero route shape —
+                // takeoff/strike/nothing/nothing/land at the theater
+                // origin — traced here).
+                if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+                    std::fprintf(stderr,
+                                 "[rbuild] flight %u sq %u airbase_vu"
+                                 " %u target_vu %u wps %zu r0 %.0f,%.0f\n",
+                                 ft.flight_id, ft.squadron_vu,
+                                 ft.airbase_vu, ft.target_vu,
+                                 rb.waypoints.size(),
+                                 rb.waypoints.empty()
+                                     ? -1.0
+                                     : rb.waypoints.front().x,
+                                 rb.waypoints.empty()
+                                     ? -1.0
+                                     : rb.waypoints.front().y);
+                }
                 if (rb.waypoints.size() >= 2) {
                     package_routes[ft.package_id] = rb.waypoints;
                     ++routes_built_;
@@ -695,6 +713,22 @@ void Campaign::run_tasking_cycle_atm_() {
             intent.escorted_flight_id = ft.escorted_flight_id;
             intent.roe = ft.roe;   // P7 — the flight's RoE byte
             intent.crew = ft.crew; // DOM-3 — the flight's crew (slots)
+            // CAMP-TOT-PACE 2 — the publish probe: the route the ladder
+            // hands the bus, paired with the session's [seed] print (the
+            // escort's all-zero route traced here).
+            if (std::getenv("F4_LAND_DEBUG") != nullptr) {
+                std::fprintf(stderr,
+                             "[pub] flight %u sq %u role %d wps %zu"
+                             " r0 %.0f,%.0f\n",
+                             intent.flight_id, intent.squadron_id,
+                             static_cast<int>(ft.role), intent.route.size(),
+                             intent.route.empty()
+                                 ? -1.0
+                                 : intent.route.front().x,
+                             intent.route.empty()
+                                 ? -1.0
+                                 : intent.route.front().y);
+            }
             // DOM-4 — the scheduled slot (post-snap). A base-less flight
             // never slotted: its takeoff stays a raw estimate, and the
             // intent carries 0 (the session keeps the TOT-anchored gate

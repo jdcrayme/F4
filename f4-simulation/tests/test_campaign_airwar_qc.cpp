@@ -29,6 +29,7 @@
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using namespace f4::simulation;
@@ -92,8 +93,16 @@ TEST(CampaignStockAirWar, LaunchesDeliveriesAndRecoveries) {
         double target_x = 0.0, target_y = 0.0;
         int delivery_index = -1;
         std::uint8_t mission = 0;
+        bool ever_suspended = false;     // the tier machinery took it live
+        double booked_cruise = 0.0;      // the fold's booked walk speed
+        double route_grids = 0.0;        // base → delivery leg sum
+        double route0_x = 0.0, route0_y = 0.0;
+        double route_end_x = 0.0, route_end_y = 0.0;
+        bool base_printed = false;
     };
     std::unordered_map<std::uint32_t, Track> tracks;
+    std::unordered_set<std::uint32_t> lifecycle_traces_;
+    std::unordered_set<std::uint32_t> lifecycle_dumped_;
 
     constexpr double kAtTargetGrid = 8.0;
     const int kHorizonMin = [] {
@@ -138,11 +147,79 @@ TEST(CampaignStockAirWar, LaunchesDeliveriesAndRecoveries) {
                         break;
                     }
                 }
+                // The gate's own ingress estimate: the base → delivery
+                // leg sum (what travel_s paced at the engine cruise).
+                for (int k = 1; k <= tr.delivery_index; ++k) {
+                    const double dx =
+                        static_cast<double>(route[k].x) - route[k - 1].x;
+                    const double dy =
+                        static_cast<double>(route[k].y) - route[k - 1].y;
+                    tr.route_grids += std::sqrt(dx * dx + dy * dy);
+                }
+                tr.route0_x = route.front().x;
+                tr.route0_y = route.front().y;
+                tr.route_end_x = route.back().x;
+                tr.route_end_y = route.back().y;
                 it = tracks.emplace(f.vu, tr).first;
             }
             Track& tr = it->second;
 
+            if (f.suspended) tr.ever_suspended = true;
+            if (tr.booked_cruise <= 0.0) {
+                tr.booked_cruise = session->flight_engine()
+                                       ->effective_cruise_grid_per_min(i);
+            }
             if (tr.launch_s < 0 && f.suspended) tr.launch_s = now;
+            // The lifecycle probe (F4_AIRWAR_LIFECYCLE): the first 3
+            // delivery tracks, one line per sample — the row's position,
+            // distance to its target, cursor, and suspension. The
+            // CAMP-TOT-PACE 2 diagnosis surface (the +1,860-s median
+            // decomposed here: the takeoff-window deagg suspends the row
+            // from t≈0, the live aircraft owns the truth, and the
+            // row-side numbers go stale for hours).
+            {
+                static const bool life_on =
+                    std::getenv("F4_AIRWAR_LIFECYCLE") != nullptr;
+                static const char* life_vus =
+                    std::getenv("F4_AIRWAR_TRACE_VU");
+                static bool vus_parsed = false;
+                static int traced = 0;
+                bool wanted = false;
+                if (life_vus != nullptr && *life_vus != '\0') {
+                    // Explicit trace list (comma vus) — a late-cohort
+                    // flight's lifecycle, not the first-registered three.
+                    if (!vus_parsed) {
+                        vus_parsed = true;
+                        const char* p = life_vus;
+                        while (*p != '\0') {
+                            lifecycle_traces_.insert(
+                                static_cast<std::uint32_t>(
+                                    std::strtoul(p, nullptr, 10)));
+                            while (*p != ',' && *p != '\0') ++p;
+                            if (*p == ',') ++p;
+                        }
+                    }
+                    wanted = lifecycle_traces_.count(f.vu) != 0;
+                } else if (life_on) {
+                    wanted = tr.delivery_index >= 0 &&
+                             (traced < 3 ||
+                              lifecycle_traces_.count(f.vu) != 0);
+                    if (wanted && lifecycle_traces_.count(f.vu) == 0) {
+                        lifecycle_traces_.insert(f.vu);
+                        ++traced;
+                    }
+                }
+                if (wanted && tr.delivery_index >= 0) {
+                    const double dx = f.fx - tr.target_x;
+                    const double dy = f.fy - tr.target_y;
+                    std::fprintf(
+                        stderr,
+                        "[life %u] t %lld row %.1f,%.1f d%.1f wp %zu"
+                        " susp %d\n",
+                        f.vu, now, f.fx, f.fy, std::sqrt(dx * dx + dy * dy),
+                        f.wp_index, f.suspended ? 1 : 0);
+                }
+            }
             if (tr.destroyed_s < 0 && f.destroyed) tr.destroyed_s = now;
             if (tr.aborted_s < 0 && f.scrubbed) tr.aborted_s = now;
             if (tr.recovered_s < 0 && f.arrived && !f.suspended) {
@@ -196,6 +273,73 @@ TEST(CampaignStockAirWar, LaunchesDeliveriesAndRecoveries) {
                 it->second.airborne_s < 0) {
                 it->second.airborne_s = now;
             }
+            // The base-mismatch probe: the route's launch grid vs the
+            // origin stamp's home-airbase objective grid. The loader's
+            // positional fallback + the synthesis feed the SIM's parking
+            // (and the whole materialization); the ATM's snapshot feeds
+            // the ROUTE — when the two disagree, the sortie lives a
+            // cross-country lie (the CAMP-TOT-PACE 2 late cohort).
+            if (!it->second.base_printed && org->home_airbase_vu != 0) {
+                it->second.base_printed = true;
+                double bx = 0.0, by = 0.0;
+                const auto bit =
+                    session->objective_id_map().find(org->home_airbase_vu);
+                if (bit != session->objective_id_map().end() &&
+                    bit->second.valid()) {
+                    const auto* tf =
+                        f4::entities::EntityHandle(bit->second,
+                                                   &session->sim().world())
+                            .get<f4::entities::TransformComponent>();
+                    if (tf != nullptr) {
+                        bx = tf->position.x / 1024.0;
+                        by = tf->position.y / 1024.0;
+                    }
+                }
+                std::fprintf(stderr,
+                             "[base %u] route0 %.0f,%.0f rEnd %.0f,%.0f"
+                             " home_vu %u base %.1f,%.1f\n",
+                             composite,
+                             it->second.route0_x, it->second.route0_y,
+                             it->second.route_end_x, it->second.route_end_y,
+                             org->home_airbase_vu, bx, by);
+            }
+            // CAMP-AIRWAR-QC 2 — the LIVE delivery. A tiered war's
+            // delivery flies DEAGGREGATED (the TOT window arms one ops
+            // window early; the airborne push-wait holds the
+            // appointment), and the row's cursor advances past the
+            // delivery waypoint only when the flight FOLDS BACK — the
+            // ops pin + the reagg cooldown ride every row-side
+            // measurement (the measured +1,860-s median: the pin, not
+            // the delivery). The lead's own position at the delivery
+            // waypoint IS the delivery moment; sample it per tick.
+            const auto* tf = h.get<f4::entities::TransformComponent>();
+            if (tf != nullptr) {
+                const double dxg =
+                    tf->position.x / 1024.0 - it->second.target_x;
+                const double dyg =
+                    tf->position.y / 1024.0 - it->second.target_y;
+                static const bool life_on =
+                    std::getenv("F4_AIRWAR_LIFECYCLE") != nullptr;
+                if (life_on && lifecycle_traces_.count(composite) != 0) {
+                    std::fprintf(stderr,
+                                 "[life %u] t %lld LIVE eid %llu"
+                                 " %.1f,%.1f d%.1f inair %d\n",
+                                 composite, now,
+                                 static_cast<unsigned long long>(eid.value),
+                                 tf->position.x / 1024.0,
+                                 tf->position.y / 1024.0,
+                                 std::sqrt(dxg * dxg + dyg * dyg),
+                                 (fm != nullptr && fm->state().gear.inAir)
+                                     ? 1
+                                     : 0);
+                }
+                if (it->second.at_target_s < 0 &&
+                    it->second.delivery_index >= 0 &&
+                    dxg * dxg + dyg * dyg <=
+                        kAtTargetGrid * kAtTargetGrid) {
+                    it->second.at_target_s = now;
+                }
+            }
         }
     }
 
@@ -204,6 +348,7 @@ TEST(CampaignStockAirWar, LaunchesDeliveriesAndRecoveries) {
         destroyed = 0, aborted = 0, with_target = 0, delivered = 0,
         no_show = 0, pending = 0;
     std::vector<double> launch_lateness;    // launch − gate (s)
+    std::vector<double> liftoff_lateness;   // airborne − gate (s)
     std::vector<double> tot_error;          // at_target − TOT (s signed)
     for (const auto& [vu, tr] : tracks) {
         (void)vu;
@@ -215,7 +360,13 @@ TEST(CampaignStockAirWar, LaunchesDeliveriesAndRecoveries) {
                     static_cast<double>(tr.launch_s - tr.gate_abs));
             }
         }
-        if (tr.airborne_s >= 0) ++airborne;
+        if (tr.airborne_s >= 0) {
+            ++airborne;
+            if (tr.gate_abs > 0) {
+                liftoff_lateness.push_back(
+                    static_cast<double>(tr.airborne_s - tr.gate_abs));
+            }
+        }
         if (tr.recovered_s >= 0) ++recovered;
         if (tr.destroyed_s >= 0) ++destroyed;
         if (tr.aborted_s >= 0) ++aborted;
@@ -237,10 +388,14 @@ TEST(CampaignStockAirWar, LaunchesDeliveriesAndRecoveries) {
             if (tr.at_target_s < 0 || dumped >= 24) continue;
             std::fprintf(stderr,
                          "[flight %u] mission %u launch %lld gate %lld "
-                         "TOT %lld at_target %lld (err %lld) didx %d\n",
+                         "airborne %lld TOT %lld at_target %lld (err %lld)"
+                         " didx %d susp %d cruise %.1f route %.0f\n",
                          vu, tr.mission, tr.launch_s, tr.gate_abs,
+                         tr.airborne_s,
                          tr.tot_abs, tr.at_target_s,
-                         tr.at_target_s - tr.tot_abs, tr.delivery_index);
+                         tr.at_target_s - tr.tot_abs, tr.delivery_index,
+                         tr.ever_suspended ? 1 : 0, tr.booked_cruise,
+                         tr.route_grids);
             ++dumped;
         }
     }
@@ -264,11 +419,13 @@ TEST(CampaignStockAirWar, LaunchesDeliveriesAndRecoveries) {
                  "  delivery missions %d | delivered %d | no-show %d | "
                  "pending %d\n"
                  "  launch vs gate: median %+.0f s (%zu samples)\n"
+                 "  liftoff vs gate: median %+.0f s (%zu samples)\n"
                  "  delivery vs TOT: median %+.0f s | within +-5 min %d/%zu"
                  " | +-15 min %d/%zu\n\n",
                  kHorizonMin, registered, launched, airborne, recovered,
                  destroyed, aborted, with_target, delivered, no_show,
                  pending, median(launch_lateness), launch_lateness.size(),
+                 median(liftoff_lateness), liftoff_lateness.size(),
                  median(tot_error), within(tot_error, 300),
                  tot_error.size(), within(tot_error, 900),
                  tot_error.size());

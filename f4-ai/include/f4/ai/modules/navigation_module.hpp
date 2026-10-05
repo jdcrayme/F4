@@ -330,6 +330,13 @@ public:
     /// the delivery leg falls back to pure pursuit — exact in the last
     /// seconds, where the entry offset has already converged.
     double attack_min_virtual_leg_ft{2000.0};
+    /// INIT-2h: the stateful re-attack's outbound run past the aim before
+    /// the reversal (ft). One-plus the bank-limited turn radius at the
+    /// delivery speed (R ~13,000 ft at 262 kts / 25 deg): enough room for
+    /// the ~180-deg re-join to roll out INBOUND on the virtual leg. The
+    /// MC-4c bounded-extension measurement re-joined at pipper 49-335 ft
+    /// with 10k and 20k alike; this is the mid-band.
+    double attack_reattack_ext_ft{15000.0};
 
     // Shared air control laws (heading/altitude/speed cascades). Public so
     // hosts can tune gains like the fields above.
@@ -349,6 +356,11 @@ public:
 
 private:
     [[nodiscard]] fsm::StateMachine<NavigationState, NavigationEvent> build_sm();
+
+    /// INIT-2h: the armed attack run's along-track position on the
+    /// virtual leg (ft from the anchor; > leg length = past the aim).
+    /// 0 when no attack run is engaged or the leg is degenerate.
+    [[nodiscard]] double attack_along_ft() const noexcept;
 
     void cache_aircraft_state(const flight::IAircraftState* state);
     void check_waypoint_capture();
@@ -381,6 +393,21 @@ private:
     geo::WorldPosition attack_from_{};
     std::size_t attack_from_wp_{0};
     bool attack_engaged_{false};
+
+    /// INIT-2h — the STATEFUL re-attack. A pass that crosses the aim with
+    /// the stick still armed and unfallen was REFUSED by the release gate;
+    /// the immediate pursuit of the aim from past-aim swings the reversal
+    /// around at the bank-limited turn radius into a pursuit orbit tangent
+    /// to the aim (the measured flight: 623 in-range abeam crossings, 75
+    /// min, stick unfallen). After a refused pass this module flies the
+    /// extension OUTBOUND first (attack_reattack_ext_ft_) — room for the
+    /// reversal — then pursues the aim and re-joins the virtual leg
+    /// inbound, where the cone can fire. A pass that was never refused
+    /// (the normal delivery — the release fires on the approach) never
+    /// sees the extension: no TOT/recovery cost on the healthy passes
+    /// (the always-extend variant measured map-neutral for exactly the
+    /// opposite reason — it delayed every release). Cleared on re-engage.
+    bool attack_refused_pass_{false};
 
     // Route + progress. wp_timer_ tracks seconds on the CURRENT waypoint
     // (guards the abeam capture — see check_waypoint_capture).

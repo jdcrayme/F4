@@ -1958,9 +1958,9 @@ build_mission_plan_from_flight(
                                         const_cast<EntityWorld*>(&world))
                                         .get<entities::TransformComponent>();
                                 if (otf == nullptr) continue;
-                                const double ddx = otf->position.x - pos.x;
-                                const double ddy = otf->position.y - pos.y;
-                                const double d2 = ddx * ddx + ddy * ddy;
+                                const double odx = otf->position.x - pos.x;
+                                const double ody = otf->position.y - pos.y;
+                                const double d2 = odx * odx + ody * ody;
                                 if (d2 < best_d2) {
                                     best_d2 = d2;
                                     best_obj = obj_id;
@@ -2094,6 +2094,18 @@ build_mission_plan_from_flight(
             }
         }
 
+        // The plan's delivery doctrine — the Strike/SEAD/CAS families
+        // deliver; every other family's action-16 points (the support
+        // racetrack corners) are station geometry, not deliveries. This
+        // MUST precede the INIT-1c appointment and the MC-5 backward
+        // pass: both gate on it, and the field's default (true) would
+        // hand every CAP/recon/support plan's raw campaign-clock
+        // appointment to the launch-slot model — the measured
+        // BARCAP-escort-recon park (the flights held brakes for their
+        // +48..80-day TOTs and the matrix rows exited 3).
+        plan.ag_delivery_mission =
+            f4::campaign::mission_is_ag_delivery(fp->mission);
+
         // INIT-1c — the saved ATO's own appointment. The flight's
         // time_on_target is ABSOLUTE campaign seconds (the same anchor
         // the session's TOT arithmetic runs on: tot_rel = tot − now);
@@ -2178,10 +2190,27 @@ build_mission_plan_from_flight(
                                 break;
                             }
                         }
+                        // The estimate's ORIGIN: route[0] for the normal
+                        // ingress-first shape (the aircraft spawns at its
+                        // base and route[0] IS the first leg's start), but
+                        // a DELIVERY-FIRST route (the planner wrote strike
+                        // -> egress; the measured SAD lead, CS079-1) opens
+                        // WITH the delivery — route[0] degenerates the
+                        // straight line to zero and the park becomes
+                        // tot - 180 s, so the flight launched with its
+                        // whole transit still ahead and arrived minutes
+                        // late. The home base lives in the route's own
+                        // terminal LAND waypoint for that shape.
+                        const f4::geo::WorldPosition* origin =
+                            &plan.route[0].position;
+                        if (d_idx == 0 && plan.route.size() > 1 &&
+                            plan.route.back().action == 7 /* WP_LAND */) {
+                            origin = &plan.route.back().position;
+                        }
                         const double ddx = plan.route[d_idx].position.x -
-                                           plan.route[0].position.x;
+                                           origin->x;
                         const double ddy = plan.route[d_idx].position.y -
-                                           plan.route[0].position.y;
+                                           origin->y;
                         const double enroute_s =
                             std::sqrt(ddx * ddx + ddy * ddy) * kCornerFactor /
                                 kLegCruiseFps +
@@ -2190,13 +2219,6 @@ build_mission_plan_from_flight(
                             std::max(0.0, plan.tot_s - enroute_s);
         }
     }
-
-    // INIT-1e: the plan's delivery doctrine rides to the brain — the
-    // Strike/SEAD/CAS families deliver; every other family's action-16
-    // points (the support racetrack corners) are station geometry, not
-    // deliveries.
-    plan.ag_delivery_mission =
-        f4::campaign::mission_is_ag_delivery(fp->mission);
 
     // start_phase stays Ground: the campaign flight departs from its
     // airbase (taxi → takeoff → enroute), which is exactly the brain's

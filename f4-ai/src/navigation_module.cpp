@@ -106,6 +106,7 @@ void NavigationModule::set_route(std::vector<Waypoint> route) {
     // EMPL-1a: a re-tasked module must not inherit the previous route's
     // attack run (same rule as the station hold above).
     attack_engaged_ = false;
+    attack_refused_pass_ = false;  // INIT-2h: the extension is per-attack
     // INIT-2h: every set_route prints under the probe — the measured
     // OCASTRIKE flight's hold re-armed twice after its release and the
     // flight cycled the anchor->delivery arc for 75 min; without this
@@ -140,6 +141,7 @@ void NavigationModule::resume_from(std::size_t index) {
     station_elapsed_ = 0.0;
     loop_start_ = loop_end_ = 0;
     attack_engaged_ = false;
+    attack_refused_pass_ = false;  // INIT-2h: the extension is per-attack
     leg_from_ = geo::WorldPosition{route_[index - 1].position.x,
                                    route_[index - 1].position.y,
                                    route_[index - 1].position.z};
@@ -237,6 +239,43 @@ AIControlOutput NavigationModule::update(double dt, const flight::IAircraftState
         attack_from_ = current_position_;
         attack_from_wp_ = wp_index_;
         attack_engaged_ = true;
+        attack_refused_pass_ = false;  // INIT-2h: a new attack, a clean slate
+    }
+
+    // INIT-2h: arm the re-attack the tick a pass is refused — the
+    // aircraft crossed the aim with the stick armed and unfallen (the
+    // brain's hold_delivery_capture_ latch). nav_heading_rad() reads the
+    // flag; the state change lives here, on the non-const path.
+    if (attack_engaged_ && wp_index_ < route_.size()) {
+        const double along = attack_along_ft();
+        const auto& wp = route_[wp_index_];
+        const double adx = wp.position.x - attack_from_.x;
+        const double ady = wp.position.y - attack_from_.y;
+        const double leg_len2 = adx * adx + ady * ady;
+        if (!attack_refused_pass_) {
+            if (hold_delivery_capture_ && along > 0.0 &&
+                along * along > leg_len2) {
+                attack_refused_pass_ = true;
+            }
+        } else if (along > 0.0) {
+            // The extension has flown past its room: RE-ANCHOR the
+            // virtual leg at the current position. The next pass is a
+            // FRESH attack run flown by the leg law — the line drives
+            // the lateral offset down exponentially (what makes first
+            // passes release), where the old shape pursued the aim from
+            // the extension's wide offset and re-refused every cycle
+            // (the measured CS079-2: a refused-re-attack limit cycle,
+            // 5k-35k ft oscillation, 40 min, stick unfallen). Same
+            // waypoint, so the engage block's index key keeps this
+            // anchor.
+            const double ext2 = attack_reattack_ext_ft;
+            if (along * along >
+                leg_len2 + 2.0 * ext2 * std::sqrt(leg_len2)
+                    + ext2 * ext2) {
+                attack_from_ = current_position_;
+                attack_refused_pass_ = false;
+            }
+        }
     }
 
     switch (sm_.current()) {
@@ -252,9 +291,25 @@ AIControlOutput NavigationModule::update(double dt, const flight::IAircraftState
 // State caching + transitions
 // ============================================================================
 
-void NavigationModule::cache_aircraft_state(const flight::IAircraftState* state)
+// ============================================================================
+// INIT-2h — the stateful re-attack's along-track helper
+// ============================================================================
+
+double NavigationModule::attack_along_ft() const noexcept
 {
-    if (!state) return;
+    if (!attack_engaged_ || wp_index_ >= route_.size()) return 0.0;
+    const auto& wp = route_[wp_index_];
+    if (!is_ag_delivery_action(wp.action)) return 0.0;
+    const double adx = wp.position.x - attack_from_.x;
+    const double ady = wp.position.y - attack_from_.y;
+    const double alen = std::sqrt(adx * adx + ady * ady);
+    if (alen < attack_min_virtual_leg_ft) return 0.0;
+    return (current_position_.x - attack_from_.x) * (adx / alen)
+         + (current_position_.y - attack_from_.y) * (ady / alen);
+}
+
+void NavigationModule::cache_aircraft_state(const flight::IAircraftState* state)
+{    if (!state) return;
     current_position_ = geo::WorldPosition(
         state->position_east_ft(), state->position_north_ft(), state->altitude_msl_ft());
     current_alt_msl_ft_ = state->altitude_msl_ft();
@@ -649,6 +704,28 @@ double NavigationModule::nav_heading_rad() const
                     (current_position_.x - attack_from_.x) * (adx / alen)
                   + (current_position_.y - attack_from_.y) * (ady / alen);
                 if (along > leg_len) {
+                    // INIT-2h — the STATEFUL re-attack. Past the aim after
+                    // a REFUSED pass (attack_refused_pass_, armed in
+                    // update(): the aircraft crossed the aim with the stick
+                    // armed and unfallen), fly STRAIGHT OUT along the ray
+                    // course — the extension buys room for the reversal at
+                    // the bank-limited turn radius (R ~13,000 ft at the
+                    // delivery speed) — until update() re-anchors the leg
+                    // at the extended position (a fresh attack run for the
+                    // leg law to converge). The immediate pursuit this
+                    // replaces swings the reversal into a pursuit orbit
+                    // tangent to the aim — the measured flight crossed
+                    // abeam 623 times in range with the release cone
+                    // refusing every pass (75 min, stick unfallen). A pass
+                    // that was never refused never sees the extension: the
+                    // healthy delivery keeps the immediate pursuit and
+                    // pays no re-attack time.
+                    if (attack_refused_pass_) {
+                        return course;
+                    }
+                    // The legacy shape: an unarmed overshoot (the stick
+                    // fell, or the attack disarmed) — pursue the aim; the
+                    // turn back re-joins the leg inbound.
                     return AirSteering::bearing_to(current_position_,
                                                    wp.position);
                 }

@@ -790,83 +790,70 @@ std::string CampaignResultLedger::to_json() const {
     w.put(",\n  \"totals\": {\n    ");
     Members m(w, ",\n    ");
     m.key("air_losses", air_losses_);
-    w.put(",\n    ");
     m.key("air_kills_attributed", air_kills_attributed_);
-    w.put(",\n    ");
     m.key("air_losses_unattributed", air_losses_unattributed_);
-    w.put(",\n    ");
     m.key("ag_kills", ag_kills_);
-    w.put(",\n    ");
     m.key("bomb_impacts", static_cast<std::int64_t>(impacts_.size()));
-    w.put(",\n    ");
-    w.number_key("objectives_damaged",
-                 static_cast<std::int64_t>(objective_damage_.size()));
-    w.put(",\n    ");
+    m.key("objectives_damaged",
+          static_cast<std::int64_t>(objective_damage_.size()));
     m.key("features_destroyed", features_destroyed_);
-    w.put(",\n    ");
     // C2 — the tasking side (one pool: draws, losses, resupply).
     m.key("mission_draws", mission_draws_);
-    w.put(",\n    ");
     m.key("mission_draw_aircraft", mission_draw_aircraft_);
-    w.put(",\n    ");
     m.key("draws_unmatched", draws_unmatched_);
-    w.put(",\n    ");
     m.key("reinforcement_fires", reinforcement_fires_);
-    w.put(",\n    ");
     m.key("aircraft_reinforced", aircraft_reinforced_);
-    w.put(",\n    ");
     // C4 — mission recovery (drawn aircraft that completed and
     // returned). Emitted ALWAYS (the C2 keys above are): a 0 is the
     // honest "no ATM pipeline / no completions yet" answer, and the
     // QC's recovery gate reads the totals block.
     m.key("mission_recoveries", mission_recoveries_);
-    w.put(",\n    ");
     m.key("aircraft_recovered", aircraft_recovered_);
-    w.put(",\n    ");
     // CAMP-DOM-3 — the personnel totals (the logs' sizes: one crew per
     // assignment record, one slot per loss/recovery record). The 0 is
     // the honest "arms off / no rosters" answer.
-    w.number_key("pilot_assignments",
-                 static_cast<std::int64_t>(pilot_assignments_.size()));
-    w.put(",\n    ");
-    w.number_key("pilot_losses",
-                 static_cast<std::int64_t>(pilot_losses_.size()));
-    w.put(",\n    ");
-    w.number_key("pilot_sorties",
-                 static_cast<std::int64_t>(pilot_recoveries_.size()));
-    w.put(",\n    ");
+    m.key("pilot_assignments",
+          static_cast<std::int64_t>(pilot_assignments_.size()));
+    m.key("pilot_losses",
+          static_cast<std::int64_t>(pilot_losses_.size()));
+    m.key("pilot_sorties",
+          static_cast<std::int64_t>(pilot_recoveries_.size()));
     // CAMP-DOM-4 — the scheduling books' total (the log's size; the
     // honest 0 is the arms-off answer).
-    w.number_key("slot_denials",
-                 static_cast<std::int64_t>(slot_denials_.size()));
+    m.key("slot_denials",
+          static_cast<std::int64_t>(slot_denials_.size()));
     w.put("\n  }");
 
     // Teams: slot order (the snapshot's order), initial + remaining +
     // losses — the existence picture — plus the C2 tasking view
     // (drawn/reinforced/aircraft_tasking) the availability gate reads.
-    Array teams_arr{w, ",\n  \"teams\": [", "\n    ", ",\n    ", "\n  ]", "]"};
-    for (std::size_t i = 0; i < teams_.size(); ++i) {
-        const auto& t = teams_[i];
-        teams_arr.element_prefix();
-        w.put("{");
-        Members em(w, ", ");
-        em.key("slot", t.slot);
-        em.key("name", t.name);
-        em.key("aircraft_initial", t.aircraft_initial);
-        em.key("aircraft_remaining", t.aircraft_remaining);
-        em.key("air_losses", t.losses);
-        em.key("aircraft_drawn", t.drawn);
-        em.key("aircraft_reinforced", t.reinforced);
-        em.key("aircraft_tasking", team_aircraft_tasking(t.slot));
-        // DOM-2: the strategic reserve's books, only when the stock
-        // flow moved anything (a pristine ledger emits byte-identical
-        // team rows).
-        if (t.replacements_spent != 0 || t.replacements_avail != t.replacements_initial) {
-            em.key("replacements_initial", t.replacements_initial);
-            em.key("replacements_avail", t.replacements_avail);
-            em.key("replacements_spent", t.replacements_spent);
+    // BLOCK-SCOPED: the Array's destructor emits the close, so the
+    // object must die at the array's end, not the function's.
+    {
+        Array teams_arr{w, ",\n  \"teams\": [", "\n    ", ",\n    ", "\n  ]", "]"};
+        for (std::size_t i = 0; i < teams_.size(); ++i) {
+            const auto& t = teams_[i];
+            teams_arr.element_prefix();
+            w.put("{");
+            Members em(w, ", ");
+            em.key("slot", t.slot);
+            em.key("name", t.name);
+            em.key("aircraft_initial", t.aircraft_initial);
+            em.key("aircraft_remaining", t.aircraft_remaining);
+            em.key("air_losses", t.losses);
+            em.key("aircraft_drawn", t.drawn);
+            em.key("aircraft_reinforced", t.reinforced);
+            em.key("aircraft_tasking", team_aircraft_tasking(t.slot));
+            // DOM-2: the strategic reserve's books, only when the stock
+            // flow moved anything (a pristine ledger emits byte-identical
+            // team rows).
+            if (t.replacements_spent != 0 || t.replacements_avail != t.replacements_initial) {
+                em.key("replacements_initial", t.replacements_initial);
+                em.key("replacements_avail", t.replacements_avail);
+                em.key("replacements_spent", t.replacements_spent);
+            }
+            w.put("}");
         }
-        w.put("}");
     }
 
     // Squadrons: only the ones with THIS-RUN activity (kills, losses,
@@ -905,8 +892,7 @@ std::string CampaignResultLedger::to_json() const {
             em.key("total_losses", s.total_losses);
             // The C2 tasking counters (one pool).
             em.key("aircraft_available", s.availability);
-            w.number_key("aircraft_tasking",
-                         squadron_tasking_available(s.vu));
+            em.key("aircraft_tasking", squadron_tasking_available(s.vu));
             em.key("run_draws", s.run_draws);
             if (s.run_recoveries != 0) {
                 em.key("run_recoveries", s.run_recoveries);
@@ -935,28 +921,26 @@ std::string CampaignResultLedger::to_json() const {
     }
 
     // Mission draws: arrival order (the tasking ledger's own log).
-    Array mission_draws_arr{w, ",\n  \"mission_draws\": [", "\n    ", ",\n    ", "\n  ]", "]"};
-    for (std::size_t i = 0; i < draws_.size(); ++i) {
-        const auto& d = draws_[i];
-        mission_draws_arr.element_prefix();
-        Members em(w, ", ");
-        w.put("{\"t_ms\": ");
-        w.put(time_ms(d.t_s));
-        em.key("team", d.team);
-        em.key("squadron", d.squadron);
-        em.key("aircraft", d.count);
-        w.put("}");
+    {
+        Array mission_draws_arr{w, ",\n  \"mission_draws\": [", "\n    ", ",\n    ", "\n  ]", "]"};
+        for (std::size_t i = 0; i < draws_.size(); ++i) {
+            const auto& d = draws_[i];
+            Members em = mission_draws_arr.element_opened("{\"t_ms\": ");
+            w.put(time_ms(d.t_s));
+            em.key("team", d.team);
+            em.key("squadron", d.squadron);
+            em.key("aircraft", d.count);
+            w.put("}");
+        }
     }
 
     // C4 — mission recoveries: arrival order (the draw's mirror log).
     // Only present when one exists — legacy runs stay byte-identical.
     if (!recoveries_.empty()) {
-    Array mission_recoveries_arr{w, ",\n  \"mission_recoveries\": [", "\n    ", ",\n    ", "\n  ]", "]"};
+        Array mission_recoveries_arr{w, ",\n  \"mission_recoveries\": [", "\n    ", ",\n    ", "\n  ]", "]"};
         for (std::size_t i = 0; i < recoveries_.size(); ++i) {
             const auto& rc = recoveries_[i];
-        mission_recoveries_arr.element_prefix();
-        Members em(w, ", ");
-            w.put("{\"t_ms\": ");
+            Members em = mission_recoveries_arr.element_opened("{\"t_ms\": ");
             w.put(time_ms(rc.t_s));
             em.key("team", rc.team);
             em.key("squadron", rc.squadron);
@@ -964,35 +948,32 @@ std::string CampaignResultLedger::to_json() const {
             em.key("released", rc.released);
             w.put("}");
         }
-        w.put("\n  ]");
     }
 
     // Reinforcement deliveries: arrival order, one record per
     // receiving squadron per fire.
-    Array reinforcements_arr{w, ",\n  \"reinforcements\": [", "\n    ", ",\n    ", "\n  ]", "]"};
-    for (std::size_t i = 0; i < reinforcements_.size(); ++i) {
-        const auto& r = reinforcements_[i];
-        reinforcements_arr.element_prefix();
-        Members em(w, ", ");
-        w.put("{\"t_ms\": ");
-        w.put(time_ms(r.t_s));
-        em.key("team", r.team);
-        em.key("squadron", r.squadron);
-        em.key("delivered", r.delivered);
-        em.key("budget_left", r.budget_left);
-        w.put("}");
+    {
+        Array reinforcements_arr{w, ",\n  \"reinforcements\": [", "\n    ", ",\n    ", "\n  ]", "]"};
+        for (std::size_t i = 0; i < reinforcements_.size(); ++i) {
+            const auto& r = reinforcements_[i];
+            Members em = reinforcements_arr.element_opened("{\"t_ms\": ");
+            w.put(time_ms(r.t_s));
+            em.key("team", r.team);
+            em.key("squadron", r.squadron);
+            em.key("delivered", r.delivered);
+            em.key("budget_left", r.budget_left);
+            w.put("}");
+        }
     }
 
     // CAMP-DOM-3 — the personnel logs: arrival order, one record per
     // crew/loss/sortie. Only present when one exists — the arms-off
     // and no-roster runs stay byte-identical.
     if (!pilot_assignments_.empty()) {
-    Array pilot_assignments_arr{w, ",\n  \"pilot_assignments\": [", "\n    ", ",\n    ", "\n  ]", "]"};
+        Array pilot_assignments_arr{w, ",\n  \"pilot_assignments\": [", "\n    ", ",\n    ", "\n  ]", "]"};
         for (std::size_t i = 0; i < pilot_assignments_.size(); ++i) {
             const auto& a = pilot_assignments_[i];
-        pilot_assignments_arr.element_prefix();
-        Members em(w, ", ");
-            w.put("{\"t_ms\": ");
+            Members em = pilot_assignments_arr.element_opened("{\"t_ms\": ");
             w.put(time_ms(a.t_s));
             em.key("team", a.team);
             em.key("squadron", a.squadron);
@@ -1004,15 +985,12 @@ std::string CampaignResultLedger::to_json() const {
             }
             w.put("]}");
         }
-        w.put("\n  ]");
     }
     if (!pilot_losses_.empty()) {
-    Array pilot_losses_arr{w, ",\n  \"pilot_losses\": [", "\n    ", ",\n    ", "\n  ]", "]"};
+        Array pilot_losses_arr{w, ",\n  \"pilot_losses\": [", "\n    ", ",\n    ", "\n  ]", "]"};
         for (std::size_t i = 0; i < pilot_losses_.size(); ++i) {
             const auto& l = pilot_losses_[i];
-        pilot_losses_arr.element_prefix();
-        Members em(w, ", ");
-            w.put("{\"t_ms\": ");
+            Members em = pilot_losses_arr.element_opened("{\"t_ms\": ");
             w.put(time_ms(l.t_s));
             em.key("team", l.team);
             em.key("squadron", l.squadron);
@@ -1020,15 +998,12 @@ std::string CampaignResultLedger::to_json() const {
             em.key("slot", l.slot);
             w.put("}");
         }
-        w.put("\n  ]");
     }
     if (!pilot_recoveries_.empty()) {
-    Array pilot_recoveries_arr{w, ",\n  \"pilot_recoveries\": [", "\n    ", ",\n    ", "\n  ]", "]"};
+        Array pilot_recoveries_arr{w, ",\n  \"pilot_recoveries\": [", "\n    ", ",\n    ", "\n  ]", "]"};
         for (std::size_t i = 0; i < pilot_recoveries_.size(); ++i) {
             const auto& rc = pilot_recoveries_[i];
-        pilot_recoveries_arr.element_prefix();
-        Members em(w, ", ");
-            w.put("{\"t_ms\": ");
+            Members em = pilot_recoveries_arr.element_opened("{\"t_ms\": ");
             w.put(time_ms(rc.t_s));
             em.key("team", rc.team);
             em.key("squadron", rc.squadron);
@@ -1037,7 +1012,6 @@ std::string CampaignResultLedger::to_json() const {
             em.key("missions_run", rc.missions_run);
             w.put("}");
         }
-        w.put("\n  ]");
     }
 
     // CAMP-DOM-4 — the slot-denial log: arrival order, one record per
@@ -1045,50 +1019,47 @@ std::string CampaignResultLedger::to_json() const {
     // refusals). Only present when one exists — the arms-off runs
     // stay byte-identical.
     if (!slot_denials_.empty()) {
-    Array slot_denials_arr{w, ",\n  \"slot_denials\": [", "\n    ", ",\n    ", "\n  ]", "]"};
+        Array slot_denials_arr{w, ",\n  \"slot_denials\": [", "\n    ", ",\n    ", "\n  ]", "]"};
         for (std::size_t i = 0; i < slot_denials_.size(); ++i) {
             const auto& d = slot_denials_[i];
-        slot_denials_arr.element_prefix();
-        Members em(w, ", ");
-            w.put("{\"t_ms\": ");
+            Members em = slot_denials_arr.element_opened("{\"t_ms\": ");
             w.put(time_ms(d.t_s));
             em.key("team", d.team);
             em.key("airbase", d.airbase);
             em.key("reason", d.reason);
             w.put("}");
         }
-        w.put("\n  ]");
     }
 
     // Air-loss events: arrival order (the log).
-    Array air_losses_arr{w, ",\n  \"air_losses\": [", "\n    ", ",\n    ", "\n  ]", "]"};
-    for (std::size_t i = 0; i < losses_.size(); ++i) {
-        const auto& l = losses_[i];
-        air_losses_arr.element_prefix();
-        Members em(w, ", ");
-        w.put("{\"t_ms\": ");
-        w.put(time_ms(l.sim_time_s));
-        em.key("victim_team", l.victim_team);
-        em.key("victim_squadron", l.victim_squadron);
-        em.key("victim_flight", l.victim_flight);
-        em.key("killer_squadron", l.killer_squadron);
-        w.put(l.attributed ? ", \"attributed\": true"
-                           : ", \"attributed\": false");
-        w.put("}");
+    {
+        Array air_losses_arr{w, ",\n  \"air_losses\": [", "\n    ", ",\n    ", "\n  ]", "]"};
+        for (std::size_t i = 0; i < losses_.size(); ++i) {
+            const auto& l = losses_[i];
+            Members em = air_losses_arr.element_opened("{\"t_ms\": ");
+            w.put(time_ms(l.sim_time_s));
+            em.key("victim_team", l.victim_team);
+            em.key("victim_squadron", l.victim_squadron);
+            em.key("victim_flight", l.victim_flight);
+            em.key("killer_squadron", l.killer_squadron);
+            w.put(l.attributed ? ", \"attributed\": true"
+                               : ", \"attributed\": false");
+            w.put("}");
+        }
     }
 
     // Bomb impacts: arrival order.
-    Array bomb_impacts_arr{w, ",\n  \"bomb_impacts\": [", "\n    ", ",\n    ", "\n  ]", "]"};
-    for (std::size_t i = 0; i < impacts_.size(); ++i) {
-        const auto& im = impacts_[i];
-        bomb_impacts_arr.element_prefix();
-        Members em(w, ", ");
-        w.put("{\"t_ms\": ");
-        w.put(time_ms(im.sim_time_s));
-        em.key("objective", im.objective);
-        em.key("miss_ft", im.miss_distance_ft);
-        em.key("features_destroyed", im.features_destroyed);
-        w.put("}");
+    {
+        Array bomb_impacts_arr{w, ",\n  \"bomb_impacts\": [", "\n    ", ",\n    ", "\n  ]", "]"};
+        for (std::size_t i = 0; i < impacts_.size(); ++i) {
+            const auto& im = impacts_[i];
+            Members em = bomb_impacts_arr.element_opened("{\"t_ms\": ");
+            w.put(time_ms(im.sim_time_s));
+            em.key("objective", im.objective);
+            em.key("miss_ft", im.miss_distance_ft);
+            em.key("features_destroyed", im.features_destroyed);
+            w.put("}");
+        }
     }
 
     // Objective damage: VU-sorted final states, the fstatus bitmap in
